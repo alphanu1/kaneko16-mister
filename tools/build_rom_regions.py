@@ -85,6 +85,11 @@ SETS = {
         "oki1": [("pcm.u5", 0x000000, 0x080000, [])],
     },
     "explbrkr": {
+        # 68000 program, ROM_LOAD16_BYTE: u18 on even bytes, u19 on odd.
+        "maincpu": [
+            ("ts100e.u18", 0x000000, 0x040000, [], "16le", 0),
+            ("ts101e.u19", 0x000000, 0x040000, [], "16le", 1),
+        ],
         "view2_0": [("ts010.u4",  0x000000, 0x100000, [])],
         "view2_1": [("ts020.u33", 0x000000, 0x100000, [])],
         "kan_spr": [
@@ -98,6 +103,21 @@ SETS = {
 
 # set name -> zip basename, where they differ
 ZIPNAME = {"blazeonj": "blazeon"}
+
+# SDRAM layout: region -> (base, size). This IS the MRA's emission order, and
+# the loader maps it as the identity — stream byte N is SDRAM byte N.
+#
+# Sized for the Tier 1 games. Later tiers have larger sprite ROMs and the map
+# will grow; because the MRA owns the layout, growing it means editing the MRA
+# and this table together, not changing address arithmetic in RTL.
+SDRAM_MAP = [
+    ("maincpu", 0x000000, 0x080000),
+    ("view2_0", 0x080000, 0x100000),
+    ("view2_1", 0x180000, 0x100000),
+    ("kan_spr", 0x280000, 0x240000),
+    ("oki1",    0x4c0000, 0x100000),
+]
+SDRAM_END = 0x5c0000        # 5.75 MB
 
 REGION_SIZE = {
     "mgcrystl": {"view2_0": 0x100000, "view2_1": 0x100000,
@@ -129,7 +149,7 @@ REGION_SIZE = {
         ],
         "oki1": [("pcm.u5", 0x000000, 0x080000, [])],
     },
-    "explbrkr": {"view2_0": 0x100000, "view2_1": 0x100000,
+    "explbrkr": {"maincpu": 0x080000, "view2_0": 0x100000, "view2_1": 0x100000,
                  "kan_spr": 0x240000, "oki1": 0x100000},
     "blazeonj": {"view2_0": 0x100000, "kan_spr": 0x200000},
     "wingforc": {"view2_0": 0x200000, "kan_spr": 0x200000, "oki1": 0x080000},
@@ -180,7 +200,39 @@ def build(setname, rompath, outdir):
                   f"sha1={hashlib.sha1(buf).hexdigest()[:16]}")
 
 
+def build_stream(setname, outdir):
+    """Concatenate the assembled regions into one image in SDRAM_MAP order.
+
+    This is what the MRA emits and what the HPS streams to the core. Writing it
+    here keeps the simulation and the MRA driven from one description — see the
+    note at the top about the two having to agree.
+    """
+    buf = bytearray(SDRAM_END)
+    placed = []
+    for region, base, size in SDRAM_MAP:
+        path = os.path.join(outdir, f"{setname}_{region}.bin")
+        if not os.path.exists(path):
+            placed.append((region, base, size, "absent, zero-filled"))
+            continue
+        data = open(path, "rb").read()
+        if len(data) > size:
+            sys.exit(f"{region}: {len(data):#x} bytes does not fit {size:#x}")
+        buf[base:base + len(data)] = data
+        placed.append((region, base, size, f"{len(data):#x} bytes"))
+
+    out = os.path.join(outdir, f"{setname}_stream.bin")
+    with open(out, "wb") as f:
+        f.write(buf)
+    print(f"  {os.path.basename(out):28s} {SDRAM_END:#09x}  "
+          f"sha1={hashlib.sha1(buf).hexdigest()[:16]}")
+    for region, base, size, note in placed:
+        print(f"      {base:#09x} {region:9s} {size:#09x}  {note}")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if len(args) != 3:
         sys.exit(__doc__)
-    build(sys.argv[1], sys.argv[2], sys.argv[3])
+    build(args[0], args[1], args[2])
+    if "--stream" in sys.argv:
+        build_stream(args[0], args[2])

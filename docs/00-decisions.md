@@ -140,3 +140,41 @@ each frame and draws into the new one while the old is composited.
 Reverses if: the M10K budget tightens once the tile fetch path is built and
 needs caching, in which case the fallback is a single buffer with drawing
 confined to vblank, not a line renderer.
+
+---
+
+## D6 — The MRA owns the SDRAM layout; the loader maps it as the identity
+
+Stream byte N is SDRAM byte N. The MRA pads each region and emits them in the
+order the map expects, and `rtl/io/kaneko_rom_loader.sv` does no per-region
+base arithmetic at all.
+
+Tier 1 map, encoded once in `tools/build_rom_regions.py` (`SDRAM_MAP`) and
+reproduced by the MRA:
+
+```
+  0x000000  maincpu   512 KB    68000 program
+  0x080000  view2_0     1 MB    VIEW2 chip 0 tiles
+  0x180000  view2_1     1 MB    VIEW2 chip 1 tiles
+  0x280000  kan_spr  2.25 MB    sprites
+  0x4c0000  oki1        1 MB    OKI samples
+  0x5c0000  end       5.75 MB
+```
+
+The alternative — a loader carrying region offsets computed from each other —
+is where the bugs are. From the ported loader's own header: it *"does not fail
+at load time, it fails much later as a game that boots to garbage, and the
+evidence points at the CPU rather than at the loader"*. Making the MRA
+responsible means a region can only be misplaced by editing the MRA, where it
+is visible, rather than by arithmetic in RTL.
+
+Consequence: `tools/build_rom_regions.py` and the MRA are two descriptions of
+one thing and **must agree**. They are kept in one table, and the MRA should be
+generated from it rather than written a second time.
+
+Sized for Tier 1. Later tiers have larger sprite ROMs; growing the map means
+editing that table and the MRA together, and never RTL.
+
+Reverses if: a game needs a region that cannot be padded into a fixed slot, in
+which case the loader gains a per-index base — one number per download index,
+not per region, and still not arithmetic over the stream.

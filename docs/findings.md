@@ -1688,3 +1688,43 @@ byte-for-byte at the right SDRAM addresses. Given that the whole design rests on
 the identity mapping, that is the property most worth testing, and the next
 piece of work here is a test that streams the assembled `explbrkr` regions
 through and compares. Recorded rather than left implied.
+
+---
+
+## 2026-08-20 — stream integrity verified: 5.75 MB in, byte for byte
+
+The loader's whole design rests on the identity mapping (D6), and nothing
+tested it — the inherited testbench is a 6-check boot-readback scenario.
+`sim/io/tb_kaneko_romstream.cpp` now feeds the real assembled `explbrkr` image
+and watches every SDRAM write the loader issues.
+
+```
+kaneko_romstream: image=3014656 words (5.75 MB) writes=3014656
+                  checks=7 fails=0 stalled=21237879
+```
+
+Every input word written exactly once, at `byte offset >> 1`, with the right
+data. No stray writes, no duplicates, no missing words, `overflow` never
+asserted, `rom_loaded` did.
+
+`stalled=21237879` matters: the host is made to honour `ioctl_wait` the way the
+HPS does — continuing to send for 4-16 more words after it asserts, because the
+signal *asks* the host to stop and everything in flight still arrives. That is
+the exact case the ported file records as having silently dropped words when
+the margin was too small. A run with a low stall count would mean the
+backpressure path was not exercised.
+
+### A free correctness check fell out of assembling the program ROM
+
+`explbrkr`'s `maincpu` is `ROM_LOAD16_BYTE` — u18 on even bytes, u19 on odd.
+Assembled, the 68000 reset vectors read:
+
+```
+initial SSP = 0x0010f7fc     initial PC = 0x00000914
+```
+
+`bakubrkr_map` puts work RAM at `0x100000-0x10ffff` and ROM at
+`0x000000-0x07ffff`, so the stack pointer lands exactly inside work RAM and the
+entry point inside ROM. A wrong interleave gives garbage in both. This is the
+first evidence that the program ROM is assembled correctly, and it came for
+free from looking at the first eight bytes.
