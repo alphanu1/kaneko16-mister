@@ -1,0 +1,206 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Kaneko 16-bit arcade core for MiSTer FPGA — Copyright (C) 2026 alphanu1
+//
+// Harness for the VU-002 sprite bitmap renderer.
+//
+// Reference: the C++ sprite compositor inside the frame gate, which renders
+// bitmaps that produce pixel-exact frames against MAME on explbrkr, blazeonj
+// and wingforc. So the question here is narrow and worth asking on its own:
+// does the RTL renderer produce the same bitmap, with the same
+// first-writer-wins ordering, against the same table and ROM?
+//
+// The ordering is the whole point. MAME parses first-to-last (multisprite
+// latches carry forward) but DRAWS last-to-first, first-writer-wins, so a
+// higher table index is frontmost. An implementation that walked the table
+// the other way would look plausible and be wrong wherever sprites overlap —
+// which is most of a busy frame.
+
+#include <verilated.h>
+#include "Vkaneko_vuspr_draw.h"
+#include <cstdio>
+#include <cstdint>
+#include <random>
+#include <vector>
+
+namespace {
+
+constexpr int BMP_LOG2 = 9;
+constexpr int BMP_W = 1 << BMP_LOG2;
+
+Vkaneko_vuspr_draw* dut;
+
+struct Spr { uint32_t code, colour, prio; bool fx, fy; int x, y; };
+
+std::vector<uint64_t> table_mem;
+std::vector<uint8_t>  rom;
+std::vector<uint16_t> bmp;
+std::vector<uint8_t>  mask;
+
+uint64_t pack(const Spr& s)
+{
+    uint64_t w = 0;
+    w |= (uint64_t)(s.code   & 0x1ffff);
+    w |= (uint64_t)(s.colour & 0x3f)   << 17;
+    w |= (uint64_t)(s.prio   & 3)      << 23;
+    w |= (uint64_t)(s.fx ? 1 : 0)      << 25;
+    w |= (uint64_t)(s.fy ? 1 : 0)      << 26;
+    w |= (uint64_t)(s.x & 0x3ff)       << 27;
+    w |= (uint64_t)(s.y & 0x3ff)       << 37;
+    return w;
+}
+
+// Reference bitmap, matching the frame gate's compositor exactly.
+void reference(const std::vector<Spr>& spr, std::vector<uint16_t>& out,
+               int x0, int x1, int y0, int y1)
+{
+    out.assign((size_t)BMP_W * BMP_W, 0);
+    std::vector<uint8_t> m((size_t)BMP_W * BMP_W, 0);
+    const size_t elements = rom.size() / 128;
+    for (int i = (int)spr.size() - 1; i >= 0; i--) {      // last to first
+        const Spr& s = spr[i];
+        for (int yy = 0; yy < 16; yy++) {
+            const int py_ = s.y + yy;
+            for (int xx = 0; xx < 16; xx++) {
+                const int px_ = s.x + xx;
+                if (px_ < x0 || px_ > x1 || py_ < y0 || py_ > y1) continue;
+                uint32_t px = s.fx ? (15u - xx) : (uint32_t)xx;
+                uint32_t py = s.fy ? (15u - yy) : (uint32_t)yy;
+                const uint32_t tile = (uint32_t)(s.code % elements);
+                const uint32_t a = tile * 128u + ((py & 8) ? 64u : 0u)
+                                 + ((px & 8) ? 32u : 0u) + (py & 7) * 4u + ((px & 7) >> 1);
+                const uint8_t byte = rom[a % rom.size()];
+                const uint8_t c = (px & 1) ? (byte & 0xf) : (byte >> 4);  // MSB order
+                if (c == 0) continue;
+                const size_t o = (size_t)(py_ & (BMP_W - 1)) * BMP_W + (px_ & (BMP_W - 1));
+                if (!m[o]) out[o] = (uint16_t)(((s.prio & 3) << 14) | ((s.colour & 0x3f) << 4) | c);
+                m[o] = 1;
+            }
+        }
+    }
+}
+
+// Registered memories: address captured at an edge, data on the next cycle.
+// Modelling them combinationally makes every stage see its own cycle's address
+// instead of the previous one's — the same mistake that made the tmap fetch
+// harness report near-total failure against already-verified logic.
+uint32_t held_tbl = 0, held_rom = 0, held_mask = 0;
+long n_bmp_we = 0, n_mask_we = 0, n_ticks = 0;
+
+void tick()
+{
+    dut->clk = 0; dut->eval();
+    dut->tbl_data = table_mem[held_tbl % table_mem.size()];
+    dut->rom_data = rom[held_rom % rom.size()];
+    dut->mask_q   = mask[held_mask % mask.size()];
+    dut->eval();
+
+    held_tbl  = dut->tbl_addr;
+    held_rom  = dut->rom_addr;
+    held_mask = dut->mask_raddr;
+
+    dut->clk = 1; dut->eval();
+    // Writes take effect at the edge.
+    n_ticks++;
+    if (dut->bmp_we)  {
+        bmp[dut->bmp_addr % bmp.size()] = dut->bmp_data; n_bmp_we++;
+        if (getenv("TRACE") && n_bmp_we <= 6)
+            printf("    bmp_we  addr=%05x (x=%d,y=%d) data=%04x\n",
+                   (unsigned)dut->bmp_addr, (int)(dut->bmp_addr & 511),
+                   (int)(dut->bmp_addr >> 9), (unsigned)dut->bmp_data);
+    }
+    if (dut->mask_we) {
+        mask[dut->mask_waddr % mask.size()] = 1; n_mask_we++;
+        if (getenv("TRACE") && n_mask_we <= 6)
+            printf("    mask_we addr=%05x (x=%d,y=%d)  mask_q was %d, raddr=%05x\n",
+                   (unsigned)dut->mask_waddr, (int)(dut->mask_waddr & 511),
+                   (int)(dut->mask_waddr >> 9), (int)dut->mask_q,
+                   (unsigned)dut->mask_raddr);
+    }
+}
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+    Verilated::commandArgs(argc, argv);
+    dut = new Vkaneko_vuspr_draw;
+    std::mt19937 rng(0x44524157u);   // 'DRAW'
+
+    rom.resize(1 << 18);
+    for (auto& b : rom) b = (uint8_t)rng();
+
+    long passes = 0, checks = 0, fails = 0, overlaps = 0;
+    long total_bmp = 0, total_mask = 0;
+
+    // Several sprite counts, including the Blaze On board's 512.
+    const int counts[] = { 8, 64, 512, 1024 };
+
+    for (int pass = 0; pass < 8; pass++) {
+        const int n = counts[pass % 4];
+        const int x0 = 0, x1 = 255, y0 = 16, y1 = 239;   // explbrkr visible area
+
+        std::vector<Spr> spr(n);
+        for (auto& s : spr) {
+            s.code   = rng() % (rom.size() / 128);
+            s.colour = rng() & 0x3f;
+            s.prio   = rng() & 3;
+            s.fx     = rng() & 1;
+            s.fy     = rng() & 1;
+            // Cluster them so sprites genuinely overlap — the ordering rule is
+            // invisible on a scattered set.
+            s.x = (int)(rng() % 200) + 20;
+            s.y = (int)(rng() % 180) + 20;
+        }
+
+        table_mem.assign(1024, 0);
+        for (int i = 0; i < n; i++) table_mem[i] = pack(spr[i]);
+
+        bmp.assign((size_t)BMP_W * BMP_W, 0);
+        mask.assign((size_t)BMP_W * BMP_W, 0);
+
+        dut->rst = 1; dut->start = 0;
+        dut->clip_x0 = x0; dut->clip_x1 = x1;
+        dut->clip_y0 = y0; dut->clip_y1 = y1;
+        dut->sprite_count = n;
+        for (int i = 0; i < 4; i++) tick();
+        dut->rst = 0;
+        dut->start = 1; tick(); dut->start = 0;
+
+        long guard = 0;
+        while (!dut->done && guard++ < (long)n * 300 + 10000) tick();
+        for (int i = 0; i < 8; i++) tick();     // drain
+
+        if (getenv("TRACE"))
+            printf("  pass=%d n=%d ticks=%ld bmp_we=%ld mask_we=%ld\n",
+                   pass, n, n_ticks, n_bmp_we, n_mask_we);
+        // Overlap is the point: with 1024 clustered sprites the mask is
+        // written ~246k times but the bitmap only ~40k, because first-writer-
+        // wins rejects the rest. With 8 sprites the two counts are equal.
+        total_bmp += n_bmp_we; total_mask += n_mask_we;
+        n_ticks = n_bmp_we = n_mask_we = 0;
+
+        std::vector<uint16_t> ref;
+        reference(spr, ref, x0, x1, y0, y1);
+
+        long bad = 0;
+        for (size_t o = 0; o < ref.size(); o++) {
+            checks++;
+            if (bmp[o] != ref[o]) {
+                bad++; fails++;
+                if (fails <= 15)
+                    printf("  MISMATCH pass=%d n=%d at (%zu,%zu) dut=%04x ref=%04x\n",
+                           pass, n, o % BMP_W, o / BMP_W, bmp[o], ref[o]);
+            }
+            if (ref[o]) overlaps++;
+        }
+        if (!bad) passes++;
+    }
+
+    printf("kaneko_vuspr_draw: checks=%ld fails=%ld passes=%ld/8 "
+           "bmp_writes=%ld mask_writes=%ld (rejected=%ld)\n",
+           checks, fails, passes, total_bmp, total_mask, total_mask - total_bmp);
+
+    dut->final();
+    delete dut;
+    return fails ? 1 : 0;
+}

@@ -107,3 +107,36 @@ attributed with confidence.
 Reverses if: Explosive Breaker turns out to need protection or I/O behaviour
 that Blaze On does not, or if the Z80 path lands early enough to make Blaze
 On's simpler video (one VIEW2, 512 sprites) the cheaper target.
+
+---
+
+## D5 — Sprites render into a bitmap, not a line buffer
+
+VU-002 draws into a sprite bitmap once per frame and the bitmap is composited
+during scanout. MAME says so directly (`kaneko_spr.cpp`): "actually
+256x256x12bit (VU002) / 512x512x16bit (KC002), double buffered".
+
+The obvious FPGA alternative — a per-scanline sprite renderer, as most arcade
+cores use — was rejected on two grounds:
+
+**It does not fit the timing.** A line is ~66 us. Scanning all 1024 records and
+drawing those that intersect is up to 16,384 pixel writes; at 100 MHz a line
+affords ~6,600 cycles. The bitmap spreads the same work over a whole frame:
+1024 sprites x 256 pixels = 262,144 writes against ~1.7M cycles per frame,
+which fits with room to spare.
+
+**It would change behaviour.** A line renderer imposes a sprites-per-line
+limit and the dropout that comes with it. VU-002 has no such limit, and
+inventing one would be visible.
+
+Cost is memory. A 16-bit cell (14-bit pen + 2-bit priority) over 320x256 is
+160 KB per buffer, 320 KB double-buffered, against 691 KB of M10K. That is
+affordable because the tilemap side needs little: 4 layers x 4 KB VRAM plus
+4 KB palette is ~20 KB.
+
+Double buffering is required, not optional: `render_sprites` flips `m_buffer`
+each frame and draws into the new one while the old is composited.
+
+Reverses if: the M10K budget tightens once the tile fetch path is built and
+needs caching, in which case the fallback is a single buffer with drawing
+confined to vblank, not a line renderer.

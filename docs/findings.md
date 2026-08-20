@@ -1459,3 +1459,51 @@ Area: 301 cells for the pipeline including the address blocks it instantiates.
 
 Neither was a fault in the RTL. When a brand-new harness reports ~99% failure
 against already-verified logic, suspect the harness.
+
+---
+
+## 2026-08-20 — VU-002 sprite bitmap renderer
+
+`rtl/video/kaneko_vuspr_draw.sv` walks the resolved sprite table and draws each
+16x16 into the sprite bitmap. Decision D5: a bitmap, as the hardware has, not a
+per-line renderer.
+
+```
+kaneko_vuspr_draw: checks=2097152 fails=0 passes=8/8
+                   bmp_writes=184340 mask_writes=771885 (rejected=587545)
+```
+
+499 cells. The reference is the C++ compositor inside the frame gate, which
+produces pixel-exact frames on three games — so this asks only whether the RTL
+reproduces it, ordering included.
+
+**The ordering is the substance of this module.** MAME parses first-to-last
+(the multisprite latches carry forward) but *draws* last-to-first with
+first-writer-wins, so **a higher table index is frontmost**. The module walks
+the table downwards and keeps the first pixel written. Sprites in the harness
+are deliberately clustered, because on a scattered set the rule is invisible:
+with 8 sprites the bitmap and mask write counts are equal, while with 1024 the
+mask is written 246k times against 40k bitmap writes — the rejected 206k are
+exactly the pixels the ordering rule discards.
+
+The mask is marked for every non-transparent source pixel, whether or not that
+pixel won. Marking only on a win would let a further-back sprite show through a
+pixel an earlier one had already claimed.
+
+### The bug worth recording: a strobe and its address must be registered together
+
+First version drew almost nothing — 113 bitmap writes where ~1900 were due. The
+cause was that `bmp_addr` was registered while `mask_waddr` was combinational,
+so the mask write landed one pixel AHEAD of the bitmap write. Every subsequent
+pixel then found its mask already set and drew nothing.
+
+It was invisible in the counters (`mask_we` fired 1933 times, about the 94% of
+non-transparent pixels expected from random ROM) and only became obvious when
+the writes were traced: `bmp_we` at (45,76) in the same cycle as `mask_waddr`
+(46,76). **A write strobe and its address must be registered together, or they
+describe different cycles.**
+
+Two harness bugs preceded it and both looked like RTL faults: memories modelled
+combinationally again, and a mask port with a single shared address, which
+cannot express read-then-write. The mask now has split read and write
+addresses, which is what an M10K simple-dual-port provides anyway.

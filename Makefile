@@ -40,7 +40,8 @@ VBUILD    := --cc --exe --build -j 0 -O2 -Wno-fatal
 # One entry per harness: <name>:<top module>:<harness source>
 HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_vuspr:kaneko_vuspr:sim/video/tb_kaneko_vuspr.cpp \
-             kaneko_tmap_fetch:kaneko_tmap_fetch:sim/video/tb_kaneko_tmap_fetch.cpp
+             kaneko_tmap_fetch:kaneko_tmap_fetch:sim/video/tb_kaneko_tmap_fetch.cpp \
+             kaneko_vuspr_draw:kaneko_vuspr_draw:sim/video/tb_kaneko_vuspr_draw.cpp
 
 # The frame gate is separate from `make test`: it needs a MAME dump and
 # assembled ROM regions, neither of which is in the repo. `make frame` builds

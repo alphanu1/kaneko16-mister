@@ -15,6 +15,9 @@ begun.
 |---|---|
 | `rtl/video/kaneko_tmap.sv` | VIEW2 coordinate pipeline — scroll, line scroll, tile lookup, attribute decode, tile-ROM pixel address. 236 yosys cells. |
 | `rtl/video/kaneko_vuspr.sv` | VU-002 sprite list parser with multisprite latching, plus sprite pixel address. 1231 cells, 216 FF. |
+| `rtl/video/kaneko_mixer.sv` | Layer/sprite priority mixing. 325 cells, combinational. |
+| `rtl/video/kaneko_tmap_fetch.sv` | Tile pixel fetch pipeline, 1 pixel/clock, 4 stages. 301 cells. |
+| `rtl/video/kaneko_vuspr_draw.sv` | Sprite bitmap renderer, first-writer-wins. 499 cells. |
 | `sim/` | Two fuzz harnesses (3.0M + 41k checks, both clean) and the frame gate. |
 | `tools/` | `bootstrap.sh`, `build_rom_regions.py`, `mame_dump_frame.lua`, `mame_view2_census.lua`. |
 | `Makefile` | `lint`, `test`, `area`, `frame`, `quartus` (17.0-guarded). |
@@ -54,11 +57,9 @@ Ordered roughly by dependency. Items marked **novel** have no drop-in source.
 - **novel** tile/sprite ROM fetch from SDRAM (1 MB + 1 MB tiles, 2.5 MB
   sprites — far too large for M10K)
 - **novel** pixel pipeline and line buffers
-- **novel** priority mixer as RTL. It currently exists only as C++ inside the
-  frame harness; the mixing model is understood and written down, but no gate
-  covers an RTL implementation.
-- **novel** double-buffered sprite bitmap with the mask semantics
-  (first-writer-wins, drawn last-to-first)
+- ~~priority mixer as RTL~~ — done, `kaneko_mixer.sv`, gate-verified
+- ~~sprite bitmap renderer with the mask semantics~~ — done,
+  `kaneko_vuspr_draw.sv`. Still needs its double buffer and the flip each frame.
 - video timing generator, and the **rotation output stage** (decision D3)
 
 ### 2. CPU and bus
