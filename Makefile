@@ -195,7 +195,9 @@ gate: $(ROM_ALIAS)/blazeonj.zip
 mra:
 	@mkdir -p mra $(ROM_DIR)
 	@tools/build_rom_regions.py $(SET) $(ROMPATH) $(ROM_DIR) --stream --mra
-	@tools/verify_mra.py mra/$(SET).mra $(ROMPATH) $(ROM_DIR)/$(SET)_stream.bin
+	@# The MRA is named after the GAME, because that filename is what the
+	@# MiSTer arcade menu displays. Find it rather than assuming the set name.
+	@f=$$(ls -t mra/*.mra | head -1); tools/verify_mra.py "$$f" $(ROMPATH) $(ROM_DIR)/$(SET)_stream.bin
 
 clean:
 	rm -rf obj_* yosys.log abc.history

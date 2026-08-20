@@ -1793,3 +1793,73 @@ that interleave with other files — explbrkr's sprite region is u37, u38, u37,
 u38, u36 *by address*, not u37, u37, u38, u38, u36. That would have loaded a
 region of exactly the right size with its halves transposed, and nothing at
 load time would have complained.
+
+---
+
+## 2026-08-20 — FIRST PICTURE ON HARDWARE, and the two bugs it found
+
+The bring-up core ran on the board and put tile artwork on screen. Both faults
+it exposed were in the bring-up renderer itself, not in the verified blocks —
+which is what it was built to do.
+
+### 1. Address scaled by four
+
+`run_word` counts **8-byte bursts**, but it was added directly to a **word**-
+address base:
+
+```systemverilog
+sdr_addr <= SDR_AW'(base + {4'd0, run_word});      // wrong: quarter address
+sdr_addr <= SDR_AW'(base + {run_word, 2'b00});     // fixed
+```
+
+Every fetch landed at a quarter of its intended address, so adjacent pixels drew
+from overlapping wrong data. On screen: dense fine-grained hash with no clean
+tile boundaries.
+
+**Worth noting what that photo already proved**, before the fix: the core
+loaded, the PLL and video timing produced a signal the monitor locked to, the
+loader moved 5.75 MB into SDRAM, and the controller returned *real ROM data* —
+because wrong-address ROM data looks like that, whereas a dead memory path gives
+uniform noise or black. Three of the four things the build exists to prove had
+already passed.
+
+### 2. The fetcher had no lookahead, dropped requests, and churned in blanking
+
+After the address fix the picture became recognisable tiles with **horizontal
+smearing that drifted diagonally**. Three flaws, all in the fetch:
+
+- **No lookahead.** The request was issued as the group's first pixel was
+  already being displayed, so the opening pixels of every 8-pixel group showed
+  the previous group's data. Constant per line, hence the diagonal drift.
+- **Dropped requests.** `run_word_q` only advanced when a request was *issued*,
+  so a run that changed while one was in flight was never fetched at all.
+- **Blanking churn.** `screen_x` runs to H_TOTAL, so during hblank the tile
+  index kept cycling and fired spurious fetches.
+
+Now it prefetches exactly one 8-pixel group ahead, wrapping to the next line
+correctly, double-buffers, compares against what it **has** rather than what it
+last asked for, and only fetches positions that will be displayed. A group is 64
+core clocks against an SDRAM read of ~20-30.
+
+### What this establishes on hardware
+
+The loader, the SDRAM controller, the PLL, the video timing and the tile decode
+all work on the real board at the real clock — none of which simulation could
+settle. The derived 6 MHz / 384 x 264 timing produces a signal the display
+locks to, which is the first evidence for that reconstruction beyond its
+agreement with MAME's 59.1854 Hz.
+
+### The MRA filename is what the menu shows
+
+`<name>` inside the XML is not what MiSTer lists. The arcade menu is built from
+the **.mra filenames** in `_Arcade`, so a file called `explbrkr.mra` lists as
+"explbrkr" however the XML is titled. The generator now names the file after the
+game, and takes the title, year and manufacturer from MAME's `GAME()` line
+rather than a hand-kept table — the same reasoning as the ROM layouts: a second
+description drifts.
+
+```
+mra/Explosive Breaker (World).mra
+  <name>Explosive Breaker (World)</name>  <year>1992</year>
+  <manufacturer>Kaneko</manufacturer>
+```

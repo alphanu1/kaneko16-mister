@@ -3,10 +3,11 @@
 Read `CLAUDE.md` first, then this. `docs/findings.md` is the measured record;
 `docs/00-decisions.md` is what was decided and what would reverse it.
 
-**Status: M0 in progress. A bring-up core builds, fits and times on Quartus
-17.0 — 18% ALMs, zero negative slack, .rbf emitted — but it has no CPU. It
-loads the ROM and renders tiles straight from SDRAM, to prove the memory and
-video paths on hardware.** The two hardest *novel* pieces are
+**Status: M0 in progress. A bring-up core RUNS ON HARDWARE and puts tile
+artwork on screen.** It has no CPU — it loads the ROM into SDRAM and renders a
+contact sheet of the tile ROM. That establishes the loader, the SDRAM
+controller, the PLL, the video timing and the tile decode on the real board.
+What remains for M1 is the 68000, the address decode, work RAM and interrupts. The two hardest *novel* pieces are
 under way; the bulk of first bring-up is conventional integration that has not
 begun.
 

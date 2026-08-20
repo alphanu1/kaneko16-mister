@@ -28,7 +28,7 @@ size but wrong above 0x180000.
     tools/build_rom_regions.py mgcrystl /home/ben/roms/Kaneko16 build/roms
 """
 
-import sys, os, zipfile, hashlib
+import sys, os, re, zipfile, hashlib
 
 # name -> {region: [entry, ...]}
 #
@@ -229,6 +229,30 @@ def build_stream(setname, outdir):
         print(f"      {base:#09x} {region:9s} {size:#09x}  {note}")
 
 
+def game_info(setname, mame_root="third_party/mame"):
+    """Pull the real title, year and manufacturer out of MAME's GAME() line.
+
+    Taken from the source rather than a table here, for the same reason the ROM
+    layouts are: a hand-kept list of titles is a second description that drifts,
+    and MAME is the oracle the rest of this project already uses. Falls back to
+    the set name if the source is not vendored.
+    """
+    import glob
+    pat = re.compile(
+        r'^GAME[L]?\(\s*(\d{4})\s*,\s*' + re.escape(setname) +
+        r'\s*,.*?ROT\d+\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"',
+        re.M)
+    for path in glob.glob(os.path.join(mame_root, "src/mame/kaneko/*.cpp")):
+        try:
+            m = pat.search(open(path, encoding="utf-8", errors="ignore").read())
+        except OSError:
+            continue
+        if m:
+            return {"year": m.group(1), "manufacturer": m.group(2),
+                    "name": m.group(3)}
+    return {"year": "", "manufacturer": "", "name": setname}
+
+
 def build_mra(setname, rompath, outdir):
     """Emit the MRA, driven from the same SETS/SDRAM_MAP tables.
 
@@ -244,10 +268,16 @@ def build_mra(setname, rompath, outdir):
         for info in z.infolist():
             crcs[info.filename] = f"{info.CRC:08x}"
 
+    info = game_info(setname)
     root = ET.Element("misterromdescription")
-    ET.SubElement(root, "name").text = setname
+    # The TITLE, not the set id — this is what the MiSTer arcade menu shows.
+    ET.SubElement(root, "name").text = info["name"]
     ET.SubElement(root, "setname").text = setname
     ET.SubElement(root, "rbf").text = "Kaneko16"
+    if info["year"]:
+        ET.SubElement(root, "year").text = info["year"]
+    if info["manufacturer"]:
+        ET.SubElement(root, "manufacturer").text = info["manufacturer"]
 
     rom = ET.SubElement(root, "rom", index="0", zip=f"{zname}.zip", md5="none")
     cursor = 0
@@ -302,11 +332,16 @@ def build_mra(setname, rompath, outdir):
         cursor = base + size
 
     ET.indent(root, space="    ")
-    out = os.path.join(outdir, f"{setname}.mra")
+    # THE FILENAME IS WHAT THE MENU SHOWS. MiSTer's arcade list is built from
+    # the .mra filenames in _Arcade, not from the <name> element inside them —
+    # so a file called explbrkr.mra lists as "explbrkr" however the XML is
+    # titled. Name the file after the game.
+    safe = re.sub(r'[/\\:*?"<>|]', "-", info["name"]).strip()
+    out = os.path.join(outdir, f"{safe}.mra")
     ET.ElementTree(root).write(out, encoding="unicode", xml_declaration=False)
     with open(out, "a") as f:
         f.write("\n")
-    print(f"  {os.path.basename(out):28s} {cursor:#09x} bytes described")
+    print(f"  {os.path.basename(out):34s} {cursor:#09x} bytes described")
 
 
 if __name__ == "__main__":

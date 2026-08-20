@@ -61,12 +61,10 @@ module kaneko_tilewall #(
 
     output logic [7:0] r, g, b
 );
-    // Which ROM region this page comes from. Only the burst-aligned part is
-    // used; the low bits are zero by construction (D6 puts every region on a
-    // 512 KB boundary).
-    /* verilator lint_off UNUSEDSIGNAL */
+    // Which ROM region this page comes from. D6 puts every region on a 512 KB
+    // boundary, so a region base is already burst-aligned as a word address
+    // and the sum below stays aligned.
     logic [24:0] base;
-    /* verilator lint_on UNUSEDSIGNAL */
     always_comb begin
         case (mode)
             2'd0:    base = BASE_VIEW2_0;
@@ -95,29 +93,81 @@ module kaneko_tilewall #(
                          + {17'd0, fine_y[3], fine_x[3], fine_y[2:0], 2'd0};
 
     // ---------------------------------------------------------- fetch
-    // One burst per 4-byte run; the run changes every 8 pixels.
-    logic [20:0] run_word_q;
-    wire  [20:0] run_word = run_byte[23:3];   // 8-byte aligned burst
+    //
+    // ONE GROUP OF LOOKAHEAD, DOUBLE BUFFERED.
+    //
+    // The first version issued the request at the moment the group's first
+    // pixel was already on screen, so the opening pixels of every 8-pixel group
+    // showed the PREVIOUS group's data — horizontal smearing, drifting
+    // diagonally because the error is constant per line. It also dropped
+    // requests: run_word_q only advanced when a request was issued, so a run
+    // that changed while one was outstanding was never fetched. And it churned
+    // during blanking, because screen_x runs to H_TOTAL and the tile index
+    // keeps cycling there.
+    //
+    // Now the fetch runs exactly one 8-pixel group ahead of the display,
+    // wrapping to the next line at the end of one, and only for positions that
+    // will actually be shown. A group lasts 8 pixel times = 64 core clocks at
+    // ce_pix = clk/8, comfortably more than an SDRAM read, so the data is
+    // always in hand before its group starts.
 
-    logic [63:0] data;
+    localparam int unsigned H_TOTAL = 384;
+    localparam int unsigned H_VIS   = 256;
+    localparam int unsigned V_TOTAL = 264;
+
+    wire [9:0] fx_raw  = {1'b0, screen_x} + 10'd8;
+    wire       fx_wrap = fx_raw >= 10'(H_TOTAL);
+    wire [8:0] fetch_x = fx_wrap ? 9'(fx_raw - 10'(H_TOTAL)) : fx_raw[8:0];
+    wire [8:0] fetch_y = fx_wrap
+                       ? ((screen_y == 9'(V_TOTAL - 1)) ? 9'd0 : screen_y + 9'd1)
+                       : screen_y;
+
+    wire [3:0]  f_tile_x = fetch_x[7:4];
+    wire [7:0]  f_tile_y = {3'd0, fetch_y[8:4]};
+    wire [15:0] f_tile   = {4'd0, f_tile_y, f_tile_x};
+    // Only bit 3 matters here: it selects the left or right 8x8 sub-tile. The
+    // low bits pick the byte within the run and are applied at display time.
+    /* verilator lint_off UNUSEDSIGNAL */
+    wire [3:0]  f_fine_x = fetch_x[3:0];
+    /* verilator lint_on UNUSEDSIGNAL */
+    wire [3:0]  f_fine_y = fetch_y[3:0];
+
+    /* verilator lint_off UNUSEDSIGNAL */
+    wire [23:0] f_run_byte = {f_tile, 7'd0}
+                           + {17'd0, f_fine_y[3], f_fine_x[3], f_fine_y[2:0], 2'd0};
+    /* verilator lint_on UNUSEDSIGNAL */
+
+    wire [20:0] want_word = f_run_byte[23:3];
+    wire        want_ok   = rom_loaded && (fetch_x < 9'(H_VIS));
+
+    logic [20:0] have_word;
+    logic [63:0] data_next, data_cur;
     logic        pending;
 
     always_ff @(posedge clk) begin
         if (rst) begin
-            sdr_req <= 1'b0; pending <= 1'b0; run_word_q <= '1; data <= '0;
+            sdr_req <= 1'b0; pending <= 1'b0; have_word <= '1;
+            data_next <= '0; data_cur <= '0;
         end else begin
             if (sdr_ack) begin
-                data    <= sdr_dout;
-                pending <= 1'b0;
-                sdr_req <= 1'b0;
+                data_next <= sdr_dout;
+                pending   <= 1'b0;
+                sdr_req   <= 1'b0;
             end
-            // Issue when the needed run changes and nothing is outstanding.
-            if (rom_loaded && !pending && (run_word != run_word_q)) begin
-                run_word_q <= run_word;
-                sdr_addr   <= SDR_AW'({base[24:2], 2'd0} + {4'd0, run_word});
-                sdr_req    <= 1'b1;
-                pending    <= 1'b1;
+
+            // Compared against what we HAVE, not against what we last asked
+            // for, so a run that changes mid-flight is still fetched.
+            if (want_ok && !pending && (want_word != have_word)) begin
+                have_word <= want_word;
+                // want_word counts 8-BYTE bursts; sdr_addr is a WORD address,
+                // so it scales by four.
+                sdr_addr  <= SDR_AW'(base + {want_word, 2'b00});
+                sdr_req   <= 1'b1;
+                pending   <= 1'b1;
             end
+
+            // Hand the prefetched group over as the display crosses into it.
+            if (ce_pix && (screen_x[2:0] == 3'd7)) data_cur <= data_next;
         end
     end
 
@@ -125,7 +175,7 @@ module kaneko_tilewall #(
     // The burst is 8 bytes; pick the byte holding this pixel's nibble pair.
     wire [2:0] byte_sel = {run_byte[2], fine_x[2:1]};
     logic [7:0] pix_byte;
-    always_comb pix_byte = data[{byte_sel, 3'd0} +: 8];
+    always_comb pix_byte = data_cur[{byte_sel, 3'd0} +: 8];
 
     // Sprites use the MSB nibble order, tiles the LSB — the one difference
     // between the two layouts, and the thing this build can show directly.
