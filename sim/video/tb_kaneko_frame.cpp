@@ -154,6 +154,42 @@ Pix layer_pixel(const Layer& L, int sx, int sy)
     return p;
 }
 
+
+// Drive the RTL mixer for one pixel. This replaces the hand-written C++
+// priority logic that used to live at each mixing site: the gate now exercises
+// kaneko_mixer.sv itself, so the mixing is verified against MAME the same way
+// the address engines are.
+static uint32_t mix_pixel(const Pix p[4], uint16_t spr_pix, uint16_t spr_prio,
+                          bool view2_2_pri, const int spr_pri[4],
+                          uint32_t tile_colbase, uint32_t spr_colbase,
+                          bool drop_sprite, bool force_sprite, bool* sprite_won)
+{
+    uint32_t solid = 0, cat_f = 0, col_f = 0, pix_f = 0, pri_f = 0;
+    for (int l = 0; l < 4; l++) {
+        if (p[l].solid) solid |= (1u << l);
+        cat_f |= (uint32_t)(p[l].cat    & 7u)   << (l * 3);
+        col_f |= (uint32_t)(p[l].colour & 0x3f) << (l * 6);
+        pix_f |= (uint32_t)(p[l].c      & 0xf)  << (l * 4);
+        pri_f |= (uint32_t)(spr_pri[l]  & 0xf)  << (l * 4);
+    }
+    dut->m_layer_solid    = solid;
+    dut->m_layer_cat_f    = cat_f;
+    dut->m_layer_colour_f = col_f;
+    dut->m_layer_pix_f    = pix_f;
+    // force_sprite (SPRTOP) claims maximum priority so the sprite always wins;
+    // drop_sprite (NOSPR, and the tiles-only census pass) removes it. Both are
+    // diagnostics, not behaviour.
+    dut->m_spr_pix        = drop_sprite ? 0 : spr_pix;
+    dut->m_spr_prio       = spr_prio;
+    dut->m_view2_2_pri    = view2_2_pri;
+    dut->m_spr_pri_f      = force_sprite ? 0xffffu : pri_f;
+    dut->m_tile_colbase   = tile_colbase;
+    dut->m_spr_colbase    = spr_colbase;
+    dut->eval();
+    if (sprite_won) *sprite_won = dut->m_sprite_won;
+    return dut->m_pen;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -397,17 +433,11 @@ int main(int argc, char** argv)
                     for (int col = 0; col < W; col++) {
                         Pix p[4];
                         for (int l = 0; l < 4; l++) p[l] = layer_pixel(layers[l], col, sy);
-                        uint32_t pen = 0; uint8_t prim = 0;
-                        for (int cat = 0; cat < 8; cat++)
-                            for (int l = 0; l < 4; l++)
-                                if (p[l].solid && p[l].cat == cat) {
-                                    pen = TILE_COLBASE + 16u * p[l].colour + p[l].c;
-                                    prim = (layers[l].chip1 && !G->view2_2_pri) ? 0 : (uint8_t)cat;
-                                }
-                        const size_t so = (size_t)sy * 512 + col;
-                        const uint16_t sv = sbmp[so];
-                        const uint16_t spix = sv & 0x3fff;
-                        if (spix && spr_pri_map[(sv >> 14) & 3] > prim) pen = SPR_COLBASE + spix;
+                        uint32_t pen = 0;
+                        const uint16_t sv = sbmp[(size_t)sy * 512 + col];
+                        pen = mix_pixel(p, sv & 0x3fff, (sv >> 14) & 3, G->view2_2_pri,
+                                        spr_pri_map, TILE_COLBASE, SPR_COLBASE,
+                                        false, false, nullptr);
                         const uint32_t rgb = xgrb555(rd16(pal, pen & 0x7ff));
                         const size_t o = (size_t)row * W + col;
                         const uint32_t want = (uint32_t)(ref[o*4+0] | (ref[o*4+1]<<8) | (ref[o*4+2]<<16));
@@ -437,19 +467,13 @@ int main(int argc, char** argv)
                     for (int col = 0; col < W; col++) {
                         Pix p[4];
                         for (int l = 0; l < 4; l++) p[l] = layer_pixel(layers[l], col, sy);
-                        uint32_t pen = 0; uint8_t prim = 0;
-                        for (int cat = 0; cat < 8; cat++)
-                            for (int l = 0; l < 4; l++)
-                                if (p[l].solid && p[l].cat == cat) {
-                                    pen = TILE_COLBASE + 16u * p[l].colour + p[l].c;
-                                    prim = (layers[l].chip1 && !G->view2_2_pri) ? 0 : (uint8_t)cat;
-                                }
+                        uint32_t pen = 0;
                         const int ssy = sy + ya, ssx = col + xa;
-                        if (ssy >= 0 && ssy < 512 && ssx >= 0 && ssx < 512) {
-                            const uint16_t sv = sbmp[(size_t)ssy * 512 + ssx];
-                            const uint16_t spix = sv & 0x3fff;
-                            if (spix && spr_pri_map[(sv >> 14) & 3] > prim) pen = SPR_COLBASE + spix;
-                        }
+                        const uint16_t sv = (ssy >= 0 && ssy < 512 && ssx >= 0 && ssx < 512)
+                                          ? sbmp[(size_t)ssy * 512 + ssx] : 0;
+                        pen = mix_pixel(p, sv & 0x3fff, (sv >> 14) & 3, G->view2_2_pri,
+                                        spr_pri_map, TILE_COLBASE, SPR_COLBASE,
+                                        false, false, nullptr);
                         const uint32_t rgb = xgrb555(rd16(pal, pen & 0x7ff));
                         const size_t o = (size_t)row * W + col;
                         const uint32_t want = (uint32_t)(ref[o*4+0] | (ref[o*4+1]<<8) | (ref[o*4+2]<<16));
@@ -476,16 +500,11 @@ int main(int argc, char** argv)
                 for (int col = 0; col < W; col++) {
                     Pix p[4];
                     for (int l = 0; l < 4; l++) p[l] = layer_pixel(layers[l], col, sy);
-                    uint32_t pen = 0; uint8_t prim = 0;
-                    for (int cat = 0; cat < 8; cat++)
-                        for (int l = 0; l < 4; l++)
-                            if (p[l].solid && p[l].cat == cat) {
-                                pen = TILE_COLBASE + 16u * p[l].colour + p[l].c;
-                                prim = (layers[l].chip1 && !G->view2_2_pri) ? 0 : (uint8_t)cat;
-                            }
                     const uint16_t sv = sbmp[(size_t)sy * 512 + col];
-                    const uint16_t spix = sv & 0x3fff;
-                    if (spix && spr_pri_map[(sv >> 14) & 3] > prim) pen = SPR_COLBASE + spix;
+                    const uint32_t pen = mix_pixel(p, sv & 0x3fff, (sv >> 14) & 3,
+                                                   G->view2_2_pri, spr_pri_map,
+                                                   TILE_COLBASE, SPR_COLBASE,
+                                                   false, false, nullptr);
                     const uint32_t rgb = xgrb555(rd16(pal, pen & 0x7ff));
                     const size_t o = (size_t)row * W + col;
                     const uint32_t want = (uint32_t)(ref[o*4+0] | (ref[o*4+1]<<8) | (ref[o*4+2]<<16));
@@ -520,27 +539,18 @@ int main(int argc, char** argv)
             Pix p[4];
             for (int l = 0; l < 4; l++) p[l] = layer_pixel(layers[l], sx, sy);
 
-            uint32_t pen = 0;          // fill_bitmap: pen 0 for sprite type 0
-            uint8_t  prim = 0;
-
-            for (int cat = 0; cat < 8; cat++)
-                for (int l = 0; l < 4; l++)
-                    if (p[l].solid && p[l].cat == cat) {
-                        pen = TILE_COLBASE + 16u * p[l].colour + p[l].c;
-                        prim = (layers[l].chip1 && !G->view2_2_pri) ? 0 : (uint8_t)cat;
-                    }
-
             const size_t so = (size_t)sy * 512 + sx;
             const uint16_t sv = sbmp[so];
             const uint16_t spix = sv & 0x3fff;
             const uint16_t spri = (sv >> 14) & 3;
-            // SPRTOP=1 ignores the priority comparison entirely, to separate
-            // "we have no sprite pixel here" from "we have one but suppressed
-            // it against the priority bitmap".
-            const bool we_drew_sprite = spix && (spr_top || spr_pri_map[spri] > prim);
-            const uint32_t tile_only_pen = pen;
-            if (we_drew_sprite && !no_sprites)
-                pen = SPR_COLBASE + spix;
+
+            bool we_drew_sprite = false;
+            uint32_t pen = mix_pixel(p, spix, spri, G->view2_2_pri, spr_pri_map,
+                                     TILE_COLBASE, SPR_COLBASE,
+                                     no_sprites, spr_top, &we_drew_sprite);
+            const uint32_t tile_only_pen =
+                mix_pixel(p, 0, 0, G->view2_2_pri, spr_pri_map,
+                          TILE_COLBASE, SPR_COLBASE, true, false, nullptr);
 
             // Census: where do we put a sprite, and where does MAME's frame
             // disagree with a tiles-only render? If those two sets differ, the
@@ -571,7 +581,7 @@ int main(int argc, char** argv)
                 // Attribute the miss, so the next step is localised rather
                 // than guessed: was a sprite composited here, and did any
                 // tile layer contribute?
-                if (spix && spr_pri_map[spri] > prim) bad_sprite++;
+                if (we_drew_sprite) bad_sprite++;
                 else if (pen != 0) bad_tile++;
                 else bad_bg++;
                 bad_row[row]++;
@@ -654,14 +664,15 @@ int main(int argc, char** argv)
                 const int sy = VIS_MIN_Y + row, sx = col;
                 Pix p[4];
                 for (int l = 0; l < 4; l++) p[l] = layer_pixel(layers[l], sx, sy);
-                uint32_t pen = 0; uint8_t prim = 0; int winner = -1;
-                for (int cat = 0; cat < 8; cat++)
-                    for (int l = 0; l < 4; l++)
-                        if (p[l].solid && p[l].cat == cat) {
-                            pen = TILE_COLBASE + 16u * p[l].colour + p[l].c;
-                            prim = (layers[l].chip1 && !G->view2_2_pri) ? 0 : (uint8_t)cat;
-                            winner = l;
-                        }
+                // The winning layer is the highest category, and among equal
+                // categories the highest index — the same rule kaneko_mixer
+                // implements; recomputed here only to label the diagnostic.
+                int winner = -1;
+                for (int l = 0; l < 4; l++)
+                    if (p[l].solid && (winner < 0 || p[l].cat >= p[winner].cat)) winner = l;
+                const uint32_t pen = mix_pixel(p, 0, 0, G->view2_2_pri, spr_pri_map,
+                                               TILE_COLBASE, SPR_COLBASE,
+                                               true, false, nullptr);
                 printf("  miss row=%3d col=%3d  our pen=%03x (layer %d colour=%02x c=%x cat=%d)\n",
                        row, col, pen, winner,
                        winner >= 0 ? p[winner].colour : 0,

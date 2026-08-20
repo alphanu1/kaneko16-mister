@@ -54,6 +54,21 @@ module kaneko_frame_top (
     output wire signed [9:0] s_out_x,
     output wire signed [9:0] s_out_y,
 
+    // ---- priority mixer (combinational) ----
+    input  wire [3:0]   m_layer_solid,
+    input  wire [11:0]  m_layer_cat_f,
+    input  wire [23:0]  m_layer_colour_f,
+    input  wire [15:0]  m_layer_pix_f,
+    input  wire [13:0]  m_spr_pix,
+    input  wire [1:0]   m_spr_prio,
+    input  wire         m_view2_2_pri,
+    input  wire [15:0]  m_spr_pri_f,
+    input  wire [10:0]  m_tile_colbase,
+    input  wire [10:0]  m_spr_colbase,
+    output wire [10:0]  m_pen,
+    output wire [2:0]   m_prio_out,
+    output wire         m_sprite_won,
+
     // ---- sprite pixel address (combinational) ----
     input  wire [16:0]  p_code,
     input  wire [3:0]   p_fine_x,
@@ -82,6 +97,14 @@ module kaneko_frame_top (
         .out_valid(s_out_valid), .out_code(s_out_code), .out_colour(s_out_colour),
         .out_prio(s_out_prio), .out_flipx(s_out_flipx), .out_flipy(s_out_flipy),
         .out_x(s_out_x), .out_y(s_out_y));
+
+    kaneko_mixer u_mix (
+        .layer_solid(m_layer_solid), .layer_cat_f(m_layer_cat_f),
+        .layer_colour_f(m_layer_colour_f), .layer_pix_f(m_layer_pix_f),
+        .spr_pix(m_spr_pix), .spr_prio(m_spr_prio),
+        .view2_2_pri(m_view2_2_pri), .spr_pri_f(m_spr_pri_f),
+        .tile_colbase(m_tile_colbase), .spr_colbase(m_spr_colbase),
+        .pen(m_pen), .prio_out(m_prio_out), .sprite_won(m_sprite_won));
 
     kaneko_vuspr_pixaddr u_pix (
         .code(p_code), .fine_x(p_fine_x), .fine_y(p_fine_y),

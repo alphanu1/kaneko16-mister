@@ -1368,3 +1368,40 @@ sub-frame capture-point error that happened to round to a frame for one game.
 instrument before concluding the hardware differs. The question "what does MAME
 actually do" had a definite answer in fifty lines of its own source, and no
 amount of fitting offsets to pixel counts would have found it.
+
+---
+
+## 2026-08-20 — priority mixer moved from the harness into RTL
+
+**Instrument:** `make gate` before and after the swap.
+
+The mixing had been C++ inside the frame harness, so the gate validated the
+address engines but not the mixing. `rtl/video/kaneko_mixer.sv` now implements
+it and the harness drives the RTL at every mixing site, including the
+diagnostic sweeps. **The gate is byte-identical after the swap** — `mgcrystl`
+298, the other three exact — which is the result wanted: the RTL reproduces
+what the C++ did, and is now itself checked against MAME.
+
+One simplification worth recording. MAME draws eight category passes, each
+touching four layers in a fixed order, with later draws overwriting earlier
+ones. For a *single pixel* that collapses to: **the winner is the solid layer
+with the highest category, ties broken by the highest layer index.** So the
+mixer is combinational, not a state machine — 8 passes x 4 layers becomes one
+comparison.
+
+The priority-bitmap value left behind is the **winner's**, not the highest
+category present, because the last write is what stands. Both the chip-1 rule
+(`m_view2_2_pri`) and the sprite comparison table are per-game inputs, not
+constants — hard rule 9.
+
+Area: 158 yosys cells, combinational.
+
+**Reuse position, checked rather than assumed.** Grepping every vendored
+repository for VIEW2 or VU-002 RTL returns nothing: there is no existing
+implementation of either custom chip, and the mixer is not a chip at all but
+the documented interaction between them, which exists only in
+`kaneko16_v.cpp`. Everything else in the system is already available — fx68k,
+jt49, jt6295, jt51, T80, and the template's `arcade_video.v`, `hps_io.sv` (which
+is also the ROM loader), OSD and PLLs. The SDRAM controller is the one
+remaining non-novel gap, and `model1-ref/rtl/mem/m1_sdram.sv` is the same
+author's and can be ported rather than rewritten.
