@@ -15,7 +15,9 @@ out of MAME or measured on the bench.
 
 Three corrections, detailed in `THIRD-PARTY.md`:
 
-- `jtfpga/fx68k` does not exist. Upstream is `ijor/fx68k`; `jotego/fx68k` is a fork.
+- ~~`jtfpga/fx68k` does not exist~~ — **WRONG, withdrawn.** It does exist; see
+  the entry dated later the same day. Upstream is `ijor/fx68k`, which is what
+  is vendored, and `jtfpga/fx68k` is that same code repackaged.
 - fx68k is **GPL-3.0-only**, not or-later. No version clause in `fx68k.sv`.
   This core therefore ships GPL-3.0-only.
 - T80 is **BSD-3-Clause**, not LGPL-2.1. The repo has no licence file at all;
@@ -1863,3 +1865,45 @@ mra/Explosive Breaker (World).mra
   <name>Explosive Breaker (World)</name>  <year>1992</year>
   <manufacturer>Kaneko</manufacturer>
 ```
+
+---
+
+## 2026-08-20 — CORRECTION: `jtfpga/fx68k` does exist. I was wrong.
+
+**Raised by the user, who was looking at the page.** An earlier entry here, and
+matching edits to the design study and `THIRD-PARTY.md`, asserted that
+`jtfpga/fx68k` did not exist and that the org was `jotego`. That was wrong on
+both counts and is withdrawn.
+
+The original probe was a `git ls-remote` batch in which that one URL reported
+not-found. Re-running it returns `refs/heads/master 1217ab8d`, and the GitHub
+API returns 200 for both the repo and the `jtfpga` org. The most likely cause is
+a transient failure or rate-limit during a batch of ten probes — **and the
+lesson is that a single negative result from a network probe is not evidence of
+absence.** Every other repo in that batch resolved, which made the one failure
+look like a real answer rather than a flaky one.
+
+It also propagated: the false claim was written into three documents as a
+"correction" to the design study, complete with reasoning about brand names
+versus org names. The reasoning was plausible and entirely invented.
+
+### What the three repositories actually are
+
+| repo | `fx68k.sv` | notes |
+|---|---|---|
+| `ijor/fx68k` | upstream | vendored here, pinned in `deps.lock` |
+| `jtfpga/fx68k` | **byte-identical to ijor's** apart from CRLF line endings | repackaged into jtframe's `hdl/` + `cfg/files.yaml` layout |
+| `jotego/fx68k` | ijor's **+130 lines** | adds an optional `FX68K_ALTERA_REGS` define putting the register file in 2 BRAM blocks — "Frees up ~2000 Logic Cells on Cyclone III". Off by default. |
+
+All three ship `microrom.mem` and `nanorom.mem`, which `fx68k.sv` loads with
+`$readmemb` and cannot run without.
+
+### What to actually use
+
+Staying on `ijor/fx68k`. jtfpga's is the same code, so switching buys nothing
+but a different directory layout. **jotego's is the only one with a
+MiSTer-relevant difference**, and it is worth revisiting when ALM pressure
+appears: `FX68K_ALTERA_REGS` trades two M10K blocks for roughly 2000 logic
+cells. At 18% utilisation today there is no pressure, and the define is off by
+default in jotego's too — so adopting it would be a deliberate choice, not a
+consequence of switching repos.

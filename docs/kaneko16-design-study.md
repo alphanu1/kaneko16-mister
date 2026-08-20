@@ -160,10 +160,19 @@ cases, Bonk's may require additional reverse engineering beyond what MAME has.
 
 **RTL:** `ijor/fx68k` — **GPL-3.0-only**. Drop in.
 
-Corrected 2026-08-20, from the vendored clone. This entry read
-`jtfpga/fx68k` — that org does not exist; `jtfpga` is the JTFPGA brand, the
-GitHub org is `jotego`, and `jotego/fx68k` is a fork of ijor's. It also read
-or-later; fx68k grants no or-later. See `THIRD-PARTY.md`.
+Corrected twice, 2026-08-20. The licence correction stands: fx68k grants no
+or-later, so this core ships GPL-3.0-only. See `THIRD-PARTY.md`.
+
+**The claim that `jtfpga/fx68k` does not exist was WRONG and is withdrawn.** It
+does exist, and its `hdl/fx68k.sv` is byte-identical to ijor's apart from line
+endings — a repackaging into jtframe's layout, not a functional fork. Three
+repositories carry this core:
+
+| | |
+|---|---|
+| `ijor/fx68k` | upstream, and what is vendored here |
+| `jtfpga/fx68k` | ijor's, repackaged for jtframe. Functionally identical. |
+| `jotego/fx68k` | ijor's plus an optional `FX68K_ALTERA_REGS` define that moves the register file into 2 BRAM blocks, freeing ~2000 logic cells on Cyclone. Off by default. |
 
 **MAME modelling:** `M68000` device, accurate.
 

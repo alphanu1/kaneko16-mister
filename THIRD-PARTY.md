@@ -59,9 +59,19 @@ files pulled in alongside kaneko/ are a mix.
 ### ijor/fx68k — GPL-3.0-only
 68000 main CPU. Cycle-accurate, fully synchronous, ~5,100 LE on Cyclone. Drop-in.
 
-The design study called this `jtfpga/fx68k`. **That org does not exist** —
-`jtfpga` is the JTFPGA brand name, the GitHub org is `jotego`, and `jotego/fx68k`
-is a fork. Upstream is `ijor/fx68k` and that is what `deps.lock` pins.
+Three repositories carry this core, and they are not interchangeable in the way
+the earlier note here claimed:
+
+| repo | what it is |
+|---|---|
+| `ijor/fx68k` | upstream. Pinned in `deps.lock` and vendored here. |
+| `jtfpga/fx68k` | ijor's, repackaged into jtframe's `hdl/` + `cfg/` layout. `fx68k.sv` is byte-identical apart from line endings. |
+| `jotego/fx68k` | ijor's plus ~130 lines: an optional `FX68K_ALTERA_REGS` define moving the register file into 2 BRAM blocks, freeing ~2000 logic cells on Cyclone. Off by default. |
+
+**An earlier version of this file said `jtfpga/fx68k` does not exist. That was
+wrong and is withdrawn** — see `docs/findings.md`. Upstream is still what is
+pinned, because jtfpga's is the same code and jotego's differs only by an
+optional define we do not currently set.
 
 ### jotego/jt49 — GPL-3.0-or-later
 YM2149 PSG. Two instances on the base board, at 12 MHz / 6 = 2 MHz.
