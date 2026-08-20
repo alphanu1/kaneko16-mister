@@ -6,6 +6,13 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/kaneko_vuspr.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/kaneko_vuspr_draw.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/kaneko_mixer.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/mem/kaneko_sdram.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/mem/kaneko_vmem.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/kaneko_bus.sv
+# fx68k: hdl/ is upstream ijor's code. hdl/verilator/ is the simulation-only
+# variant and must NOT be built here.
+set_global_assignment -name SYSTEMVERILOG_FILE third_party/fx68k/hdl/fx68k.sv
+set_global_assignment -name SYSTEMVERILOG_FILE third_party/fx68k/hdl/fx68kAlu.sv
+set_global_assignment -name SYSTEMVERILOG_FILE third_party/fx68k/hdl/uaddrPla.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/mem/bw_monitor.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/io/kaneko_rom_loader.sv
 set_global_assignment -name QIP_FILE rtl/pll/pll.qip

@@ -26,7 +26,11 @@ RTL_DIRS  := rtl/video rtl/cpu rtl/sound rtl/mem rtl/io rtl/pll
 RTL       := $(wildcard $(patsubst %,%/*.sv,$(RTL_DIRS)))
 # Simulation-only SystemVerilog (harness wrappers). Compiled into harnesses but
 # never linted as core RTL and never instantiated from rtl/.
-SIM_SV    := $(wildcard sim/*/*.sv) $(wildcard third_party/fx68k/hdl/verilator/*.sv)
+SIM_SV    := $(wildcard sim/*/*.sv)
+# fx68k's Verilator-compatible variant, needed only by the CPU harness.
+# Building it into every harness cost ~2 MB of objects each and, at -j 32,
+# exhausted a 16 GB tmpfs through GCC's temporaries.
+FX68K_SIM := $(wildcard third_party/fx68k/hdl/verilator/*.sv)
 
 # -Wno-DECLFILENAME: a file holds a group of related modules, not one module
 #   named after the file.
@@ -38,6 +42,7 @@ VFLAGS    := -Wall -Wno-DECLFILENAME -Wno-MULTITOP
 VBUILD    := --cc --exe --build -j 0 -O2 -Wno-fatal
 
 # One entry per harness: <name>:<top module>:<harness source>
+# <name>:<top module>:<harness source>[:<extra sources>]
 HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_vuspr:kaneko_vuspr:sim/video/tb_kaneko_vuspr.cpp \
              kaneko_tmap_fetch:kaneko_tmap_fetch:sim/video/tb_kaneko_tmap_fetch.cpp \
@@ -45,7 +50,7 @@ HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_sdram:kaneko_sdram_harness:sim/mem/tb_kaneko_sdram.cpp \
              kaneko_romload:kaneko_romload_harness:sim/io/tb_kaneko_romload.cpp \
              kaneko_romstream:kaneko_romstream_harness:sim/io/tb_kaneko_romstream.cpp \
-             kaneko_cpu:kaneko_cpu_harness:sim/cpu/tb_kaneko_cpu.cpp
+             kaneko_cpu:kaneko_cpu_harness:sim/cpu/tb_kaneko_cpu.cpp:FX68K
 
 # The frame gate is separate from `make test`: it needs a MAME dump and
 # assembled ROM regions, neither of which is in the repo. `make frame` builds
@@ -58,6 +63,10 @@ DUMP_FRAME ?= 600
 DUMP_AT    ?= vblank
 
 .PHONY: all lint test clean area quartus quartus-check
+# GCC writes temporaries to $TMPDIR, which defaults to /tmp — a 16 GB tmpfs
+# here. Parallel Verilator builds of fx68k filled it and every harness failed
+# with "Disk quota exceeded", which reads like a permissions or code fault.
+export TMPDIR := $(CURDIR)/build/tmp
 all: lint test
 
 # --------------------------------------------------------------- quartus 17
@@ -98,15 +107,18 @@ lint:
 # with /obj_*/ rather than a per-name list — a narrower pattern stops covering
 # new harnesses the moment one is named differently.
 test:
+	@mkdir -p build/tmp
 	@fail=0; \
 	for h in $(HARNESSES); do \
-	  name=$${h%%:*}; rest=$${h#*:}; top=$${rest%%:*}; src=$${rest#*:}; \
+	  name=$${h%%:*}; rest=$${h#*:}; top=$${rest%%:*}; rest2=$${rest#*:}; \
+	  src=$${rest2%%:*}; extra=""; \
+	  case "$$rest2" in *:FX68K) extra="$(FX68K_SIM)";; esac; \
 	  $(VERILATOR) $(VBUILD) $(VFLAGS) --top-module $$top \
-	    --Mdir obj_$$name -o $$name $(RTL) $(SIM_SV) $$src >/dev/null 2>&1 || { \
+	    --Mdir build/obj_$$name -o $$name $(RTL) $(SIM_SV) $$extra $$src >/dev/null 2>&1 || { \
 	      echo "BUILD FAILED: $$name"; \
 	      $(VERILATOR) $(VBUILD) $(VFLAGS) --top-module $$top \
-	        --Mdir obj_$$name -o $$name $(RTL) $(SIM_SV) $$src; fail=1; continue; }; \
-	  ./obj_$$name/$$name || fail=1; \
+	        --Mdir build/obj_$$name -o $$name $(RTL) $(SIM_SV) $$extra $$src; fail=1; continue; }; \
+	  ./build/obj_$$name/$$name || fail=1; \
 	done; \
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; fi
 
@@ -140,11 +152,11 @@ dump:
 
 frame: regions dump
 	@$(VERILATOR) $(VBUILD) $(VFLAGS) --top-module kaneko_frame_top \
-	  --Mdir obj_frame -o frame $(RTL) $(SIM_SV) sim/video/tb_kaneko_frame.cpp \
+	  --Mdir build/obj_frame -o frame $(RTL) $(SIM_SV) sim/video/tb_kaneko_frame.cpp \
 	  >/dev/null 2>&1 || { echo "BUILD FAILED"; \
 	  $(VERILATOR) $(VBUILD) $(VFLAGS) --top-module kaneko_frame_top \
-	  --Mdir obj_frame -o frame $(RTL) $(SIM_SV) sim/video/tb_kaneko_frame.cpp; exit 1; }
-	@./obj_frame/frame $(DUMP_DIR) $(ROM_DIR) $(SET)
+	  --Mdir build/obj_frame -o frame $(RTL) $(SIM_SV) sim/video/tb_kaneko_frame.cpp; exit 1; }
+	@./build/obj_frame/frame $(DUMP_DIR) $(ROM_DIR) $(SET)
 
 # ------------------------------------------------------------ multi-game gate
 # Hard rule 9: a change to shared video code must be checked against every
@@ -165,7 +177,7 @@ $(ROM_ALIAS)/blazeonj.zip:
 .PHONY: gate
 gate: $(ROM_ALIAS)/blazeonj.zip
 	@$(VERILATOR) $(VBUILD) $(VFLAGS) --top-module kaneko_frame_top \
-	  --Mdir obj_frame -o frame $(RTL) $(SIM_SV) sim/video/tb_kaneko_frame.cpp \
+	  --Mdir build/obj_frame -o frame $(RTL) $(SIM_SV) sim/video/tb_kaneko_frame.cpp \
 	  >/dev/null 2>&1 || { echo "BUILD FAILED"; exit 1; }
 	@printf '%-10s %8s %8s %9s   %s\n' GAME FRAME DIFF MATCH NOTE
 	@for gf in $(GATE_GAMES); do \
@@ -181,7 +193,7 @@ gate: $(ROM_ALIAS)/blazeonj.zip
 	      -nothrottle -seconds_to_run 30 >/dev/null 2>&1 ) || true; \
 	  if [ ! -f $$d/frame.raw ]; then \
 	    printf '%-10s %8s %8s %9s   %s\n' $$g $$f - - "DUMP FAILED"; continue; fi; \
-	  out=$$(./obj_frame/frame $$d $(ROM_DIR) $$g 2>&1); \
+	  out=$$(./build/obj_frame/frame $$d $(ROM_DIR) $$g 2>&1); \
 	  diff=$$(echo "$$out" | grep -oE 'diff=[0-9]+' | cut -d= -f2); \
 	  match=$$(echo "$$out" | grep -oE 'match=[0-9.]+%' | cut -d= -f2); \
 	  printf '%-10s %8s %8s %9s\n' $$g $$f "$$diff" "$$match"; \
@@ -200,5 +212,7 @@ mra:
 	@# MiSTer arcade menu displays. Find it rather than assuming the set name.
 	@f=$$(ls -t mra/*.mra | head -1); tools/verify_mra.py "$$f" $(ROMPATH) $(ROM_DIR)/$(SET)_stream.bin
 
+# Hard rule 10: one directory holds everything generated, so a clean is
+# complete and git status stays readable.
 clean:
-	rm -rf obj_* yosys.log abc.history
+	rm -rf build obj_* output_files db incremental_db yosys.log abc.history

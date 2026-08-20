@@ -14,6 +14,9 @@
 /sys/
 
 # ------------------------------------------------------------------ builds
+# Hard rule 10: everything generated lives under build/. The entries below the
+# first are for artefacts Quartus and Verilator place elsewhere when a setting
+# is missed — kept so a stray one cannot be committed.
 # Hard rule 2. Anchored with a leading slash where the top-level directory is
 # meant, so that /build/ is not silently satisfied by a nested /quartus/build/.
 /build/
