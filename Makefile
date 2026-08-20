@@ -186,5 +186,16 @@ gate: $(ROM_ALIAS)/blazeonj.zip
 	  printf '%-10s %8s %8s %9s\n' $$g $$f "$$diff" "$$match"; \
 	done
 
+# ------------------------------------------------------------------- MRA
+# D6: the MRA owns the SDRAM layout and the loader maps it as the identity, so
+# the MRA and SDRAM_MAP are two descriptions of one thing. `mra` generates both
+# from the same table and then CHECKS they agree — a region misplaced by the MRA
+# loads without error and shows up much later as a game booting to garbage.
+.PHONY: mra
+mra:
+	@mkdir -p mra $(ROM_DIR)
+	@tools/build_rom_regions.py $(SET) $(ROMPATH) $(ROM_DIR) --stream --mra
+	@tools/verify_mra.py mra/$(SET).mra $(ROMPATH) $(ROM_DIR)/$(SET)_stream.bin
+
 clean:
 	rm -rf obj_* yosys.log abc.history

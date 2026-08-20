@@ -1728,3 +1728,68 @@ initial SSP = 0x0010f7fc     initial PC = 0x00000914
 entry point inside ROM. A wrong interleave gives garbage in both. This is the
 first evidence that the program ROM is assembled correctly, and it came for
 free from looking at the first eight bytes.
+
+---
+
+## 2026-08-20 — first synthesised core: builds, fits and TIMES
+
+`quartus_sh --flow compile` under Quartus 17.0, full flow:
+
+```
+Analysis & Synthesis  successful, 0 errors
+Fitter                successful   ALMs 7,578 / 41,910 (18%)
+                                   block RAM 405,249 / 5,662,720 bits (7%)
+                                   PLLs 3 / 6
+Assembler             successful   Kaneko16.rbf, 2.34 MB
+TimeQuest             successful   ZERO negative slack, 18 setup / 15 hold clocks
+```
+
+**The timing result is only meaningful because the core PLL was constrained.**
+`emu|pll|pll_inst|altera_pll_i|...` appears in both the setup and hold
+summaries, so `sys_top.sdc`'s clock groups matched and the SDC guard did not
+fire. That is the check the guard exists for: a core whose PLL hierarchy does
+not match gets timed against the HDMI and audio PLLs, reports SUCCESS, and
+emits an .rbf that fails on hardware. Model 2 paid -36.5 ns for it once.
+
+Worst setup slack on a core clock is **+0.251 ns** — positive but not
+comfortable, and worth watching as the CPU and the rest of the video path land.
+
+### What this build is
+
+No 68000. It loads the MRA stream into SDRAM and renders a wall of tiles
+straight from the tile ROM, so what appears is real Explosive Breaker artwork
+fetched through the pipeline the finished core will use. The modes are chosen so
+a wrong picture localises itself: mode 3 is a pattern touching no memory at all,
+so a blank screen there means the video path while a picture there and nothing
+elsewhere means the memory path.
+
+Deliberate simplifications, each recorded rather than assumed:
+
+- **One 48 MHz clock for SDRAM and core**, so there is no clock-domain crossing.
+  A CDC has its own failure modes and adding one before memory has ever worked
+  on hardware means debugging two unproven things at once.
+- **NP=5 rather than 1.** The controller sizes arbiter state from NP and does
+  not elaborate at 1 (`index 2 cannot fall outside the declared range [0:0]`),
+  and five is the configuration its testbench covers — so the build runs the
+  arrangement that is actually verified.
+- **No rotation.** explbrkr is ROT90, but D3's rotation stage is deliberately
+  left out so the picture is judged in native orientation, the same orientation
+  the frame gate compares.
+
+### The MRA is generated and CHECKED, not written
+
+`make mra` emits the MRA and the stream image from one table and then expands
+the MRA the way the HPS does, comparing:
+
+```
+MRA expands to  0x05c0000 bytes  sha1=76f3027bc3de64ab
+stream image is 0x05c0000 bytes  sha1=76f3027bc3de64ab
+MATCH
+```
+
+This closes D6's loop. It also caught a real bug in the generator: parts were
+emitted in *entry* order, but `ROM_RELOAD` places copies at specific offsets
+that interleave with other files — explbrkr's sprite region is u37, u38, u37,
+u38, u36 *by address*, not u37, u37, u38, u38, u36. That would have loaded a
+region of exactly the right size with its halves transposed, and nothing at
+load time would have complained.

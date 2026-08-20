@@ -229,6 +229,86 @@ def build_stream(setname, outdir):
         print(f"      {base:#09x} {region:9s} {size:#09x}  {note}")
 
 
+def build_mra(setname, rompath, outdir):
+    """Emit the MRA, driven from the same SETS/SDRAM_MAP tables.
+
+    D6: the MRA owns the layout and the loader maps it as the identity, so the
+    MRA and SDRAM_MAP must agree. Generating one from the other is the only way
+    to keep that true — a hand-written MRA is a second description that drifts.
+    """
+    import xml.etree.ElementTree as ET
+
+    zname = ZIPNAME.get(setname, setname)
+    crcs = {}
+    with zipfile.ZipFile(os.path.join(rompath, zname + ".zip")) as z:
+        for info in z.infolist():
+            crcs[info.filename] = f"{info.CRC:08x}"
+
+    root = ET.Element("misterromdescription")
+    ET.SubElement(root, "name").text = setname
+    ET.SubElement(root, "setname").text = setname
+    ET.SubElement(root, "rbf").text = "Kaneko16"
+
+    rom = ET.SubElement(root, "rom", index="0", zip=f"{zname}.zip", md5="none")
+    cursor = 0
+    for region, base, size in SDRAM_MAP:
+        entries = SETS[setname].get(region)
+        if base != cursor:
+            ET.SubElement(rom, "part", repeat=str(base - cursor)).text = "00"
+            cursor = base
+        if not entries:
+            ET.SubElement(rom, "part", repeat=str(size)).text = "00"
+            cursor += size
+            continue
+
+        # Emit parts in ADDRESS order, not entry order. ROM_RELOAD places a
+        # copy at a specific offset, and those offsets interleave with other
+        # files: explbrkr's sprite region is u37, u38, u37, u38, u36 by address,
+        # not u37, u37, u38, u38, u36. Emitting per entry produced exactly that
+        # wrong order, which would have loaded a region of the right size with
+        # the halves transposed.
+        placements = []          # (offset, entry, is_interleave_pair)
+        i = 0
+        while i < len(entries):
+            e = entries[i]
+            mode = e[4] if len(e) > 4 else "flat"
+            if mode == "16le":
+                placements.append((e[1], entries[i:i + 2], True))
+                i += 2
+            else:
+                for dst in [e[1]] + e[3]:
+                    placements.append((dst, e, False))
+                i += 1
+        placements.sort(key=lambda p: p[0])
+
+        written = 0
+        for off, ent, is_pair in placements:
+            if off > written:
+                ET.SubElement(rom, "part", repeat=str(off - written)).text = "00"
+                written = off
+            if is_pair:
+                il = ET.SubElement(rom, "interleave", output="16")
+                for pe in sorted(ent, key=lambda x: x[5]):
+                    ET.SubElement(il, "part", name=pe[0],
+                                  crc=crcs.get(pe[0], "0"),
+                                  map="01" if pe[5] == 0 else "10")
+                written += ent[0][2] * 2
+            else:
+                ET.SubElement(rom, "part", name=ent[0], crc=crcs.get(ent[0], "0"))
+                written += ent[2]
+
+        if written < size:
+            ET.SubElement(rom, "part", repeat=str(size - written)).text = "00"
+        cursor = base + size
+
+    ET.indent(root, space="    ")
+    out = os.path.join(outdir, f"{setname}.mra")
+    ET.ElementTree(root).write(out, encoding="unicode", xml_declaration=False)
+    with open(out, "a") as f:
+        f.write("\n")
+    print(f"  {os.path.basename(out):28s} {cursor:#09x} bytes described")
+
+
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if len(args) != 3:
@@ -236,3 +316,5 @@ if __name__ == "__main__":
     build(args[0], args[1], args[2])
     if "--stream" in sys.argv:
         build_stream(args[0], args[2])
+    if "--mra" in sys.argv:
+        build_mra(args[0], args[1], "mra")

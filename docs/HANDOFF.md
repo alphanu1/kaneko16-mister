@@ -3,7 +3,10 @@
 Read `CLAUDE.md` first, then this. `docs/findings.md` is the measured record;
 `docs/00-decisions.md` is what was decided and what would reverse it.
 
-**Status: M0 in progress. M1 not started.** The two hardest *novel* pieces are
+**Status: M0 in progress. A bring-up core builds, fits and times on Quartus
+17.0 — 18% ALMs, zero negative slack, .rbf emitted — but it has no CPU. It
+loads the ROM and renders tiles straight from SDRAM, to prove the memory and
+video paths on hardware.** The two hardest *novel* pieces are
 under way; the bulk of first bring-up is conventional integration that has not
 begun.
 
