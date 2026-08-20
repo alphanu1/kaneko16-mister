@@ -1644,3 +1644,47 @@ Clean at all three geometries:
 **Worth feeding back to the Model 2 project**, where the same two failures are
 live in its own suite. The fix is to the testbench's expectation, not to the
 controller.
+
+---
+
+## 2026-08-20 — ROM loader ported from Model 2
+
+`rtl/io/kaneko_rom_loader.sv`, with the TGP microcode path removed (a second
+download index feeding an on-chip 32-bit program RAM; no equivalent here).
+
+**The design principle is the reason to port rather than write.** From its own
+header: *"STREAM LAYOUT IS THE SDRAM LAYOUT"*. The MRA pads every region and
+emits them in the order the SDRAM map expects, so the mapping is the identity —
+stream byte N is SDRAM byte N — and there is deliberately no per-region base
+arithmetic in the loader.
+
+That matches exactly what was already recorded here about
+`tools/build_rom_regions.py` being the MRA's twin. The header states the cost of
+the alternative: a loader carrying region offsets computed from each other "does
+not fail at load time, it fails much later as a game that boots to garbage, and
+the evidence points at the CPU rather than at the loader".
+
+Two further lessons come with the file and are kept:
+
+- **`ioctl_wait` must survive the HOST's reaction time, not the testbench's.**
+  It asks the host to stop; everything already in flight still arrives. At
+  depth 8 / margin 6 the buffer tolerated 15 cycles and silently dropped words
+  at 16 — and the test missed it because it swept 0..6, "the margin the
+  parameter was set to: it confirmed the setting instead of testing it". Now
+  512 / 256, with the sweep an order of magnitude past anything plausible.
+- **`SDR_AW` must match the controller's geometry.** A loader narrower than the
+  controller silently wraps the stream over its own start — "a black screen
+  with no error", which is what a 43.62 MB set did against a 24-bit address.
+
+### The inherited test is narrow, and that is not yet fixed
+
+`kaneko_romload` passes, but it is a specific boot-readback scenario carried
+over from Model 2's context: 6 checks. It does exercise the real path — ioctl
+through the loader through the SDRAM controller and back — which is worth
+having as a smoke test.
+
+It does **not** verify stream integrity: that a full ROM image fed in arrives
+byte-for-byte at the right SDRAM addresses. Given that the whole design rests on
+the identity mapping, that is the property most worth testing, and the next
+piece of work here is a test that streams the assembled `explbrkr` regions
+through and compares. Recorded rather than left implied.

@@ -132,7 +132,13 @@ in the same process. Rewriting would have meant rediscovering both.
 GPL-3.0). Its provenance note is retained in place and must not be dropped.
 
 Its verification came with it: `sim/mem/sdram_model.sv` (a device model),
-`kaneko_sdram_harness.sv`, and the two testbenches.
+`kaneko_sdram_harness.sv`, and its testbench.
+
+### `rtl/io/kaneko_rom_loader.sv`
+Ported 2026-08-20 from the same project (`rtl/io/m2_rom_loader.sv`), with the
+TGP microcode path removed — that is a second download index feeding an on-chip
+32-bit program RAM, which this hardware has no equivalent of. Its harness and
+testbench came with it.
 
 ## Originally written here
 
