@@ -39,7 +39,11 @@ measurement is not yet trustworthy (see below).
 
 ---
 
-## What is left before Magical Crystals boots
+## What is left before Explosive Breaker boots
+
+(Bring-up title changed from Magical Crystals 2026-08-20 — see
+`docs/00-decisions.md` D4. Its video renders pixel-exact, so a bring-up failure
+points at the CPU or memory rather than the renderer.)
 
 Ordered roughly by dependency. Items marked **novel** have no drop-in source.
 

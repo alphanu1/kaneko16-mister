@@ -63,3 +63,47 @@ Two consequences to carry into the video work:
 
 Reverses if: MiSTer framework conventions make a vertical default actively broken on
 common setups — in which case the toggle stays and only the default moves.
+
+---
+
+## D4 — Bring-up title is Explosive Breaker, not Magical Crystals
+
+Changed 2026-08-20. The design study picked Magical Crystals for its simple
+sound path. The frame gate has since made a stronger argument for a different
+title.
+
+**Bring up on a game whose video path is provably exact**, so that any failure
+during bring-up is attributable to the CPU, bus or memory rather than to the
+renderer. As measured:
+
+| | video gate | sound path | VIEW2 chips | sprites |
+|---|---|---|---|---|
+| `explbrkr` | **exact**, several frames, content-rich | 2x YM2149 + OKI, **no sound CPU** | 2 | 1024 |
+| `blazeonj` | exact, but the frame is 91% black | **Z80** + YM2151 + sound latch | 1 | 512 |
+| `mgcrystl` | 298 px wrong (open line-scroll anomaly) | 2x YM2149 + OKI, no sound CPU | 2 | 1024 |
+
+Explosive Breaker is chosen over Blaze On on the **sound path**, which is the
+deciding factor rather than the video. Its sound chips sit directly on the
+68000 bus as register files, so there is no handshake for the main CPU to
+satisfy and sound can be stubbed entirely without risking the boot. Blaze On
+drives a Z80 through a sound latch with an NMI on data-pending; a game that
+waits on a sound-CPU response would stall a core that has not implemented one,
+and diagnosing that during first bring-up is exactly the confusion this
+decision exists to avoid.
+
+Blaze On's gate result is also weaker: its captured frame is 91% black with 10
+distinct colours, against Explosive Breaker's content-rich frames exact at
+400, 600, 800, 900, 1000 and 1200.
+
+ROT90 costs nothing here. The frame gate compares MAME's **native** buffer, so
+rotation is purely an output-stage concern for the physical display (D3) and
+does not complicate verification.
+
+Magical Crystals is not abandoned — it is the one title exercising line scroll,
+and its 298-pixel anomaly is the open question in the tilemap path. It gets
+revisited once the rest of the system works, when a wrong picture can be
+attributed with confidence.
+
+Reverses if: Explosive Breaker turns out to need protection or I/O behaviour
+that Blaze On does not, or if the Z80 path lands early enough to make Blaze
+On's simpler video (one VIEW2, 512 sprites) the cheaper target.

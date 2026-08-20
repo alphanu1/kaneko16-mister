@@ -1443,7 +1443,7 @@ pipeline is not only ever exercised back to back.
   result is masked instead. Gating it would save nothing and would put the
   control bit in the address path.
 
-Area: 355 cells for the pipeline including the address blocks it instantiates.
+Area: 301 cells for the pipeline including the address blocks it instantiates.
 
 ### Two harness bugs worth recording, because both looked like RTL bugs
 

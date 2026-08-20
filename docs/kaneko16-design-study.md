@@ -85,9 +85,16 @@ Corrected 2026-08-20 against the vendored driver, see `docs/findings.md`:
   the board, `blazeon_map` and the VU-002 setup, and differs in year, rotation,
   main clock, sound complement and every ROM label.
 
-**Bring-up title: Magical Crystals (`mgcrystl`).** Simplest sound path (no Z80),
-single VU-002, no MCU. Clock-verified PCB timings in source. **Not yet on disk** —
-see `docs/findings.md`.
+**Bring-up title: Explosive Breaker (`explbrkr`)** — changed 2026-08-20, see
+`docs/00-decisions.md` D4. The study originally chose Magical Crystals for its
+sound path. Explosive Breaker shares that sound path (2x YM2149 + OKI, no sound
+CPU) *and* renders pixel-exact against MAME across six sampled frames, whereas
+Magical Crystals has an open 298-pixel line-scroll anomaly. Bringing up on a
+provably exact renderer means a bring-up failure is attributable to the CPU or
+memory rather than the video.
+
+Magical Crystals remains the only title exercising line scroll and is revisited
+once the rest of the system works.
 
 ### Tier 2 — CALC3 MCU (NEC uPD78322, 16K internal ROM, **NOT DUMPED**)
 
