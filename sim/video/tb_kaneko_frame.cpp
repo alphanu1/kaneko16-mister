@@ -91,6 +91,9 @@ struct Pix { bool solid; uint8_t c; uint8_t colour; uint8_t cat; };
 
 int g_xadj = 0, g_yadj = 0;
 bool g_ls_by_screen = false;   // LSMODE=screen -> index line scroll by scanline
+int  g_lsadj = 0;              // LSADJ=n -> shift the line-scroll index by n
+bool g_ls_off = false;         // LSOFF=1 -> ignore line scroll entirely
+bool g_ls_parity = false;      // LSPAR=1 -> odd rows reuse the even row's value
 
 Pix layer_pixel(const Layer& L, int sx, int sy)
 {
@@ -110,11 +113,21 @@ Pix layer_pixel(const Layer& L, int sx, int sy)
     dut->eval();
 
     // map_y indexes the line-scroll RAM. Not the scanline — see findings.
-    const uint16_t ls = g_ls_by_screen ? L.scroll[sy & 0x1ff]
-                                       : L.scroll[dut->t_map_y & 0x1ff];
+    // LSADJ shifts the line-scroll index. mgcrystl's chip1 layer0 alternates
+    // 0x15c0/0x1600 per line, which is exactly 1 pixel after >>6, so a
+    // one-line phase error shows as a one-pixel shift on alternate rows —
+    // which is what the misses look like.
+    int ls_idx = (g_ls_by_screen ? sy : (int)dut->t_map_y) + g_lsadj;
+    // LSPAR=1 tests the rule the miss pattern implies: that odd rows take the
+    // preceding row's scroll value, i.e. the alternation is applied at half
+    // the rate we apply it.
+    if (g_ls_parity && (ls_idx & 1)) ls_idx -= 1;
+    const uint16_t ls = L.scroll[ls_idx & 0x1ff];
 
     dut->t_linescroll = ls;
-    dut->t_linescroll_en = L.linescroll_en;
+    // LSOFF=1 forces line scroll off regardless of the layer control bit, to
+    // test whether MAME is applying it here at all.
+    dut->t_linescroll_en = g_ls_off ? 0 : L.linescroll_en;
     dut->eval();
 
     const uint16_t attr = L.vram[dut->t_vram_attr_addr & 0x7ff];
@@ -149,6 +162,9 @@ int main(int argc, char** argv)
 
     dut = new Vkaneko_frame_top;
     g_ls_by_screen = getenv("LSMODE") && !strcmp(getenv("LSMODE"), "screen");
+    if (getenv("LSADJ")) g_lsadj = atoi(getenv("LSADJ"));
+    g_ls_off = getenv("LSOFF") != nullptr;
+    g_ls_parity = getenv("LSPAR") != nullptr;
 
     // ------------------------------------------------------------ inputs
     int W = 256, H = 224;
@@ -378,12 +394,95 @@ int main(int argc, char** argv)
         g_xadj = 0; g_yadj = 0;
     }
 
+    // Sprite-only offset sweep. The tilemap sweep earlier refuted a global
+    // shift; this asks the same question of the sprite layer alone, which the
+    // census suggests is displaced rather than wrong.
+    if (getenv("SPRSWEEP")) {
+        printf("  sprite offset sweep (rows = yadj, cols = xadj):\n        ");
+        for (int xa = -2; xa <= 2; xa++) printf("%8d", xa);
+        printf("\n");
+        for (int ya = -2; ya <= 2; ya++) {
+            printf("  %4d", ya);
+            for (int xa = -2; xa <= 2; xa++) {
+                long d = 0;
+                for (int row = 0; row < H; row++) {
+                    const int sy = VIS_MIN_Y + row;
+                    for (int col = 0; col < W; col++) {
+                        Pix p[4];
+                        for (int l = 0; l < 4; l++) p[l] = layer_pixel(layers[l], col, sy);
+                        uint32_t pen = 0; uint8_t prim = 0;
+                        for (int cat = 0; cat < 8; cat++)
+                            for (int l = 0; l < 4; l++)
+                                if (p[l].solid && p[l].cat == cat) {
+                                    pen = TILE_COLBASE + 16u * p[l].colour + p[l].c;
+                                    prim = (layers[l].chip1 && !G->view2_2_pri) ? 0 : (uint8_t)cat;
+                                }
+                        const int ssy = sy + ya, ssx = col + xa;
+                        if (ssy >= 0 && ssy < 512 && ssx >= 0 && ssx < 512) {
+                            const uint16_t sv = sbmp[(size_t)ssy * 512 + ssx];
+                            const uint16_t spix = sv & 0x3fff;
+                            if (spix && spr_pri_map[(sv >> 14) & 3] > prim) pen = SPR_COLBASE + spix;
+                        }
+                        const uint32_t rgb = xgrb555(rd16(pal, pen & 0x7ff));
+                        const size_t o = (size_t)row * W + col;
+                        const uint32_t want = (uint32_t)(ref[o*4+0] | (ref[o*4+1]<<8) | (ref[o*4+2]<<16));
+                        if ((rgb & 0xffffff) != (want & 0xffffff)) d++;
+                    }
+                }
+                printf("%8ld", d);
+            }
+            printf("\n");
+        }
+    }
+
+    // Per-row best X offset. Instead of arguing about what MAME did, measure
+    // it: for each row independently, find the sampling offset that minimises
+    // that row's mismatches. The pattern across rows names the rule.
+    if (getenv("ROWSWEEP")) {
+        printf("  per-row best xadj (row: best[misses]):\n");
+        for (int row = 0; row < H; row++) {
+            long best_d = -1; int best_x = 0; long zero_d = 0;
+            for (int xa = -2; xa <= 2; xa++) {
+                g_xadj = xa;
+                long d = 0;
+                const int sy = VIS_MIN_Y + row;
+                for (int col = 0; col < W; col++) {
+                    Pix p[4];
+                    for (int l = 0; l < 4; l++) p[l] = layer_pixel(layers[l], col, sy);
+                    uint32_t pen = 0; uint8_t prim = 0;
+                    for (int cat = 0; cat < 8; cat++)
+                        for (int l = 0; l < 4; l++)
+                            if (p[l].solid && p[l].cat == cat) {
+                                pen = TILE_COLBASE + 16u * p[l].colour + p[l].c;
+                                prim = (layers[l].chip1 && !G->view2_2_pri) ? 0 : (uint8_t)cat;
+                            }
+                    const uint16_t sv = sbmp[(size_t)sy * 512 + col];
+                    const uint16_t spix = sv & 0x3fff;
+                    if (spix && spr_pri_map[(sv >> 14) & 3] > prim) pen = SPR_COLBASE + spix;
+                    const uint32_t rgb = xgrb555(rd16(pal, pen & 0x7ff));
+                    const size_t o = (size_t)row * W + col;
+                    const uint32_t want = (uint32_t)(ref[o*4+0] | (ref[o*4+1]<<8) | (ref[o*4+2]<<16));
+                    if ((rgb & 0xffffff) != (want & 0xffffff)) d++;
+                }
+                if (xa == 0) zero_d = d;
+                if (best_d < 0 || d < best_d) { best_d = d; best_x = xa; }
+            }
+            g_xadj = 0;
+            if (zero_d > 0)
+                printf("    row %3d (map_y %3d, %s): best xadj=%+d [%ld], at 0 [%ld]\n",
+                       row, VIS_MIN_Y + row, ((VIS_MIN_Y + row) & 1) ? "odd " : "even",
+                       best_x, best_d, zero_d);
+        }
+    }
+
     std::vector<uint32_t> out((size_t)W * H);
     long diff = 0;
     long first_bad = -1;
     long bad_sprite = 0, bad_tile = 0, bad_bg = 0;
     long ours_spr = 0, mame_spr = 0, both_spr = 0, only_ours = 0, only_mame = 0;
+    std::vector<uint8_t> only_ours_map((size_t)W*H, 0), only_mame_map((size_t)W*H, 0);
     const bool no_sprites = getenv("NOSPR") != nullptr;
+    const bool spr_top = getenv("SPRTOP") != nullptr;
     std::vector<long> bad_row((size_t)H, 0);
 
     for (int row = 0; row < H; row++) {
@@ -408,7 +507,10 @@ int main(int argc, char** argv)
             const uint16_t sv = sbmp[so];
             const uint16_t spix = sv & 0x3fff;
             const uint16_t spri = (sv >> 14) & 3;
-            const bool we_drew_sprite = spix && spr_pri_map[spri] > prim;
+            // SPRTOP=1 ignores the priority comparison entirely, to separate
+            // "we have no sprite pixel here" from "we have one but suppressed
+            // it against the priority bitmap".
+            const bool we_drew_sprite = spix && (spr_top || spr_pri_map[spri] > prim);
             const uint32_t tile_only_pen = pen;
             if (we_drew_sprite && !no_sprites)
                 pen = SPR_COLBASE + spix;
@@ -425,8 +527,8 @@ int main(int argc, char** argv)
                 if (we_drew_sprite) ours_spr++;
                 if (mame_has_sprite) mame_spr++;
                 if (we_drew_sprite && mame_has_sprite) both_spr++;
-                if (we_drew_sprite && !mame_has_sprite) only_ours++;
-                if (!we_drew_sprite && mame_has_sprite) only_mame++;
+                if (we_drew_sprite && !mame_has_sprite) { only_ours++; only_ours_map[o2]=1; }
+                if (!we_drew_sprite && mame_has_sprite) { only_mame++; only_mame_map[o2]=1; }
             }
 
             const uint32_t rgb = xgrb555(rd16(pal, pen & 0x7ff));
@@ -455,6 +557,49 @@ int main(int argc, char** argv)
            total, diff, 100.0 * (total - diff) / total);
     printf("  sprite census: ours=%ld mame=%ld overlap=%ld  only-ours=%ld only-mame=%ld\n",
            ours_spr, mame_spr, both_spr, only_ours, only_mame);
+    // Where are the disagreements? A tight cluster is one or two sprites; a
+    // scatter is systematic.
+    {
+        int ox0=9999,oy0=9999,ox1=-1,oy1=-1, mx0=9999,my0=9999,mx1=-1,my1=-1;
+        for (int row = 0; row < H; row++)
+            for (int col = 0; col < W; col++) {
+                if (only_ours_map[(size_t)row*W+col]) {
+                    if (col<ox0) ox0=col; if (col>ox1) ox1=col;
+                    if (row<oy0) oy0=row; if (row>oy1) oy1=row;
+                }
+                if (only_mame_map[(size_t)row*W+col]) {
+                    if (col<mx0) mx0=col; if (col>mx1) mx1=col;
+                    if (row<my0) my0=row; if (row>my1) my1=row;
+                }
+            }
+        if (ox1>=0) printf("    only-ours bbox: x %d..%d  y %d..%d  (%dx%d)\n",
+                           ox0,ox1,oy0,oy1,ox1-ox0+1,oy1-oy0+1);
+        if (mx1>=0) printf("    only-mame bbox: x %d..%d  y %d..%d  (%dx%d)\n",
+                           mx0,mx1,my0,my1,mx1-mx0+1,my1-my0+1);
+
+        // Work back from a pixel MAME drew and we did not: which palette entry
+        // did it use, and does that entry lie in the sprite range (below the
+        // tile colour base)? That names the sprite colour and pen.
+        int shown = 0;
+        for (int row = 0; row < H && shown < 8; row++)
+            for (int col = 0; col < W && shown < 8; col++) {
+                if (!only_mame_map[(size_t)row*W+col]) continue;
+                const size_t o = (size_t)row*W+col;
+                const uint32_t want = (uint32_t)(ref[o*4+0] | (ref[o*4+1]<<8) | (ref[o*4+2]<<16));
+                const int sy = VIS_MIN_Y + row;
+                const uint16_t sv = sbmp[(size_t)sy*512 + col];
+                printf("    only-mame px (%3d,%3d) our sbmp=%04x  want=%06x  pal:",
+                       col, row, sv, want & 0xffffff);
+                int found = 0;
+                for (int e = 0; e < 2048 && found < 5; e++)
+                    if ((xgrb555(rd16(pal, e)) & 0xffffff) == (want & 0xffffff)) {
+                        printf(" %03x%s", e, e < (int)TILE_COLBASE ? "(spr)" : "(tile)");
+                        found++;
+                    }
+                printf("\n");
+                shown++;
+            }
+    }
     if (diff) {
         printf("  attribution: sprite-covered=%ld tile=%ld background=%ld\n",
                bad_sprite, bad_tile, bad_bg);

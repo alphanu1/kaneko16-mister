@@ -1086,3 +1086,79 @@ explbrkr f900   diff=986   98.28%   (census: ours 1122,  mame 1118,  overlap 717
 `explbrkr`'s remaining error is now symmetric — 405 pixels where only we place
 a sprite, 401 where only MAME does — which reads like a small positional
 offset on a few sprites rather than wrong data. That is the next thread.
+
+---
+
+## 2026-08-20 — OPEN: odd rows take the even row's line scroll, and I cannot explain why
+
+**Instrument:** a per-row X-offset sweep in the frame harness (`ROWSWEEP=1`),
+which finds, for each row independently, the sampling offset that minimises
+that row's mismatches. Measuring what MAME did beats arguing about it.
+
+```
+row  39 (map_y  55, odd ): best xadj=-1 [0 misses], at 0 [8]
+row  41 (map_y  57, odd ): best xadj=-1 [1],        at 0 [16]
+row  42 (map_y  58, even): best xadj=+0 [1],        at 0 [1]
+row  43 (map_y  59, odd ): best xadj=-1 [1],        at 0 [19]
+row  44 (map_y  60, even): best xadj=+0 [2],        at 0 [2]
+row  47 (map_y  63, odd ): best xadj=-1 [3],        at 0 [30]
+```
+
+**Even rows are already right. Odd rows are consistently one pixel too far
+right, and correcting them takes their error to nearly zero.**
+
+`mgcrystl`'s chip1 layer0 line-scroll RAM holds two values alternating by
+index: even indices `0x15c0`, odd `0x1600`. The difference is `0x40`, which is
+exactly one pixel in 10.6 fixed point. So the observed error is precisely "we
+used the odd index's value where MAME used the even one".
+
+### What has been ruled out
+
+| hypothesis | test | result |
+|---|---|---|
+| global constant offset | ±2 sweep, both axes | (0,0) is the minimum — refuted |
+| line scroll not applied at all | `LSOFF=1` | 642 -> 2433, much worse — it IS applied |
+| index phase off by one | `LSADJ=-1` | 656, slightly worse — fixes odd rows, breaks even |
+| index off by two | `LSADJ=±2` | 642, identical — alternation has period 2 |
+| priority suppressing sprites | `SPRTOP=1` | byte-identical — not priority |
+
+The empirical rule that fits is **`index = map_y & ~1`** — odd rows reuse the
+preceding even row's value — which takes the frame from 642 to **358**
+(98.88% -> 99.38%).
+
+### Why it has NOT been adopted
+
+I cannot derive that rule from `tilemap.cpp`, and a rule that fits without a
+mechanism is how a wrong model gets baked in. What the source says:
+
+- `set_scroll_rows(0x200)` = 512, `m_height` = 512, so `rowheight = 1` — one
+  scroll entry per tilemap row, no pairing.
+- `draw_common` groups only *consecutive equal* rowscroll values; these
+  alternate, so every group is one row.
+- `effective_rowscroll` = `m_dx - m_rowscroll[i]`, clamped mod width. Hand
+  computed: even rows give xpos 425, odd 424, i.e. map_x 122/123 — exactly what
+  the RTL produces.
+- `xextent` in that call is `visarea.right() + left() + 1` and is only used in
+  the FLIPX branch, which is not taken here.
+
+Every reading of the source says per-row. The measurement says per-row-pair.
+
+It also does not explain everything: `index & ~1` leaves 358 pixels wrong, and
+rows 49-52 have misses that no X offset fixes at all.
+
+**The RTL is unchanged and still follows the source.** Changing it to match an
+unexplained empirical fit would trade a defensible model for a better number.
+
+### Next steps for this question
+
+1. Check whether the rule survives on a different frame or game with a
+   *different* line-scroll pattern. A rule that only fits this alternation is
+   probably a coincidence of it.
+2. Consider that the game may be writing the scroll RAM in a way that makes
+   the alternation an artefact — e.g. longword writes covering two entries.
+   MAME would still read per-row, so this would not explain MAME's output, but
+   it would explain the data's shape.
+3. If it survives, instrument MAME directly rather than inferring from pixels.
+
+**This is now the largest single known error in the tilemap path** and the top
+open question for closing M0 on `mgcrystl`.
