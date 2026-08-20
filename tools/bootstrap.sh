@@ -264,6 +264,19 @@ mv "$LOCK.tmp" "$LOCK"
 
 # --------------------------------------------------------------------- report
 
+# ------------------------------------------------------------------- sys/
+#
+# A MiSTer core builds against the framework's sys/ directory. Most cores commit
+# a copy; this one does not, for the same reason third_party/ is not committed —
+# it is upstream code that bootstrap places, so there is one rule rather than
+# two. It is gitignored.
+if [ -d "$VENDOR/template/sys" ]; then
+    say "== sys/ framework"
+    rm -rf "$ROOT/sys"
+    cp -r "$VENDOR/template/sys" "$ROOT/sys"
+    echo "  copied $(find "$ROOT/sys" -type f | wc -l) files from template"
+fi
+
 cat <<'REPORT'
 
 ================================ LICENCE REPORT ================================

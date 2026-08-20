@@ -7,6 +7,12 @@
 # in here rather than read in place. Same treatment.
 /third_party/
 
+# The MiSTer sys/ framework, placed by tools/bootstrap.sh from the vendored
+# template. Upstream code, so it follows the same rule as third_party/ rather
+# than being committed — most cores commit a copy, but then there are two rules
+# for vendored code instead of one.
+/sys/
+
 # ------------------------------------------------------------------ builds
 # Hard rule 2. Anchored with a leading slash where the top-level directory is
 # meant, so that /build/ is not silently satisfied by a nested /quartus/build/.
