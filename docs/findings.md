@@ -1507,3 +1507,49 @@ Two harness bugs preceded it and both looked like RTL faults: memories modelled
 combinationally again, and a mask port with a single shared address, which
 cannot express read-then-write. The mask now has split read and write
 addresses, which is what an M10K simple-dual-port provides anyway.
+
+---
+
+## 2026-08-20 — SDRAM controller ported, not rewritten
+
+`rtl/mem/kaneko_sdram.sv` and `bw_monitor.sv` are ported from the Model 1 core
+(same author, GPL-3.0-or-later), renamed and otherwise unchanged. Their
+verification came with them.
+
+```
+sdram_model[trc=7]: checks=1944  fails=0
+kaneko_sdram:       checks=74729 fails=0 violations=0 reads=95607 writes=6625
+  aggregate 0.439 words/cyc = 87.8 MB/s at 100 MHz (125.5 MB/s at 143 MHz)
+```
+
+**Why port rather than write.** The controller is generic — a parameterised
+array of ports with no Model-1-specific dependency — and its header records two
+hazards found the hard way and invisible from a datasheet:
+
+- requests must be latched on the request **rising edge**, not sampled as a
+  level qualified by `!pend && !ack`, or a requester that issues its next
+  request in direct response to an ack drops it and the port hangs forever;
+- completion must clear `pend` on the **ack rising edge** and before the
+  new-request latch in the same process, so a chained request landing on that
+  edge wins rather than vanishing.
+
+Rewriting would have meant rediscovering both, and the failure mode of the
+first is "adding an unrelated master broke the CPU".
+
+That file in turn follows meathax's System 32 controller; its provenance note
+is retained and recorded in `THIRD-PARTY.md`.
+
+**Bandwidth headroom.** 87.8 MB/s at 100 MHz measured under streaming traffic
+across five ports. The design study's §6 estimate says the Kaneko video path has
+no bandwidth concern, and this is the first number that bears on it — the tile
+fetch path will want roughly 4 layers x 1 byte/pixel at ~6 MHz pixel rate,
+around 24 MB/s, plus sprite ROM reads during the draw pass.
+
+**Lint waivers.** The ported file trips WIDTHEXPAND, UNUSEDPARAM and
+UNUSEDSIGNAL under our stricter `-Wall`. They are waived at the top of the file,
+listed individually with the reason: the file is kept diffable against its
+origin, the warnings are width-of-an-int and dead-signal notes, and the module
+carries its own passing testbenches. Blanket-waiving was avoided.
+
+Also added `` `timescale 1ns/1ps `` to our own RTL, which previously had none —
+Verilator warns when some modules have one and others do not.

@@ -43,6 +43,7 @@
 // The code latch is 17 bits, which is provably enough: it is loaded with at
 // most 0xffff from RAM and incremented at most 1023 times in a pass.
 
+`timescale 1ns/1ps
 `default_nettype none
 
 module kaneko_vuspr #(

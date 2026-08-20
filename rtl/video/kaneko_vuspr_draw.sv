@@ -26,6 +26,7 @@
 // Pixel format matches MAME's sprite bitmap: {priority[1:0], pen[13:0]}, with
 // pen = colour*16 + c. Pen 0 means nothing here.
 
+`timescale 1ns/1ps
 `default_nettype none
 
 module kaneko_vuspr_draw #(

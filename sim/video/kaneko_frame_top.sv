@@ -7,6 +7,7 @@
 // arbitration and no memory, and nothing in rtl/ should ever instantiate it.
 // The real top level is a later milestone.
 
+`timescale 1ns/1ps
 `default_nettype none
 
 module kaneko_frame_top (

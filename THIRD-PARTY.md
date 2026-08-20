@@ -109,6 +109,26 @@ Reference only, for repository structure, bootstrap and verification patterns.
 It is the same author's work, so reuse is unencumbered — but take it as a
 **copy into this tree with its own header**, never as a cross-repo include.
 
+## Ported from the Model 1 core
+
+### `rtl/mem/kaneko_sdram.sv`, `rtl/mem/bw_monitor.sv`
+Ported 2026-08-20 from `sega-model1-mister` (`rtl/mem/m1_sdram.sv`,
+`bw_monitor.sv`), renamed and otherwise unchanged. Same author, GPL-3.0-or-later,
+so no licence friction — an or-later grant may be used as GPL-3.0-only.
+
+Ported rather than rewritten because the controller is generic (a parameterised
+array of ports, no Model-1-specific dependency) and because its header records
+two hazards found the hard way and invisible from a datasheet: requests must be
+latched on the request *rising edge* rather than sampled as a level, and
+completion must clear `pend` on the ack rising edge before the new-request latch
+in the same process. Rewriting would have meant rediscovering both.
+
+**That file in turn follows meathax's System 32 controller** (`s32`,
+GPL-3.0). Its provenance note is retained in place and must not be dropped.
+
+Its verification came with it: `sim/mem/sdram_model.sv` (a device model),
+`kaneko_sdram_harness.sv`, and the two testbenches.
+
 ## Originally written here
 
 Everything under `rtl/`, `sim/`, `tools/`, `quartus/`, `mra/` and `docs/` except

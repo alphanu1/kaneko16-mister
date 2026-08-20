@@ -37,6 +37,7 @@
 //     tmap[0] and -(dx+2) for tmap[1]; the caller passes the already-adjusted
 //     value here.
 
+`timescale 1ns/1ps
 `default_nettype none
 
 // ---------------------------------------------------------------- vertical

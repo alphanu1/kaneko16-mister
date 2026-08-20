@@ -30,6 +30,7 @@
 // assumed: mgcrystl runs {2,3,5,7} with m_view2_2_pri clear, explbrkr {8,8,8,8}
 // with it set. See hard rule 9.
 
+`timescale 1ns/1ps
 `default_nettype none
 
 module kaneko_mixer (

@@ -31,6 +31,7 @@
 // is there either way) and would add a path from the control bit into the
 // address.
 
+`timescale 1ns/1ps
 `default_nettype none
 
 module kaneko_tmap_fetch (
