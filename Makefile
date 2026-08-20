@@ -140,5 +140,46 @@ frame: regions dump
 	  --Mdir obj_frame -o frame $(RTL) $(SIM_SV) sim/video/tb_kaneko_frame.cpp; exit 1; }
 	@./obj_frame/frame $(DUMP_DIR) $(ROM_DIR) $(SET)
 
+# ------------------------------------------------------------ multi-game gate
+# Hard rule 9: a change to shared video code must be checked against every
+# configured game, not just the one being worked on. Games differ in chip
+# count, sprite list size, priorities, offsets, ROM layout and geometry, and a
+# constant tuned until one game matches will silently break another.
+#
+# GATE_GAMES entries are <set>:<frame>.
+GATE_GAMES ?= mgcrystl:600 explbrkr:900 blazeonj:600 wingforc:600
+
+# MAME looks up a set by name, but blazeon.zip holds the blazeonj set. Alias it
+# here rather than renaming anything in the user's ROM folder.
+ROM_ALIAS := build/roms_alias
+$(ROM_ALIAS)/blazeonj.zip:
+	@mkdir -p $(ROM_ALIAS)
+	@ln -sf $(ROMPATH)/blazeon.zip $(ROM_ALIAS)/blazeonj.zip
+
+.PHONY: gate
+gate: $(ROM_ALIAS)/blazeonj.zip
+	@$(VERILATOR) $(VBUILD) $(VFLAGS) --top-module kaneko_frame_top \
+	  --Mdir obj_frame -o frame $(RTL) $(SIM_SV) sim/video/tb_kaneko_frame.cpp \
+	  >/dev/null 2>&1 || { echo "BUILD FAILED"; exit 1; }
+	@printf '%-10s %8s %8s %9s   %s\n' GAME FRAME DIFF MATCH NOTE
+	@for gf in $(GATE_GAMES); do \
+	  g=$${gf%%:*}; f=$${gf#*:}; d=build/gate_$$g; \
+	  mkdir -p $(ROM_DIR); \
+	  tools/build_rom_regions.py $$g $(ROMPATH) $(ROM_DIR) >/dev/null 2>&1 || \
+	    { printf '%-10s %8s %8s %9s   %s\n' $$g $$f - - "ROM BUILD FAILED"; continue; }; \
+	  rm -rf $$d; mkdir -p $$d; \
+	  ( cd $$d && DUMP_DIR=$(CURDIR)/$$d DUMP_FRAME=$$f DUMP_SET=$$g \
+	    mame -rompath "$(ROMPATH);$(CURDIR)/$(ROM_ALIAS)" $$g \
+	      -autoboot_script $(CURDIR)/tools/mame_dump_frame.lua \
+	      -skip_gameinfo -autoboot_delay 0 -video none -sound none \
+	      -nothrottle -seconds_to_run 30 >/dev/null 2>&1 ) || true; \
+	  if [ ! -f $$d/frame.raw ]; then \
+	    printf '%-10s %8s %8s %9s   %s\n' $$g $$f - - "DUMP FAILED"; continue; fi; \
+	  out=$$(./obj_frame/frame $$d $(ROM_DIR) $$g 2>&1); \
+	  diff=$$(echo "$$out" | grep -oE 'diff=[0-9]+' | cut -d= -f2); \
+	  match=$$(echo "$$out" | grep -oE 'match=[0-9.]+%' | cut -d= -f2); \
+	  printf '%-10s %8s %8s %9s\n' $$g $$f "$$diff" "$$match"; \
+	done
+
 clean:
 	rm -rf obj_* yosys.log abc.history

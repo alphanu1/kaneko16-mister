@@ -34,7 +34,9 @@ M0 frame gate, RTL rendered against a frame MAME actually produced:
 
 ```
 mgcrystl  98.88%   (642 / 57344 pixels differ)
-explbrkr  98.28%   (986 differ — 972 tile, 626 sprite)
+explbrkr  98.28%   (986 differ)
+blazeonj 100.00%   (exact)
+wingforc 100.00%   (exact, 71680 pixels)
 ```
 
 The gate is scanline-exact. Neither passes yet.

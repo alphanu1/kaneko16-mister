@@ -28,7 +28,9 @@ comes from. Nothing yet stores, fetches, mixes or outputs one.
 
 ```
 mgcrystl f600   diff=642   98.88%
-explbrkr f900   diff=986   98.28%   (972 tile, 626 sprite)
+explbrkr f900   diff=986   98.28%
+blazeonj f600   diff=0    100.00%   PASS
+wingforc f600   diff=0    100.00%   PASS
 ```
 
 M0's gate is scanline-exact. Neither passes. The tilemap path is close — under

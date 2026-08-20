@@ -180,10 +180,56 @@ int main(int argc, char** argv)
         }
     }
 
+    // Per-game video configuration, read out of the machine configs. These
+    // are NOT interchangeable: explbrkr takes MACHINE_RESET_OVERRIDE(gtmr),
+    // which sets m_view2_2_pri = 1, so its second VIEW2 writes its category
+    // into the priority bitmap where mgcrystl's writes 0. And its sprite
+    // priorities are {8,8,8,8} — above everything — against mgcrystl's
+    // {2,3,5,7}. Using one game's numbers for the other renders a plausible
+    // wrong picture rather than failing.
+    struct GameCfg {
+        const char* name;
+        int dx, dy, vis_min_y;
+        int spr_pri[4];
+        bool view2_2_pri;
+        uint32_t tile_colbase, spr_colbase;
+        int nchips;              // VIEW2 chips: 2 layers each
+        int nsprites;            // sprite records the driver parses
+        uint16_t spr_xoffs, spr_yoffs;   // set_offsets()
+    };
+    // Every field here differs between games and none may be assumed. See
+    // hard rule 9.
+    static const GameCfg GAMES[] = {
+        { "mgcrystl", 0x5b, -0x8, 16, { 2, 3, 5, 7 }, false, 0x400, 0, 2, 1024, 0,      0 },
+        { "explbrkr", 0x5b, -0x8, 16, { 8, 8, 8, 8 }, true,  0x400, 0, 2, 1024, 0,      0 },
+        // Blaze On board: ONE VIEW2 chip, 512 sprite records, and a large
+        // sprite X offset — set_offsets(0x10000 - 0x680, 0).
+        { "blazeonj", 0x33,  0x8,  0, { 1, 2, 8, 8 }, false, 0x400, 0, 1,  512, 0xf980, 0 },
+        { "wingforc", 0x33,  0x9,  0, { 1, 2, 8, 8 }, false, 0x400, 0, 1,  512, 0xf980, 0 },
+    };
+    const char* setname = (argc > 3) ? argv[3] : "mgcrystl";
+    const GameCfg* G = nullptr;
+    for (const auto& g : GAMES) if (!strcmp(g.name, setname)) G = &g;
+    if (!G) { fprintf(stderr, "no video config for set '%s'\n", setname); return 2; }
+    printf("set: %s  view2_2_pri=%d spr_pri={%d,%d,%d,%d}\n", G->name, G->view2_2_pri,
+           G->spr_pri[0], G->spr_pri[1], G->spr_pri[2], G->spr_pri[3]);
+
+    const int DX = G->dx, DY = G->dy;
+    const int VIS_MIN_Y = G->vis_min_y;
+
     auto v0 = slurp(dump + "/view2_0_vram.bin", 0x4000);
-    auto v1 = slurp(dump + "/view2_1_vram.bin", 0x4000);
     auto r0 = slurp(dump + "/view2_0_regs.bin", 32);
-    auto r1 = slurp(dump + "/view2_1_regs.bin", 32);
+    // One-chip games have no second VIEW2 at all; substitute a disabled blank
+    // rather than inventing data for it.
+    std::vector<uint8_t> v1, r1;
+    if (G->nchips == 2) {
+        v1 = slurp(dump + "/view2_1_vram.bin", 0x4000);
+        r1 = slurp(dump + "/view2_1_regs.bin", 32);
+    } else {
+        v1.assign(0x4000, 0);
+        r1.assign(32, 0);
+        r1[8] = 0x10; r1[9] = 0x10;   // layerctl: both layers disabled (bits 12 and 4)
+    }
     auto sr = slurp(dump + "/spr_regs.bin", 32);
     // SPRRAM selects which sprite RAM snapshot the frame is rendered from, so
     // the buffering lag is settled by measurement rather than assumption:
@@ -199,14 +245,15 @@ int main(int argc, char** argv)
     if (!strcmp(which, "buf2")) sfile = "/spriteram_buf2.bin";
     else if (!strcmp(which, "live")) sfile = "/spriteram.bin";
     printf("sprite RAM: %s\n", which);
-    auto sram = slurp(dump + sfile, 0x2000);
+    auto sram = slurp(dump + sfile, (size_t)(G->nsprites * 8));
     auto pal = slurp(dump + "/palette.bin", 0x1000);
     auto ref = slurp(dump + "/frame.raw", (size_t)W * H * 4);
 
-    const std::string setname_early = (argc > 3) ? argv[3] : "mgcrystl";
-    auto rom_t0 = slurp(roms + "/" + setname_early + "_view2_0.bin");
-    auto rom_t1 = slurp(roms + "/" + setname_early + "_view2_1.bin");
-    auto rom_sp = slurp(roms + "/" + setname_early + "_kan_spr.bin");
+    auto rom_t0 = slurp(roms + "/" + std::string(G->name) + "_view2_0.bin");
+    auto rom_t1 = (G->nchips == 2)
+                    ? slurp(roms + "/" + std::string(G->name) + "_view2_1.bin")
+                    : std::vector<uint8_t>(128, 0);
+    auto rom_sp = slurp(roms + "/" + std::string(G->name) + "_kan_spr.bin");
 
     // VRAM window: 0x0000 vram_1, 0x1000 vram_0, 0x2000 scroll_1, 0x3000
     // scroll_0. Layer 1 is at the LOW half — the trap called out in the RTL.
@@ -216,33 +263,6 @@ int main(int argc, char** argv)
     uint16_t reg0[16], reg1[16], sreg[16];
     for (int i = 0; i < 16; i++) { reg0[i] = rd16(r0, i); reg1[i] = rd16(r1, i); sreg[i] = rd16(sr, i); }
 
-    // Per-game video configuration, read out of the machine configs. These
-    // are NOT interchangeable: explbrkr takes MACHINE_RESET_OVERRIDE(gtmr),
-    // which sets m_view2_2_pri = 1, so its second VIEW2 writes its category
-    // into the priority bitmap where mgcrystl's writes 0. And its sprite
-    // priorities are {8,8,8,8} — above everything — against mgcrystl's
-    // {2,3,5,7}. Using one game's numbers for the other renders a plausible
-    // wrong picture rather than failing.
-    struct GameCfg {
-        const char* name;
-        int dx, dy, vis_min_y;
-        int spr_pri[4];
-        bool view2_2_pri;
-        uint32_t tile_colbase, spr_colbase;
-    };
-    static const GameCfg GAMES[] = {
-        { "mgcrystl", 0x5b, -0x8, 16, { 2, 3, 5, 7 }, false, 0x400, 0 },
-        { "explbrkr", 0x5b, -0x8, 16, { 8, 8, 8, 8 }, true,  0x400, 0 },
-    };
-    const char* setname = (argc > 3) ? argv[3] : "mgcrystl";
-    const GameCfg* G = nullptr;
-    for (const auto& g : GAMES) if (!strcmp(g.name, setname)) G = &g;
-    if (!G) { fprintf(stderr, "no video config for set '%s'\n", setname); return 2; }
-    printf("set: %s  view2_2_pri=%d spr_pri={%d,%d,%d,%d}\n", G->name, G->view2_2_pri,
-           G->spr_pri[0], G->spr_pri[1], G->spr_pri[2], G->spr_pri[3]);
-
-    const int DX = G->dx, DY = G->dy;
-    const int VIS_MIN_Y = G->vis_min_y;
 
     // tmap[0] takes regs 2/3 and VRAM 0x1000; tmap[1] takes regs 0/1 and VRAM
     // 0x0000. Layer enable is bit 12 (tmap0) and bit 4 (tmap1), ACTIVE LOW.
@@ -290,21 +310,21 @@ int main(int argc, char** argv)
             uint32_t lo = sreg[i * 2], hi = sreg[i * 2 + 1];
             dut->s_regs_flat[i] = lo | (hi << 16);
         }
-        dut->s_sprite_xoffs = 0; dut->s_sprite_yoffs = 0;   // mgcrystl: none
+        dut->s_sprite_xoffs = G->spr_xoffs; dut->s_sprite_yoffs = G->spr_yoffs;
         dut->s_visarea_min_y = VIS_MIN_Y;
         dut->s_wide_screen = (W > 0x100);
         dut->s_fliptype = 0;
 
         auto tick = [&]() {
             dut->clk = 0; dut->eval();
-            dut->s_ram_data = rd16(sram, dut->s_ram_addr & 0xfff);
+            dut->s_ram_data = rd16(sram, dut->s_ram_addr % (uint32_t)(G->nsprites * 4));
             dut->clk = 1; dut->eval();
         };
         dut->rst = 1; dut->s_start = 0; tick(); tick();
         dut->rst = 0; dut->s_start = 1; tick();
         dut->s_start = 0;
         long guard = 0;
-        while (sprites.size() < 1024 && guard++ < 1024 * 64) {
+        while ((int)sprites.size() < G->nsprites && guard++ < 1024 * 64) {
             tick();
             if (dut->s_out_valid) {
                 int sx = (int32_t)(int16_t)((dut->s_out_x & 0x3ff) << 6) >> 6;
@@ -325,6 +345,7 @@ int main(int argc, char** argv)
     std::vector<uint8_t>  smask((size_t)512 * 512, 0);
     {
         const size_t elements = rom_sp.size() / 128;
+        (void)elements;
         for (int i = (int)sprites.size() - 1; i >= 0; i--) {
             const Spr& s = sprites[i];
             for (int yy = 0; yy < 16; yy++) {

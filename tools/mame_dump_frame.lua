@@ -33,6 +33,13 @@ local MAPS = {
   explbrkr = { view2_0 = 0x500000, view2_1 = 0x580000, spriteram = 0x600000,
                palette = 0x700000, regs0 = 0x800000, regs1 = 0xb00000,
                sregs = 0x900000 },
+  -- blazeon_map: ONE VIEW2 chip, and only 0x1000 bytes of sprite RAM (512
+  -- records, not 1024). 0x980000 is the second sprite chip's registers, which
+  -- MAME treats as plain RAM and ignores.
+  blazeonj = { view2_0 = 0x600000, spriteram = 0x700000, palette = 0x500000,
+               regs0 = 0x800000, sregs = 0x900000, chips = 1, sprbytes = 0x1000 },
+  wingforc = { view2_0 = 0x600000, spriteram = 0x700000, palette = 0x500000,
+               regs0 = 0x800000, sregs = 0x900000, chips = 1, sprbytes = 0x1000 },
 }
 local M = MAPS[SET] or error("no memory map for set '" .. SET .. "'")
 
@@ -83,7 +90,7 @@ while true do
     if frame == FRAME - 2 or frame == FRAME - 1 then
         emu.wait(scr:time_until_pos(223, 0))
         dump(frame == FRAME - 1 and "spriteram_buf1.bin" or "spriteram_buf2.bin",
-             M.spriteram, 0x2000 / 2)
+             M.spriteram, (M.sprbytes or 0x2000) / 2)
     end
 
     if frame == FRAME then
@@ -93,10 +100,12 @@ while true do
         -- 0x1000 vram_0, 0x2000 scroll_1, 0x3000 scroll_0 — layer 1 sits at the
         -- LOW half, which is the trap.
         dump("view2_0_vram.bin", M.view2_0, 0x4000 / 2)
-        dump("view2_1_vram.bin", M.view2_1, 0x4000 / 2)
         dump("view2_0_regs.bin", M.regs0, 16)
-        dump("view2_1_regs.bin", M.regs1, 16)
-        dump("spriteram.bin",    M.spriteram, 0x2000 / 2)
+        if (M.chips or 2) == 2 then
+            dump("view2_1_vram.bin", M.view2_1, 0x4000 / 2)
+            dump("view2_1_regs.bin", M.regs1, 16)
+        end
+        dump("spriteram.bin",    M.spriteram, (M.sprbytes or 0x2000) / 2)
         dump("spr_regs.bin",     M.sregs, 16)
         dump("palette.bin",      M.palette, 0x1000 / 2)
 
@@ -105,7 +114,8 @@ while true do
 
         local f = assert(io.open(DIR .. "/frame.txt", "w"))
         f:write(string.format("frame=%d\n", frame))
-        for chip, base in ipairs({ M.regs0, M.regs1 }) do
+        local reglist = (M.chips or 2) == 2 and { M.regs0, M.regs1 } or { M.regs0 }
+        for chip, base in ipairs(reglist) do
             f:write(string.format("view2_%d_regs=", chip - 1))
             for i = 0, 15 do f:write(string.format("%04x ", space:read_u16(base + i * 2))) end
             f:write("\n")

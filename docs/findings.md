@@ -1162,3 +1162,72 @@ unexplained empirical fit would trade a defensible model for a better number.
 
 **This is now the largest single known error in the tilemap path** and the top
 open question for closing M0 on `mgcrystl`.
+
+---
+
+## 2026-08-20 — multi-game gate: Wing Force and Blaze On are PIXEL-EXACT
+
+**Instrument:** `make gate` — a new target that dumps and renders every
+configured game and prints one table. Built because a fix tuned until one game
+matches is how the other games silently break (hard rule 9).
+
+```
+GAME          FRAME     DIFF     MATCH
+mgcrystl        600      642  98.8804%
+explbrkr        900      986  98.2806%
+blazeonj        600        0 100.0000%
+wingforc        600        0 100.0000%
+```
+
+**Wing Force renders 71,680 of 71,680 pixels exactly**, and Blaze On 74,240 of
+74,240. Both were verified not to be degenerate: an offset sweep shows any
+one-pixel shift costs 7,042 pixels on Wing Force and 2,035 on Blaze On, so the
+zero is a real match and not a blank frame trivially agreeing.
+
+That is a first full M0 pass, on a configuration that exercises a good deal:
+**one** VIEW2 chip rather than two, a **512**-entry sprite list rather than
+1024, ROT270, a `0xf980` sprite X offset from `set_offsets(0x10000-0x680, 0)`,
+and a **byte-interleaved** `ROM_LOAD16_BYTE` tile region.
+
+### What it does NOT prove
+
+Blaze On's frame is 91% black with 10 distinct colours, so its number is much
+weaker than Wing Force's (59 colours, 38% non-black).
+
+More importantly, **only `mgcrystl` exercises line scroll at all**:
+
+| game | line-scroll RAM |
+|---|---|
+| `mgcrystl` | chip1 L0 — 3 distinct values, alternating by index |
+| `explbrkr` | all four layers all-zero |
+| `blazeonj` | both layers all-zero |
+| `wingforc` | both layers all-zero |
+
+So the two exact results say nothing about the line-scroll path, and the one
+open anomaly — odd rows taking the even row's scroll value — is confined to the
+only frame that tests it. A passing gate on three games would still leave that
+question exactly where it is.
+
+### Per-game facts now in the configuration table
+
+Every one of these differs between games and would render a plausible wrong
+picture if assumed: memory map, `m_view2_2_pri`, sprite priorities, VIEW2 chip
+count, sprite list size, sprite X/Y offsets, ROM layout including interleave,
+rotation, and screen geometry. They live in `GAMES[]` in the harness and
+`MAPS`/`SETS` in the tools, never in the shared path.
+
+Two mechanical notes from building this: `blazeon.zip` holds the `blazeonj`
+set, so the gate aliases it through a symlink rather than renaming anything in
+the ROM folder; and `tools/build_rom_regions.py` gained `ROM_LOAD16_BYTE`
+support, without which Wing Force's tile region is the right size and the wrong
+picture.
+
+### The ROM layout table is the MRA's twin
+
+Noted in conversation and worth recording: on hardware the core has no memory
+map of its own for ROM data. The **MRA** tells the HPS loader how to
+concatenate and interleave the parts, and the core receives one stream into
+SDRAM. `tools/build_rom_regions.py` encodes exactly what an MRA must
+reproduce, so the two descriptions must agree or the core will render
+differently from the gate. When MRA generation is written it should be driven
+from that same table rather than hand-written a second time.
