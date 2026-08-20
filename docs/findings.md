@@ -1405,3 +1405,57 @@ jt49, jt6295, jt51, T80, and the template's `arcade_video.v`, `hps_io.sv` (which
 is also the ROM loader), OSD and PLLs. The SDRAM controller is the one
 remaining non-novel gap, and `model1-ref/rtl/mem/m1_sdram.sv` is the same
 author's and can be ported rather than rewritten.
+
+---
+
+## 2026-08-20 — VIEW2 pixel fetch pipeline: 1 pixel/clock against real memories
+
+`rtl/video/kaneko_tmap_fetch.sv` wraps the verified combinational address
+engine with the memory accesses it implies. Four registered stages, 1
+pixel/clock, 4 clocks latency:
+
+```
+S0  screen_x/y      -> map_y            -> scroll RAM address
+S1  scroll word     -> map_x, tile idx  -> VRAM address
+S2  VRAM word       -> attr/code decode -> tile ROM address
+S3  ROM byte        -> nibble select    -> pixel out
+```
+
+`kaneko_tmap_fetch: checks=972776 fails=0 latency=4 bubbles=89038 stalls=27209`
+
+The reference is **not** another transcription of MAME — it is the
+combinational path the frame gate already validates against real MAME frames.
+This harness asks one question: does the pipelined version, driven against
+memories, produce exactly what the verified combinational version produces?
+Pipelining bugs are their own species — a stage off by one, a signal that
+fails to travel with its pixel, a control input sampled at the wrong stage —
+and the frame gate would not catch any of them.
+
+Bubbles (`req_valid` low) and stalls (`ce` low) are interleaved so the
+pipeline is not only ever exercised back to back.
+
+### Implementation choices, which are ours and not the hardware's
+
+- **VRAM is 1024 x 32**, holding `{code, attr}` in one word, so a tile entry is
+  a single read. The chip's own VRAM is 16-bit with attr and code in adjacent
+  words; packing them halves the fetch cost and changes nothing visible.
+- The scroll RAM read is unconditional even when line scroll is disabled — the
+  result is masked instead. Gating it would save nothing and would put the
+  control bit in the address path.
+
+Area: 355 cells for the pipeline including the address blocks it instantiates.
+
+### Two harness bugs worth recording, because both looked like RTL bugs
+
+1. **Queue alignment off by one.** Popping when `size > LATENCY` compares each
+   request against its *successor's* output. The signature was unmistakable in
+   hindsight: `dut` values matched `ref` values from the adjacent check.
+2. **Memories modelled combinationally.** The pipeline assumes registered
+   M10K-style reads — address captured at an edge, data on the next cycle —
+   but the model returned data in the same cycle, so every stage saw its own
+   cycle's address instead of the previous one's. The three reads are chained
+   (`vram_addr` depends on `scr_data`, `rom_addr` on `vram_data`), so each has
+   to be presented and evaluated in order.
+
+Neither was a fault in the RTL. When a brand-new harness reports ~99% failure
+against already-verified logic, suspect the harness.

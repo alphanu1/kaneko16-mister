@@ -39,7 +39,8 @@ VBUILD    := --cc --exe --build -j 0 -O2 -Wno-fatal
 
 # One entry per harness: <name>:<top module>:<harness source>
 HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
-             kaneko_vuspr:kaneko_vuspr:sim/video/tb_kaneko_vuspr.cpp
+             kaneko_vuspr:kaneko_vuspr:sim/video/tb_kaneko_vuspr.cpp \
+             kaneko_tmap_fetch:kaneko_tmap_fetch:sim/video/tb_kaneko_tmap_fetch.cpp
 
 # The frame gate is separate from `make test`: it needs a MAME dump and
 # assembled ROM regions, neither of which is in the repo. `make frame` builds
@@ -79,14 +80,13 @@ quartus: lint test quartus-check
 
 # ------------------------------------------------------------------- lint
 lint:
-	@fail=0; \
-	for f in $(RTL); do \
-	  $(VERILATOR) --lint-only $(VFLAGS) $$f >/dev/null 2>&1 || { \
-	    echo "== lint $$f"; \
-	    $(VERILATOR) --lint-only $(VFLAGS) $$f || fail=1; }; \
-	done; \
-	if [ $$fail -ne 0 ]; then echo "LINT FAILED"; exit 1; fi; \
-	echo "lint: $(words $(RTL)) file(s) clean"
+	@$(VERILATOR) --lint-only $(VFLAGS) $(RTL) >/dev/null 2>&1 || { \
+	  $(VERILATOR) --lint-only $(VFLAGS) $(RTL); echo "LINT FAILED"; exit 1; }
+	@echo "lint: $(words $(RTL)) file(s) clean"
+# Linted as one set rather than file by file. Modules now span files —
+# kaneko_tmap_fetch instantiates the address blocks that live in
+# kaneko_tmap.sv — and a per-file lint cannot resolve those. Verilator still
+# checks every module it parses, so nothing is lost.
 
 # ------------------------------------------------------------------- test
 # Each harness builds into its own obj_<name>/ tree, which .gitignore covers
@@ -106,7 +106,7 @@ test:
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; fi
 
 # ------------------------------------------------------------------- area
-MOD ?= kaneko_tmap_layer
+MOD ?= kaneko_tmap_fetch
 area:
 	@$(YOSYS) -p "read_verilog -sv $(RTL); synth -top $(MOD); stat" 2>&1 | \
 	  awk '/=== design hierarchy ===/,0' | head -40
