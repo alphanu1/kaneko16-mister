@@ -938,3 +938,64 @@ four), a 512-entry sprite list rather than 1024, and a second sprite chip at
 `0x980000` that MAME ignores entirely — the open question already recorded in
 this file. Sand Scorpion is the other candidate but lives in a different
 driver.
+
+---
+
+## 2026-08-20 — sprite capture fixed; an earlier "93.82%" is WITHDRAWN
+
+**Instrument:** `tools/mame_dump_frame.lua`, rewritten to capture sprite RAM at
+**scanline 223** — immediately before the driver's `copy()` at scanline 224 —
+instead of at end of frame.
+
+### The first attempt was a broken instrument that read like a result
+
+The scanline capture was first added as a second coroutine resumed from the
+existing frame notifier. That coroutine was then advanced twice per frame: once
+by the notifier and once by `emu.wait`'s own scheduling. It captured the wrong
+frames **and corrupted the main dump**.
+
+It did not look broken. Explosive Breaker appeared to improve from 87.97% to
+**93.82%**, which is exactly the direction a real fix would move it. What gave
+it away was Magical Crystals in the same run: **71.54%, with 13,204 TILE
+misses.** Sprite RAM cannot affect tile pixels. The dumped state and the dumped
+reference frame no longer described the same moment.
+
+**The 93.82% figure reported for Explosive Breaker is withdrawn.** It was
+measured against a corrupted dump.
+
+Rewritten as a single linear coroutine — autoboot scripts already run in one,
+so `emu.wait` works directly and no second coroutine is needed.
+
+### What the corrected instrument measures
+
+| snapshot | mgcrystl f600 | explbrkr f900 |
+|---|---|---|
+| `buf1` — scanline 223 of N-1, i.e. the buffer, one-frame lag | 642 / **98.88%** | 6600 / **88.49%** |
+| `buf2` — scanline 223 of N-2, two-frame lag | 642 / 98.88% | 6896 / 87.97% |
+| `live` — frame N, no lag | 642 / 98.88% | 6600 / 88.49% |
+
+**One-frame lag beats two-frame lag** on the only frame able to tell them apart
+(6600 vs 6896). That is evidence against MAME's own `// 2 frame delayed
+normaly` comment for this board, though that comment does say "differs per
+PCB?".
+
+**One-frame lag is still indistinguishable from no lag**, because `buf1 ==
+live` byte-for-byte on both dumps — the sprite RAM does not change between
+scanline 223 of frame N-1 and the end of frame N. Settling that needs a frame
+where it does. `buf1` is the correct model on the source reading and is now the
+default; it is not yet independently confirmed.
+
+### Corrections to earlier entries in this file
+
+- The claim that "live scored better, contradicting the one-frame lag" was
+  based on the misaligned end-of-frame capture. With a scanline-accurate
+  capture, `buf1` ties `live` and beats `buf2`. The earlier entry stands as
+  written only in its conclusion that the instrument was flawed.
+- The end-of-frame `spriteram_prev.bin` capture has been removed rather than
+  kept as an option. It was never the buffer.
+
+**Standing lesson, and the reason this is written up at length:** an instrument
+that perturbs what it measures produces a plausible number in the expected
+direction. The only thing that caught it was a second measurement in the same
+run moving in a way the hypothesis could not explain. Change one thing, and
+check the things that should not have moved.

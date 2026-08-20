@@ -28,7 +28,7 @@ comes from. Nothing yet stores, fetches, mixes or outputs one.
 
 ```
 mgcrystl f600   diff=642   98.88%
-explbrkr f900   diff=6896  87.97%   (544 tile, 6352 sprite)
+explbrkr f900   diff=6600  88.49%   (694 tile, 5906 sprite)
 ```
 
 M0's gate is scanline-exact. Neither passes. The tilemap path is close — under
@@ -102,12 +102,13 @@ Ordered roughly by dependency. Items marked **novel** have no drop-in source.
    simulation resolves it — it needs a hardware reference or a PCB capture.
    Wing Force's `59.1854` Hz is the only precise figure anywhere in the driver
    and is worth chasing first.
-2. **Sprite lag is unresolved and the instrument is flawed.** `render_sprites`
-   runs at scanline 224 but the capture fires at end of frame, so neither
-   snapshot is the buffer MAME rendered from. Live scored *better* than the
-   previous frame on `explbrkr` (6600 vs 6896), contradicting the recorded
-   assumption. Fix the capture to a scanline tap before trusting any sprite
-   figure.
+2. **Sprite lag: one-frame is measured better than two-frame, but is not
+   distinguishable from no lag.** The capture now happens at scanline 223,
+   immediately before the driver's `copy()`. One-frame beats two-frame on the
+   only frame that can separate them (6600 vs 6896) — evidence against MAME's
+   own `// 2 frame delayed normaly` for this board. But the one-frame snapshot
+   is byte-identical to the no-lag snapshot on both dumps, so that half is
+   still open and needs a frame where sprite RAM moves late.
 3. **The line-scroll index is unconfirmed against a frame.** Well-supported by
    reading `tilemap.cpp`, but every frame tried so far is degenerate. Needs
    Blaze On's 2nd demo level, which needs harness support for a one-chip,

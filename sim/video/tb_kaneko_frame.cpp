@@ -169,10 +169,19 @@ int main(int argc, char** argv)
     auto r0 = slurp(dump + "/view2_0_regs.bin", 32);
     auto r1 = slurp(dump + "/view2_1_regs.bin", 32);
     auto sr = slurp(dump + "/spr_regs.bin", 32);
-    // SPRRAM=live uses the frame's own live RAM instead of the previous
-    // frame's, to test the buffering lag empirically.
-    const bool spr_live = getenv("SPRRAM") && !strcmp(getenv("SPRRAM"), "live");
-    auto sram = slurp(dump + (spr_live ? "/spriteram.bin" : "/spriteram_prev.bin"), 0x2000);
+    // SPRRAM selects which sprite RAM snapshot the frame is rendered from, so
+    // the buffering lag is settled by measurement rather than assumption:
+    //   buf1  live at scanline 223 of frame N-1 — the buffer, one-frame lag
+    //   buf2  live at scanline 223 of frame N-2 — two-frame lag
+    //   live  live at frame N — no lag
+    // The old end-of-frame "prev" capture is gone: it fired ~32 lines after the
+    // copy and was never the buffer.
+    const char* which = getenv("SPRRAM") ? getenv("SPRRAM") : "buf1";
+    std::string sfile = "/spriteram_buf1.bin";
+    if (!strcmp(which, "buf2")) sfile = "/spriteram_buf2.bin";
+    else if (!strcmp(which, "live")) sfile = "/spriteram.bin";
+    printf("sprite RAM: %s\n", which);
+    auto sram = slurp(dump + sfile, 0x2000);
     auto pal = slurp(dump + "/palette.bin", 0x1000);
     auto ref = slurp(dump + "/frame.raw", (size_t)W * H * 4);
 
