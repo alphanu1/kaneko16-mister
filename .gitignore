@@ -32,6 +32,11 @@ timing/
 qdb/
 *.qws
 *.rpt
+# Quartus drops these in the project root regardless of
+# PROJECT_OUTPUT_DIRECTORY — there is no assignment that moves them, so rule 10
+# is enforced here instead.
+/c5_pin_model_dump.txt
+/jtag.cdf
 *.summary
 *.smsg
 *.pin
