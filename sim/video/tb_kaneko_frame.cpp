@@ -171,12 +171,14 @@ int main(int argc, char** argv)
     auto sr = slurp(dump + "/spr_regs.bin", 32);
     // SPRRAM selects which sprite RAM snapshot the frame is rendered from, so
     // the buffering lag is settled by measurement rather than assumption:
-    //   buf1  live at scanline 223 of frame N-1 — the buffer, one-frame lag
-    //   buf2  live at scanline 223 of frame N-2 — two-frame lag
+    //   buf1  live at scanline 223 of frame N-1 — one-frame lag
+    //   buf2  live at scanline 223 of frame N-2 — two-frame lag, the DEFAULT:
+    //         measured best, and it agrees with MAME's own "2 frame delayed
+    //         normaly" comment
     //   live  live at frame N — no lag
     // The old end-of-frame "prev" capture is gone: it fired ~32 lines after the
     // copy and was never the buffer.
-    const char* which = getenv("SPRRAM") ? getenv("SPRRAM") : "buf1";
+    const char* which = getenv("SPRRAM") ? getenv("SPRRAM") : "buf2";
     std::string sfile = "/spriteram_buf1.bin";
     if (!strcmp(which, "buf2")) sfile = "/spriteram_buf2.bin";
     else if (!strcmp(which, "live")) sfile = "/spriteram.bin";
@@ -380,6 +382,8 @@ int main(int argc, char** argv)
     long diff = 0;
     long first_bad = -1;
     long bad_sprite = 0, bad_tile = 0, bad_bg = 0;
+    long ours_spr = 0, mame_spr = 0, both_spr = 0, only_ours = 0, only_mame = 0;
+    const bool no_sprites = getenv("NOSPR") != nullptr;
     std::vector<long> bad_row((size_t)H, 0);
 
     for (int row = 0; row < H; row++) {
@@ -404,8 +408,26 @@ int main(int argc, char** argv)
             const uint16_t sv = sbmp[so];
             const uint16_t spix = sv & 0x3fff;
             const uint16_t spri = (sv >> 14) & 3;
-            if (spix && spr_pri_map[spri] > prim)
+            const bool we_drew_sprite = spix && spr_pri_map[spri] > prim;
+            const uint32_t tile_only_pen = pen;
+            if (we_drew_sprite && !no_sprites)
                 pen = SPR_COLBASE + spix;
+
+            // Census: where do we put a sprite, and where does MAME's frame
+            // disagree with a tiles-only render? If those two sets differ, the
+            // sprites are in the wrong places; if they coincide but the pixels
+            // still differ, the placement is right and the colour is wrong.
+            const uint32_t tile_rgb = xgrb555(rd16(pal, tile_only_pen & 0x7ff));
+            {
+                const size_t o2 = (size_t)row * W + col;
+                const uint32_t w2 = (uint32_t)(ref[o2*4+0] | (ref[o2*4+1]<<8) | (ref[o2*4+2]<<16));
+                const bool mame_has_sprite = (tile_rgb & 0xffffff) != (w2 & 0xffffff);
+                if (we_drew_sprite) ours_spr++;
+                if (mame_has_sprite) mame_spr++;
+                if (we_drew_sprite && mame_has_sprite) both_spr++;
+                if (we_drew_sprite && !mame_has_sprite) only_ours++;
+                if (!we_drew_sprite && mame_has_sprite) only_mame++;
+            }
 
             const uint32_t rgb = xgrb555(rd16(pal, pen & 0x7ff));
             out[(size_t)row * W + col] = rgb;
@@ -431,6 +453,8 @@ int main(int argc, char** argv)
     const long total = (long)W * H;
     printf("kaneko_frame: pixels=%ld diff=%ld match=%.4f%%\n",
            total, diff, 100.0 * (total - diff) / total);
+    printf("  sprite census: ours=%ld mame=%ld overlap=%ld  only-ours=%ld only-mame=%ld\n",
+           ours_spr, mame_spr, both_spr, only_ours, only_mame);
     if (diff) {
         printf("  attribution: sprite-covered=%ld tile=%ld background=%ld\n",
                bad_sprite, bad_tile, bad_bg);

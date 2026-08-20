@@ -29,13 +29,20 @@ SETS = {
         ],
         "oki1":    [("mc030.u32", 0x000000, 0x040000, [])],
     },
+    # Transcribed from ROM_START( explbrkr ), kaneko16.cpp. The first version of
+    # this entry was written from the zip's file listing instead, and was wrong
+    # in every particular: the two 512K sprite files were swapped, ts002e sat at
+    # 0x100000 rather than 0x200000, both ROM_RELOADs were missing, and the
+    # region was sized 0x140000 instead of 0x240000. The result rendered 5,547
+    # sprite pixels MAME does not draw at all. A zip listing gives filenames and
+    # sizes; only the source gives the layout.
     "explbrkr": {
         "view2_0": [("ts010.u4",  0x000000, 0x100000, [])],
         "view2_1": [("ts020.u33", 0x000000, 0x100000, [])],
         "kan_spr": [
-            ("ts000e.u38", 0x000000, 0x080000, []),
-            ("ts001e.u37", 0x080000, 0x080000, []),
-            ("ts002e.u36", 0x100000, 0x040000, []),
+            ("ts001e.u37", 0x000000, 0x080000, [0x100000]),
+            ("ts000e.u38", 0x080000, 0x080000, [0x180000]),
+            ("ts002e.u36", 0x200000, 0x040000, []),
         ],
         "oki1":    [("ts030.u5",  0x000000, 0x100000, [])],
     },
@@ -45,7 +52,7 @@ REGION_SIZE = {
     "mgcrystl": {"view2_0": 0x100000, "view2_1": 0x100000,
                  "kan_spr": 0x280000, "oki1": 0x040000},
     "explbrkr": {"view2_0": 0x100000, "view2_1": 0x100000,
-                 "kan_spr": 0x140000, "oki1": 0x100000},
+                 "kan_spr": 0x240000, "oki1": 0x100000},
 }
 
 

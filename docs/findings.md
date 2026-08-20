@@ -999,3 +999,90 @@ that perturbs what it measures produces a plausible number in the expected
 direction. The only thing that caught it was a second measurement in the same
 run moving in a way the hypothesis could not explain. Change one thing, and
 check the things that should not have moved.
+
+---
+
+## 2026-08-20 — explbrkr sprite ROM layout was wrong; 88.49% -> 98.28%
+
+**Instrument:** `ROM_START( explbrkr )` in `kaneko16.cpp`, after a sprite census
+in the frame harness localised the error.
+
+The census was what pointed at it. On `explbrkr` the harness drew **5,971**
+sprite pixels where MAME's frame has only **1,118**, overlapping on 424 —
+i.e. 5,547 sprite pixels MAME does not draw at all. `mgcrystl` overlapped
+13,503 of 13,526 in the same run, so the sprite *path* was fine and the
+*data* was not.
+
+**The `explbrkr` entry in `tools/build_rom_regions.py` had been written from
+the zip's file listing rather than from `ROM_START`, and was wrong in every
+particular:**
+
+| | what I had | what the source says |
+|---|---|---|
+| first file | `ts000e.u38` @ 0x000000 | `ts001e.u37` @ 0x000000 |
+| second file | `ts001e.u37` @ 0x080000 | `ts000e.u38` @ 0x080000 |
+| third file | `ts002e.u36` @ 0x100000 | `ts002e.u36` @ **0x200000** |
+| ROM_RELOAD | none | **two** — 0x100000 and 0x180000 |
+| region size | 0x140000 | **0x240000** |
+
+The two 512K files were swapped, the third was at the wrong offset, both
+reloads were missing and the region was under-sized by 1 MB.
+
+```
+explbrkr  88.49%  ->  97.21%   (6600 -> 1598 pixels)
+mgcrystl  98.88%  ->  98.88%   (unchanged, as expected)
+```
+
+`mgcrystl` is unaffected because its layout *was* read from `ROM_START`. The
+single-file regions now hash to MAME's own `ROM_LOAD` SHA-1s, which is a free
+check the multi-file sprite region does not get.
+
+**Lesson: a zip listing gives filenames and sizes. Only the source gives the
+layout.** Both look equally plausible in a table, and the wrong one produces a
+picture rather than an error.
+
+---
+
+## 2026-08-20 — sprite lag is TWO frames; the earlier one-frame result is REVERSED
+
+**Instrument:** the frame gate, re-run against all three snapshots once the
+sprite ROM was correct.
+
+```
+explbrkr f900     diff    match     ours   mame   overlap
+  buf1  (1 frame) 1598    97.21%     674   1118      146
+  buf2  (2 frame)  986    98.28%    1122   1118      717
+  live  (0 frame) 1598    97.21%     674   1118      146
+```
+
+**Two-frame lag wins**, and it is not close. It also produces almost exactly
+the right *number* of sprite pixels — 1,122 against MAME's 1,118 — where the
+one-frame model produces 674.
+
+This **reverses** the conclusion recorded earlier today, that one-frame beat
+two-frame (6600 vs 6896). That measurement was taken with the broken sprite ROM
+above, so both figures described a render whose sprite tiles were garbage. The
+ranking it produced carried no information.
+
+The corrected result agrees with MAME's own comment at the call site:
+`// 2 frame delayed normaly; differs per PCB?`. Two independent things now
+point the same way, where before the measurement contradicted the source and I
+took the measurement's side.
+
+`buf2` is now the harness default. `mgcrystl` remains unable to distinguish any
+of the three — its sprites are static across the whole window.
+
+**Standing lesson:** a comparison between two hypotheses is only worth the
+inputs it is run on. Both branches were fed corrupt data, so the ranking was
+noise that looked like a result — and it was reported as one.
+
+### Where the gate stands
+
+```
+mgcrystl f600   diff=642   98.88%   (census: ours 13526, mame 13801, overlap 13503)
+explbrkr f900   diff=986   98.28%   (census: ours 1122,  mame 1118,  overlap 717)
+```
+
+`explbrkr`'s remaining error is now symmetric — 405 pixels where only we place
+a sprite, 401 where only MAME does — which reads like a small positional
+offset on a few sprites rather than wrong data. That is the next thread.
