@@ -1394,7 +1394,7 @@ category present, because the last write is what stands. Both the chip-1 rule
 (`m_view2_2_pri`) and the sprite comparison table are per-game inputs, not
 constants — hard rule 9.
 
-Area: 158 yosys cells, combinational.
+Area: 325 yosys cells, combinational.
 
 **Reuse position, checked rather than assumed.** Grepping every vendored
 repository for VIEW2 or VU-002 RTL returns nothing: there is no existing
