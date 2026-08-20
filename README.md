@@ -33,8 +33,8 @@ Miles Rally 1/2.
 M0 frame gate, RTL rendered against a frame MAME actually produced:
 
 ```
-mgcrystl  98.88%   (642 / 57344 pixels differ)
-explbrkr  98.28%   (986 differ)
+mgcrystl  99.48%   (298 / 57344 pixels differ)
+explbrkr 100.00%   (exact)
 blazeonj 100.00%   (exact)
 wingforc 100.00%   (exact, 71680 pixels)
 ```

@@ -1294,3 +1294,77 @@ rather than the end of frame N, every capture is systematically one frame late,
 and the per-game disagreement is then about when each game writes its state
 within the frame. That is worth settling before chasing any remaining residual,
 because it sets the meaning of every number here.
+
+---
+
+## 2026-08-20 — RESOLVED: MAME renders at vblank begin, not at end of frame
+
+**Instrument:** MAME's own source — `src/emu/screen.cpp`, `src/emu/video.cpp`
+and `src/frontend/mame/luaengine.cpp`, vendored for the purpose.
+
+The previous entry left the capture/picture alignment open, with two games
+disagreeing. Reading the source settles the mechanism.
+
+### What MAME does
+
+`screen_device::vblank_begin`:
+
+```c
+// if this is the primary screen and we need to update now
+if (!(m_video_attributes & VIDEO_UPDATE_AFTER_VBLANK))
+    update_if_primary();
+```
+
+**The screen is rendered at VBLANK BEGIN.** `kaneko16` does not set
+`VIDEO_UPDATE_AFTER_VBLANK`, so that is the path taken.
+
+The Lua frame notifier fires much later. `video_manager::frame_update` runs
+`finish_screen_updates()` first and only then
+`machine().call_notifiers(MACHINE_NOTIFY_FRAME)`, which is what
+`lua_engine::on_machine_frame` — and therefore both
+`add_machine_frame_notifier` and `wait_next_frame` — is attached to.
+
+So an end-of-frame capture is a whole vblank period newer than the picture. A
+game that writes its video registers during vblank drifts by a full frame; one
+that writes earlier does not. That is exactly why `explbrkr` needed a one-frame
+correction and `mgcrystl` did not — and why no single frame offset could fit
+both.
+
+### The frame counter is not reliable either
+
+`emu.wait()` resumes on a timer, not on a frame notifier, so any wait inside
+the loop stops the counter tracking rendered frames. Two runs differing only by
+an `emu.wait` captured **demonstrably different pictures for "frame 600"**
+while every byte of captured state was identical. Frameskip was ruled out:
+`-noautoframeskip -frameskip 0` changes nothing.
+
+### The fix
+
+Capture the state at vblank start and the picture one line later, **in the same
+block**. Frame identity then stops mattering — whatever frame it is, the state
+and the picture describe the same instant. `DUMP_AT=vblank` is now the default.
+
+```
+             before          after
+mgcrystl       642            298      99.48%
+explbrkr       986              0     100.00%   EXACT
+blazeonj         0              0     100.00%
+wingforc         0              0     100.00%
+```
+
+**Explosive Breaker is now pixel-exact**, and three of the four gate frames
+pass. `mgcrystl`'s remaining 298 are the odd-row line-scroll anomaly, which is
+unchanged by this and remains the one open question in the tilemap path.
+
+### What this corrects
+
+The previous entry's `STATE_LAG` experiment — one frame of tile-state lag —
+fitted `explbrkr` and broke `mgcrystl`, and I recorded it as an unexplained
+per-game disagreement. It was neither per-game nor a frame lag: it was a
+sub-frame capture-point error that happened to round to a frame for one game.
+`STATE_LAG` is retained only as a diagnostic and defaults to 0.
+
+**Standing lesson:** when two games disagree about a constant, suspect the
+instrument before concluding the hardware differs. The question "what does MAME
+actually do" had a definite answer in fifty lines of its own source, and no
+amount of fitting offsets to pixel counts would have found it.

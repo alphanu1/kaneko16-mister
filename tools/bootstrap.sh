@@ -231,6 +231,9 @@ if [ "$DO_MAME" = 1 ]; then
       '/src/emu/digfx.*' \
       '/src/emu/emupal.*' \
       '/src/emu/video/generic.*' \
+      '/src/emu/video.*' \
+      '/src/emu/screen.*' \
+      '/src/frontend/mame/luaengine.cpp' \
       '/LICENSE.md'
     # Pin only AFTER sparse-checkout is configured. The clone is --no-checkout,
     # so checking out a ref before the sparse patterns exist would materialise

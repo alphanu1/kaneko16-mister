@@ -111,8 +111,22 @@ while true do
 
     -- Tile state, captured STATE_LAG frames before the reference picture.
     if frame == FRAME - STATE_LAG then
-        local at = tonumber(os.getenv("DUMP_AT") or "")
-        if at then emu.wait(scr:time_until_pos(at, 0)) end
+        -- MAME renders the frame at VBLANK BEGIN, not at end of frame:
+        -- screen_device::vblank_begin calls update_if_primary() unless the
+        -- driver sets VIDEO_UPDATE_AFTER_VBLANK, which kaneko16 does not. The
+        -- Lua frame notifier fires later still, in video_manager::frame_update
+        -- after finish_screen_updates(). So an end-of-frame capture is up to a
+        -- whole vblank period newer than the picture.
+        --
+        -- DUMP_AT=vblank waits for the real vblank start rather than guessing a
+        -- scanline; the visible area ends at line 239 here, so a hardcoded 223
+        -- is still inside the active display.
+        local at = os.getenv("DUMP_AT") or "vblank"   -- default: the instant MAME renders
+        if at == "vblank" then
+            emu.wait(scr:time_until_vblank_start())
+        elseif tonumber(at) then
+            emu.wait(scr:time_until_pos(tonumber(at), 0))
+        end
 
         print(string.format("== state at frame %d (picture at %d)", frame, FRAME))
 
@@ -139,10 +153,22 @@ while true do
         f:write("\n")
         f:write(string.format("width=%d\nheight=%d\n", scr.width, scr.height))
         f:close()
-    end
 
-    -- The reference picture.
-    if frame == FRAME then
+        -- Picture, read in the SAME block as the state rather than at a later
+        -- frame notifier.
+        --
+        -- Frame identity is not reliable across runs: emu.wait() inside this
+        -- loop resumes on a timer, not on a frame notifier, so the counter
+        -- stops tracking rendered frames. Two runs differing only by an
+        -- emu.wait captured demonstrably DIFFERENT pictures for "frame 600"
+        -- while every byte of state was identical. (Frameskip was ruled out —
+        -- -noautoframeskip -frameskip 0 changes nothing.)
+        --
+        -- Reading the picture here removes the question entirely: whatever
+        -- frame this is, the state and the picture describe the same instant.
+        -- One line past the end of the visible area, so vblank_begin's
+        -- update_if_primary() has run.
+        emu.wait(scr:time_until_pos(scr.height + 1, 0))
         manager.machine.video:snapshot()
         local px = scr:pixels()
         local pf = assert(io.open(DIR .. "/frame.raw", "wb"))

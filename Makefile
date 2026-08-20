@@ -49,6 +49,7 @@ ROM_DIR  ?= build/roms
 ROMPATH  ?= /home/ben/roms/Kaneko16
 SET      ?= mgcrystl
 DUMP_FRAME ?= 600
+DUMP_AT    ?= vblank
 
 .PHONY: all lint test clean area quartus quartus-check
 all: lint test
@@ -124,7 +125,7 @@ regions:
 dump:
 	@rm -rf $(DUMP_DIR)
 	@mkdir -p $(DUMP_DIR)
-	@cd $(DUMP_DIR) && DUMP_DIR=$(CURDIR)/$(DUMP_DIR) DUMP_FRAME=$(DUMP_FRAME) DUMP_SET=$(SET) \
+	@cd $(DUMP_DIR) && DUMP_DIR=$(CURDIR)/$(DUMP_DIR) DUMP_FRAME=$(DUMP_FRAME) DUMP_SET=$(SET) DUMP_AT=$(DUMP_AT) \
 	  mame -rompath $(ROMPATH) $(SET) \
 	    -autoboot_script $(CURDIR)/tools/mame_dump_frame.lua \
 	    -skip_gameinfo -autoboot_delay 0 -video none -sound none \
@@ -168,7 +169,7 @@ gate: $(ROM_ALIAS)/blazeonj.zip
 	  tools/build_rom_regions.py $$g $(ROMPATH) $(ROM_DIR) >/dev/null 2>&1 || \
 	    { printf '%-10s %8s %8s %9s   %s\n' $$g $$f - - "ROM BUILD FAILED"; continue; }; \
 	  rm -rf $$d; mkdir -p $$d; \
-	  ( cd $$d && DUMP_DIR=$(CURDIR)/$$d DUMP_FRAME=$$f DUMP_SET=$$g \
+	  ( cd $$d && DUMP_DIR=$(CURDIR)/$$d DUMP_FRAME=$$f DUMP_SET=$$g DUMP_AT=$(DUMP_AT) \
 	    mame -rompath "$(ROMPATH);$(CURDIR)/$(ROM_ALIAS)" $$g \
 	      -autoboot_script $(CURDIR)/tools/mame_dump_frame.lua \
 	      -skip_gameinfo -autoboot_delay 0 -video none -sound none \

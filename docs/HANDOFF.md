@@ -27,8 +27,8 @@ comes from. Nothing yet stores, fetches, mixes or outputs one.
 ## What the M0 gate says
 
 ```
-mgcrystl f600   diff=642   98.88%
-explbrkr f900   diff=986   98.28%
+mgcrystl f600   diff=298   99.48%
+explbrkr f900   diff=0    100.00%   PASS
 blazeonj f600   diff=0    100.00%   PASS
 wingforc f600   diff=0    100.00%   PASS
 ```
