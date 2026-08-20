@@ -1,0 +1,10 @@
+# Pinned upstream revisions. Regenerate with tools/bootstrap.sh --update
+# 2026-08-20T18:44:29Z
+template       MiSTer-devel/Template_MiSTer df59d675a1e11a2390fb0f6ba577909977380b7b
+fx68k          ijor/fx68k 0602ee4627b10f301298f2673d826cdd6baa9327
+jt49           jotego/jt49 47301ed51374d6d41db4db846b7643fecf75e417
+jt6295         jotego/jt6295 7d76b0be8cd8f85f3ae741178c9830b20e2071a1
+jt51           jotego/jt51 985a573dcfc1ff135553a39f7eae21d18ba57cbe
+t80            MiSTer-devel/T80 830fd0315f0af5cdbcb0e703f1cea3ce4e91f538
+mame           mamedev/mame 1ff7d66e66ac10ad0541af0cab3a47336ade5c47
+model1-ref     local/sega-model1-mister a5dc6b3e3d5f406b2fe6995aa824d676bb995c35

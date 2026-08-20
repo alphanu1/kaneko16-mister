@@ -67,28 +67,58 @@ The library splits cleanly into tiers by MCU complexity. Implement in order.
 
 | Title | Year | Board | Sound | Screen | Notes |
 |---|---|---|---|---|---|
-| Magical Crystals | 1991 | Z00FC-02 | 2× YM2149 + OKI M6295 | 256×224 | Puzzle shooter |
-| Explosive Breaker / Bakuretsu Breaker | 1992 | ZOOFC-02 | 2× YM2149 + OKI M6295 | 256×224 | Breakout |
-| Blaze On | 1992 | Z02AT-002 | Z80 + YM2151 + OKI | 320×232 | Horizontal shmup. 2× VU-002. |
+| Magical Crystals | 1991 | Z00FC-02 | 2× YM2149 + OKI M6295 | 256×224 | Puzzle shooter. Set id **`mgcrystl`**. |
+| Explosive Breaker / Bakuretsu Breaker | 1992 | ZOOFC-02 | 2× YM2149 + OKI M6295 | 224×256 | **Vertical shmup, ROT90** — not Breakout. Set id `explbrkr`. |
+| Blaze On | 1992 | Z02AT-002 | Z80 + YM2151, **no OKI** | 320×232 | Horizontal shmup, ROT0. 2× VU-002. |
+| Wing Force | 1993 | Blaze On board | Z80 + YM2151 + OKI M6295 | 320×224 | **Vertical, ROT270. Prototype.** 16 MHz. Set id `wingforc`. |
 
 All carry `MACHINE_SUPPORTS_SAVE`, no `MACHINE_IMPERFECT_GRAPHICS`.
 
-**Bring-up title: Magical Crystals.** Simplest sound path (no Z80), single VU-002,
-no MCU. Clock-verified PCB timings in source.
+Corrected 2026-08-20 against the vendored driver, see `docs/findings.md`:
 
-### Tier 2 — CALC3 MCU (NEC uPD78322, 16K internal ROM, DUMPED)
+- The bring-up set id is **`mgcrystl`**, not "mcrystal".
+- **Blaze On has no OKI.** `blazeon()` instantiates Z80 + YM2151 only. The OKI
+  in the "Z80 + YM2151 + OKI" description belongs to Wing Force.
+- **Wing Force was missing from this table** and is now the only ROM on hand. It
+  is a separate game from Blaze On, not another name for it — `wingforc` is its
+  own parent set in MAME, where `blazeonj` names `blazeon` as parent. It shares
+  the board, `blazeon_map` and the VU-002 setup, and differs in year, rotation,
+  main clock, sound complement and every ROM label.
+
+**Bring-up title: Magical Crystals (`mgcrystl`).** Simplest sound path (no Z80),
+single VU-002, no MCU. Clock-verified PCB timings in source. **Not yet on disk** —
+see `docs/findings.md`.
+
+### Tier 2 — CALC3 MCU (NEC uPD78322, 16K internal ROM, **NOT DUMPED**)
 
 | Title | Year | Sound | Notes |
 |---|---|---|---|
 | Shogun Warriors | 1992 | 2× YM2149 + OKI M6295 | Fighter |
 | B.Rap Boys | 1992 | 2× YM2149 + OKI M6295 | Beat-em-up |
 
-The CALC3 ROM is dumped and verified in MAME. It handles DIP switches, EEPROM
-read/write, and supplies decrypted code/data snippets to the 68000. The MAME device
-`KANEKO_CALC3` simulates this by software reimplementation rather than executing the
-real firmware. The ROM being dumped means a real execution approach is also possible
-— implement as HLE (same methodology as Model 1 I/O board) and revisit if a game
-needs something the HLE misses.
+CALC3 handles DIP switches, EEPROM read/write, and supplies decrypted code/data
+snippets to the 68000. `KANEKO_CALC3` is a software reimplementation of that
+behaviour.
+
+**Corrected 2026-08-20. This section previously said the CALC3 ROM was "dumped and
+verified", and concluded that executing the real firmware was an option. That rests
+on a confusion between two different ROMs.**
+
+What is dumped is the CALC3's **external data ROM** — `fb040e.u33` for Shogun
+Warriors, which MAME's `ROM_START` labels `/* MCU Data */` and loads into the region
+tagged `"calc3_rom"`. The board note in `kaneko16.cpp` reads "KANEKO CALC3 508 (74
+Pin PQFP, NEC uPD78322 MCU, **Linked to FB-040.U33**)". That is the data the MCU
+reads, not the code it runs.
+
+The uPD78322's **16 KB internal program ROM is not dumped.** Decapping identified
+the part; that is not a dump. And MAME instantiates no CPU core for it — no
+uPD78-series device, no TLCS-90, nothing. `m_calc3_region` is passed to
+`decompress_table()` as data, and every behaviour is reimplemented in C++.
+
+**Consequence: CALC3 is in the same position as TBSOP01, not a better one.** MAME's
+simulation is the only available path — there is no firmware to execute and no LLE
+fallback if the HLE misses something. The plan does not change (HLE either way) but
+the safety net the previous wording implied does not exist.
 
 ### Tier 3 — TBSOP01 MCU (NEC uPD78324, 32K ROM, NOT DUMPED)
 
@@ -121,7 +151,12 @@ cases, Bonk's may require additional reverse engineering beyond what MAME has.
 
 68000 at 12 MHz (Magical Crystals, verified on PCB) or 16 MHz (GTMR, verified on PCB).
 
-**RTL:** `jtfpga/fx68k` — GPL-3.0-or-later. Drop in.
+**RTL:** `ijor/fx68k` — **GPL-3.0-only**. Drop in.
+
+Corrected 2026-08-20, from the vendored clone. This entry read
+`jtfpga/fx68k` — that org does not exist; `jtfpga` is the JTFPGA brand, the
+GitHub org is `jotego`, and `jotego/fx68k` is a fork of ijor's. It also read
+or-later; fx68k grants no or-later. See `THIRD-PARTY.md`.
 
 **MAME modelling:** `M68000` device, accurate.
 
@@ -178,17 +213,22 @@ embedded in source.
 **Tile format** (2 words per tile, from `kaneko_tmap.cpp`):
 ```
 Word 0:
-  [15:13] unused
-  [12:11] High Priority (vs sprites and vs other tiles)
+  [15:11] unused
+  [10:9]  High Priority (vs Sprites)
+  [8]     High Priority (vs Tiles)
   [7:2]   Colour / palette
   [1]     Flip X
   [0]     Flip Y
 Word 1: Tile code
 ```
 
+Corrected 2026-08-20. This table read `[15:13] unused` and `[12:11] High
+Priority` — two bits too high, and it merged the vs-sprites and vs-tiles
+fields. MAME reads the priority as `(attr >> 8) & 7`. See `docs/findings.md`.
+
 **Layer control register** (at offset `0x008` in the register bank):
 ```
-[15]    BG Disable
+[12]    BG Disable      <- corrected 2026-08-20, was documented as [15]
 [11]    BG Line Scroll enable
 [10]    ? (always 1 in gtmr/bakubrkr)
 [9]     BG Flip X
@@ -209,8 +249,16 @@ Word 1: Tile code
 0x006: BG Scroll Y
 ```
 
-Line scroll RAM: 512 words per layer, added to the global scroll X value per scanline.
-Used in Blaze On 2nd demo level, Magical Crystals, Sand Scorpion.
+Line scroll RAM: 512 words per layer, added to the global scroll X value.
+
+**Indexed by tilemap row, not by screen scanline** — corrected 2026-08-20. MAME's
+`rowscroll` index is the tilemap row that lands on a given screen line, i.e. `map_y`
+after vertical scroll. The two coincide only while scroll Y is zero; Explosive
+Breaker's attract frame has scroll Y = 8, so indexing by scanline is eight lines out.
+The sum is also taken **before** the `>> 6`, at full 10.6 precision.
+
+Used in Blaze On 2nd demo level, Magical Crystals, Sand Scorpion — and, measured
+2026-08-20, in Explosive Breaker's attract loop on all four layers.
 
 **MAME modelling:** `KANEKO_TMAP`, a standalone device. Accurate, no imperfect flags
 on base titles.
@@ -297,12 +345,14 @@ MAME — it's a parameter change and a different attribute decoder.
 
 | MCU | Device | ROM status | MAME approach | MiSTer approach |
 |---|---|---|---|---|
-| CALC3 (uPD78322) | `KANEKO_CALC3` | **Dumped** | Software sim | HLE or execute real ROM |
+| CALC3 (uPD78322) | `KANEKO_CALC3` | **Not dumped** (internal ROM; the dumped `calc3_rom` is external *data*) | Software sim | MAME's simulation |
 | TBSOP01 (uPD78324) | `KANEKO_TOYBOX` | **Not dumped** | Software sim | MAME's simulation |
 | TBSOP02 | `KANEKO_TOYBOX` | Not dumped | Software sim | MAME's simulation |
 
-CALC3: because the ROM is dumped, a clean LLE implementation (execute real firmware)
-is possible. HLE is faster to ship. Use HLE first.
+CALC3: corrected 2026-08-20. The internal program ROM is **not** dumped, so LLE is
+not available — the region MAME calls `calc3_rom` is the external data ROM
+(`fb040e.u33`, labelled `/* MCU Data */`), and no CPU core is instantiated anywhere
+for this MCU. Port MAME's simulation, as with TOYBOX.
 
 TBSOP01/02: no ROM exists. MAME's simulation is the only available approach. Port
 `kaneko_toybox.cpp` as-is. The open questions in the MAME source (Bonk's EEPROM
@@ -322,7 +372,7 @@ unsolved reverse engineering problems, not implementation gaps.
 | 93C46 EEPROM, NVRAM, glue | 200–400 | trivial |
 | **VIEW2 tilemap (2 chips = 4 layers)** | **3,000–5,000** | novel — see 4.6 |
 | **VU-002 sprite engine** | **2,000–4,000** | novel — see 4.7 |
-| CALC3 HLE | 200–500 | HLE of dumped ROM interface |
+| CALC3 HLE | 200–500 | port of MAME's simulation; no firmware exists to run |
 | TOYBOX simulation | 500–1,000 | port of MAME simulation |
 | Priority mixer, palette, sync | 800–1,500 | standard pattern |
 | `sys/` framework | 5,000 | fixed |
@@ -352,6 +402,8 @@ Blaze On: add T80 + jt51 sound path, handle 2× VU-002 correctly.
 
 **M3 — CALC3 MCU: Shogun Warriors and B.Rap Boys (Tier 2)**
 Implement `kaneko_calc3_hle.sv` based on `kaneko_calc3.cpp` command protocol.
+Note the external data ROM (`calc3_rom`) must be loaded via MRA and fed to the
+table-decompression path; it is data, not code.
 CALC3 handles: DIP reading, EEPROM access, decryption of 68000 code/data snippets.
 Gate: Shogun Warriors boots, character select and one round playable.
 
@@ -368,12 +420,38 @@ Two sequels (GTMR2) follow from the same base.
 
 ## 8. Licence position
 
-**GPL-3.0-or-later** — forced by fx68k (GPL-3.0-or-later). See `THIRD_PARTY.md`
-methodology in the Model 1 repository for the upgrade-clause reasoning.
+**GPL-3.0-only** — forced by fx68k. `THIRD-PARTY.md` in this repository carries the
+full position and the evidence; the short version follows.
 
-All MAME device sources used as reference are BSD-3-Clause (Luca Elia, David Haywood,
-others). jt49, jt51, jt6295 are GPL-3.0-or-later, compatible. T80 is LGPL-2.1,
-compatible under GPL-3.
+Corrected 2026-08-20 by reading the vendored clones. This section previously said
+or-later, and named two licences that turned out to be wrong:
+
+- **fx68k is GPL-3.0-ONLY, not or-later.** `LICENSE` is a bare GPLv3 text and
+  `fx68k.sv` carries only a copyright line — no version clause. The "any later
+  version" text inside `LICENSE` is the licence's own how-to-apply appendix, not a
+  grant the author made. So the core ships GPL-3.0-only.
+- **T80 is BSD-3-Clause, not LGPL-2.1.** `MiSTer-devel/T80` ships no licence file;
+  the terms are in the `T80.vhd` header — Daniel Wallner's opencores BSD grant with
+  retain-notice, synthesized-form and no-endorsement clauses. Permissive, and
+  compatible, but the notice must be retained on anything lifted.
+
+Unchanged and verified: all MAME device sources used as reference are BSD-3-Clause
+(Luca Elia, David Haywood, others) — readable **and** adaptable, which is what makes
+VIEW2 and VU-002 tractable. jt49, jt51 and jt6295 are genuinely GPL-3.0-or-later,
+with the full clause in each `hdl/` source. MiSTer's `sys/` is GPL-2.0-or-later,
+and that or-later clause is the only reason a GPL-3 core may use it.
+
+---
+
+## 8b. Screen orientation
+
+Two titles are vertical and they rotate in **opposite** directions: Explosive Breaker
+is ROT90, Wing Force is ROT270. Everything else in the library is ROT0.
+
+The core provides an OSD rotation toggle for these, **defaulted to vertical**. See
+`docs/00-decisions.md` D3 for the reasoning and its consequences for the video path —
+in particular that rotation is an output-stage concern and the tilemap/sprite hardware
+works in native orientation.
 
 ---
 

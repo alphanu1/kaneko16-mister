@@ -1,33 +1,48 @@
 {
-  // third_party/ holds four upstream clones, each with its own .git. VS Code
+  // third_party/ holds upstream clones, each with its own .git. VS Code
   // auto-detects them and lists them in Source Control, which is noise: they
-  // are read-only reference material vendored by tools/bootstrap.sh, never
+  // are read-only reference material vendored by the bootstrap script, never
   // edited here.
   //
+  // Hard rule 3: every clone added under third_party/ gets a line here in the
+  // same change that adds it. Hard rule 5 routes local reference cores through
+  // the same path — a copy of sega-model1-mister or NMK16 pulled in for
+  // reference is a clone like any other and belongs in this list.
+  //
   // MAME additionally trips the "too many active changes" warning. Its index
-  // carries ~31,400 files while only ~34 are on disk, the rest marked
-  // skip-worktree by the --no-cone sparse checkout. That is intentional (it is
+  // carries ~31,400 files while only a few dozen are on disk, the rest marked
+  // skip-worktree by a --no-cone sparse checkout. That is intentional (it is
   // what keeps the clone at ~5 MB instead of several GB); VS Code counts index
   // entries rather than honouring skip-worktree and hits its 10,000 limit.
   //
   // Listed explicitly rather than using git.autoRepositoryDetection, because
-  // reading third_party/mame/src/devices/cpu/mb86233/ is routine work here and
-  // the "openEditors" mode would re-activate the repo the moment those files
-  // are opened.
+  // reading third_party/mame/src/mame/kaneko/ is routine work here and the
+  // "openEditors" mode would re-activate the repo the moment those files are
+  // opened.
   "git.ignoredRepositories": [
+    "third_party/mame",
     "third_party/template",
-    "third_party/s32",
-    "third_party/geometrizer",
-    "third_party/mame"
+    "third_party/fx68k",
+    "third_party/jt49",
+    "third_party/jt51",
+    "third_party/jt6295",
+    "third_party/t80",
+
+    // Hard rule 5: a copy of a sibling core, taken so it is never read in
+    // place. Pinned by deps.lock like any other dependency.
+    "third_party/model1-ref"
   ],
 
-  // Keep the file watcher off ~41 MB of vendored source and its history.
+  // Keep the file watcher off vendored source, its history, and Verilator
+  // build trees. obj_* rather than a per-harness list: a narrower pattern
+  // stops covering new harnesses the moment one is named differently.
+  //
   // Not added to search.exclude on purpose: MAME is the oracle and grepping it
   // is a daily activity.
   "files.watcherExclude": {
     "**/third_party/**": true,
-    "**/obj_fpmul/**": true,
-    "**/obj_fpadd/**": true
+    "**/obj_*/**": true,
+    "**/build/**": true
   },
 
   "[systemverilog]": {

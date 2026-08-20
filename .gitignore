@@ -1,0 +1,118 @@
+# ---------------------------------------------------------------- vendored
+# Every cloned or downloaded repository lands here and is never committed.
+# Hard rule 3: anything added under third_party/ must ALSO be listed in
+# git.ignoredRepositories in .vscode/settings.json — each clone carries its own
+# .git and otherwise shows up in Source Control as noise.
+# Hard rule 5: local reference cores (sega-model1-mister, NMK16, ...) are copied
+# in here rather than read in place. Same treatment.
+/third_party/
+
+# ------------------------------------------------------------------ builds
+# Hard rule 2. Anchored with a leading slash where the top-level directory is
+# meant, so that /build/ is not silently satisfied by a nested /quartus/build/.
+/build/
+/quartus/build/
+/releases/
+db/
+incremental_db/
+output_files/
+greybox_tmp/
+simulation/
+timing/
+.qsys_edit/
+qdb/
+*.qws
+*.rpt
+*.summary
+*.smsg
+*.pin
+*.done
+*.jdi
+*.sld
+*.qar
+*.qarlog
+*.sopcinfo
+*.bak
+*.orig
+*.rej
+
+# Bitstreams and programming files.
+*.sof
+*.pof
+*.rbf
+*.jic
+*.map
+*.fit
+*.sta
+*.asm
+
+# --------------------------------------------------------------- verilator
+# Not obj_<prefix>*/ — a narrower pattern stops covering new harnesses the
+# moment one is named differently, and that has already let a build tree
+# through in a sibling repository.
+obj_dir/
+/obj_*/
+/sim/**/obj_*/
+*.vcd
+*.fst
+*.fst.hier
+*.wlf
+
+# ------------------------------------------------------------------- yosys
+*.json.yosys
+/yosys.log
+# abc writes its command history into the working directory on every area run,
+# which for this Makefile is the repository root.
+/abc.history
+*.blif
+*.edif
+
+# --------------------------------------------------------------- toolchain
+/tools/**/__pycache__/
+*.pyc
+
+# Quartus installer: BOTH the downloaded archive and the unpacked tree. Several
+# GB each, and Altera-licensed — redistributing it is not permitted, so neither
+# may ever be committed. No trailing slash on the directory rule: a directory-
+# only pattern cannot match a path that does not exist yet, and an installer
+# script that checks the path is ignored BEFORE creating it would fire on every
+# clean run.
+/tools/quartus-unpack
+/tools/*.tar
+/tools/*.tar.*
+/tools/Quartus*
+/tools/QuartusLiteSetup*
+/tools/*.qdz
+# Chrome writes "Unconfirmed NNNNN.crdownload" — with a space — which no *.tar
+# pattern would ever catch.
+*.crdownload
+*.part
+*.download
+*.partial
+
+# -------------------------------------------------------------------- roms
+# Hard rule 2: never commit ROM images or anything derived from them, including
+# extracted tables baked into source. Load via the MRA path at runtime.
+/roms/
+/rom/
+/build/rom/
+*.zip
+*.7z
+*.hex
+
+# ------------------------------------------------------------------ editor
+# Shared project settings are committed; everything else under .vscode/ is not.
+# The directory itself must not be excluded — git will not re-include a file
+# underneath an excluded directory, so this has to be `.vscode/*`.
+.vscode/*
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ------------------------------------------------------------------- local
+# Local working instructions, kept on disk but not published.
+/CLAUDE.md
