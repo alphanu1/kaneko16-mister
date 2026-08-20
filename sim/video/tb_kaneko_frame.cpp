@@ -76,6 +76,7 @@ inline uint32_t xgrb555(uint16_t v)
 }
 
 struct Layer {
+    int      index;             // 0..3, for the LAYERS bitmask
     const uint16_t* vram;       // 0x800 words: 1024 tiles x 2
     const uint16_t* scroll;     // 0x800 words, 512 used
     uint16_t scroll_x, scroll_y;
@@ -91,6 +92,7 @@ struct Pix { bool solid; uint8_t c; uint8_t colour; uint8_t cat; };
 
 int g_xadj = 0, g_yadj = 0;
 bool g_ls_by_screen = false;   // LSMODE=screen -> index line scroll by scanline
+int  g_layer_mask = 0xf;       // LAYERS=n -> bitmask of enabled layers
 int  g_lsadj = 0;              // LSADJ=n -> shift the line-scroll index by n
 bool g_ls_off = false;         // LSOFF=1 -> ignore line scroll entirely
 bool g_ls_parity = false;      // LSPAR=1 -> odd rows reuse the even row's value
@@ -99,7 +101,7 @@ Pix layer_pixel(const Layer& L, int sx, int sy)
 {
     sx += g_xadj; sy += g_yadj;
     Pix p{false, 0, 0, 0};
-    if (!L.enabled) return p;
+    if (!L.enabled || !(g_layer_mask & (1 << L.index))) return p;
 
     dut->t_screen_x = sx & 0x1ff;
     dut->t_screen_y = sy & 0x1ff;
@@ -163,6 +165,8 @@ int main(int argc, char** argv)
     dut = new Vkaneko_frame_top;
     g_ls_by_screen = getenv("LSMODE") && !strcmp(getenv("LSMODE"), "screen");
     if (getenv("LSADJ")) g_lsadj = atoi(getenv("LSADJ"));
+    if (getenv("XADJ")) g_xadj = atoi(getenv("XADJ"));
+    if (getenv("YADJ")) g_yadj = atoi(getenv("YADJ"));
     g_ls_off = getenv("LSOFF") != nullptr;
     g_ls_parity = getenv("LSPAR") != nullptr;
 
@@ -294,6 +298,8 @@ int main(int argc, char** argv)
         mklayer(w1, reg1, 0, true,  &rom_t1),
         mklayer(w1, reg1, 1, true,  &rom_t1),
     };
+    for (int i = 0; i < 4; i++) layers[i].index = i;
+    if (getenv("LAYERS")) g_layer_mask = atoi(getenv("LAYERS"));
 
     printf("layers: ");
     for (int i = 0; i < 4; i++)

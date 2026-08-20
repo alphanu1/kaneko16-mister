@@ -1231,3 +1231,66 @@ SDRAM. `tools/build_rom_regions.py` encodes exactly what an MRA must
 reproduce, so the two descriptions must agree or the core will render
 differently from the gate. When MRA generation is written it should be driven
 from that same table rather than hand-written a second time.
+
+---
+
+## 2026-08-20 — OPEN: the capture-to-picture frame alignment differs per game
+
+**Instrument:** a wide X-offset scan on `explbrkr` frame 400, then reading the
+scroll register on consecutive frames.
+
+`explbrkr` frame 400 rendered 69.97% with 17,218 mismatches. A wide scan found
+that a uniform **+4 pixel** X offset takes it to **exactly zero**. Four pixels
+is `0x100` in 10.6 fixed point, and the chip1 `scroll_x` register decrements by
+exactly `0x100` per frame while the game scrolls:
+
+```
+frame 398: cd40    frame 399: cc40    frame 400: cb40    frame 401: ca40
+```
+
+So the picture `scr:pixels()` returned at frame 400 was rendered from **frame
+399's** register state. The state capture is one frame ahead of the reference
+image.
+
+Adding `STATE_LAG=1` — capturing tile state one frame before the picture —
+takes `explbrkr` frame 400 from 17,218 to **0**, and leaves frames 600 and 800
+exact. That looks conclusive.
+
+**It is not.** The same change takes `mgcrystl` frame 600 from 642 to **9,725**
+(98.88% -> 83.04%). And `mgcrystl`'s tile registers are *identical* across
+frames 598, 599 and 600:
+
+```
+f598: 68c0 0200 6940 0200 0c0c
+f599: 68c0 0200 6940 0200 0c0c
+f600: 68c0 0200 6940 0200 0c0c
+```
+
+so the regression cannot be register alignment — it comes from its VRAM or
+palette, which do change per frame. Sprite captures were verified to be
+picture-relative and unaffected by `STATE_LAG`, so they are not the cause
+either.
+
+**Two games therefore disagree about the correct alignment, and no single
+value is right for both.** `STATE_LAG` defaults to **0**, which preserves the
+better overall result across the gate; `STATE_LAG=1` reproduces the
+explbrkr-exact behaviour.
+
+### Why this matters more than the pixel counts
+
+Every frame-gate number in this file is measured against a reference whose
+alignment to the captured state is now known to be uncertain. That does not
+invalidate the exact results — `wingforc` and `blazeonj` at 0 diff, and
+`explbrkr` at frames 600/800 — because an exact match under an ambiguous
+alignment is still an exact match. It does mean **a non-zero diff cannot
+currently be attributed to the RTL rather than to the harness.**
+
+Ruled out: a late capture (`DUMP_AT` at scanlines 200, 223, 224 and end of
+frame all give identical results, so the state is stable across that window).
+
+Next: determine when MAME actually calls `screen_update` relative to
+`emu.wait_next_frame()`. If the coroutine resumes at the start of frame N+1
+rather than the end of frame N, every capture is systematically one frame late,
+and the per-game disagreement is then about when each game writes its state
+within the frame. That is worth settling before chasing any remaining residual,
+because it sets the meaning of every number here.

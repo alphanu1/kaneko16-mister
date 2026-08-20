@@ -20,6 +20,22 @@
 local DIR   = os.getenv("DUMP_DIR")   or "."
 local FRAME = tonumber(os.getenv("DUMP_FRAME") or "600")
 local SET   = os.getenv("DUMP_SET")   or "mgcrystl"
+-- The picture returned by scr:pixels() at frame N was rendered from the
+-- register/VRAM state as it stood at frame N-1. Measured: explbrkr's chip1
+-- scroll_x decrements 0x100 (4 pixels) per frame while scrolling, and frame
+-- 400's picture matches frame 399's register value exactly — a +4 pixel offset
+-- took frame 400 from 17,218 mismatches to ZERO.
+--
+-- So the tile state is captured STATE_LAG frames before the reference picture.
+--
+-- BUT this is NOT settled and the default is 0. STATE_LAG=1 makes explbrkr
+-- frame 400 exact, and simultaneously takes mgcrystl frame 600 from 642
+-- mismatches to 9,725 — with mgcrystl's tile registers provably IDENTICAL
+-- across frames 598-600, so the regression comes from its VRAM/palette, not
+-- its registers. The two games disagree about the correct alignment and the
+-- mechanism is not understood. Default 0 preserves the better overall result;
+-- STATE_LAG=1 reproduces the explbrkr-exact behaviour. See docs/findings.md.
+local STATE_LAG = tonumber(os.getenv("STATE_LAG") or "0")
 
 -- The memory maps differ per game and are NOT interchangeable. mgcrystl_map
 -- puts the palette at 0x500000 and the VIEW2 windows at 0x600000/0x680000;
@@ -93,12 +109,13 @@ while true do
              M.spriteram, (M.sprbytes or 0x2000) / 2)
     end
 
-    if frame == FRAME then
-        print(string.format("== dumping frame %d to %s", frame, DIR))
+    -- Tile state, captured STATE_LAG frames before the reference picture.
+    if frame == FRAME - STATE_LAG then
+        local at = tonumber(os.getenv("DUMP_AT") or "")
+        if at then emu.wait(scr:time_until_pos(at, 0)) end
 
-        -- VIEW2 chip 0 and 1. Within each window vram_map is: 0x0000 vram_1,
-        -- 0x1000 vram_0, 0x2000 scroll_1, 0x3000 scroll_0 — layer 1 sits at the
-        -- LOW half, which is the trap.
+        print(string.format("== state at frame %d (picture at %d)", frame, FRAME))
+
         dump("view2_0_vram.bin", M.view2_0, 0x4000 / 2)
         dump("view2_0_regs.bin", M.regs0, 16)
         if (M.chips or 2) == 2 then
@@ -109,11 +126,8 @@ while true do
         dump("spr_regs.bin",     M.sregs, 16)
         dump("palette.bin",      M.palette, 0x1000 / 2)
 
-        manager.machine.video:snapshot()
-        print("  snapshot written")
-
         local f = assert(io.open(DIR .. "/frame.txt", "w"))
-        f:write(string.format("frame=%d\n", frame))
+        f:write(string.format("state_frame=%d\npicture_frame=%d\n", frame, FRAME))
         local reglist = (M.chips or 2) == 2 and { M.regs0, M.regs1 } or { M.regs0 }
         for chip, base in ipairs(reglist) do
             f:write(string.format("view2_%d_regs=", chip - 1))
@@ -123,17 +137,19 @@ while true do
         f:write("spr_regs=")
         for i = 0, 15 do f:write(string.format("%04x ", space:read_u16(M.sregs + i * 2))) end
         f:write("\n")
-
-        local w, h = scr.width, scr.height
-        f:write(string.format("width=%d\nheight=%d\n", w, h))
+        f:write(string.format("width=%d\nheight=%d\n", scr.width, scr.height))
         f:close()
+    end
 
+    -- The reference picture.
+    if frame == FRAME then
+        manager.machine.video:snapshot()
         local px = scr:pixels()
         local pf = assert(io.open(DIR .. "/frame.raw", "wb"))
         pf:write(px)
         pf:close()
-        print(string.format("  frame.raw            %d x %d, %d bytes", w, h, #px))
-
+        print(string.format("  frame.raw            %d x %d, %d bytes",
+                            scr.width, scr.height, #px))
         manager.machine:exit()
         return
     end
