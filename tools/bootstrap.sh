@@ -40,13 +40,23 @@ done
 #
 # name | repo | branch | role | licence | forkable
 #
-# fx68k is ijor/fx68k. The design study's "jtfpga/fx68k" is not a real org —
-# jtfpga is the JTFPGA brand, the GitHub org is jotego, and jotego/fx68k is a
-# fork of ijor's. Pin upstream, not the fork.
+# fx68k: jtfpga/fx68k rather than upstream ijor/fx68k, deliberately.
+#
+# Its hdl/fx68k.sv is BYTE-IDENTICAL to ijor's apart from line endings — it is a
+# repackaging, not a fork — but it additionally ships hdl/verilator/, a variant
+# that flattens the s_nanod struct into individual wires. Upstream's version
+# cannot be linted or simulated by Verilator at all:
+#
+#   %Error-BLKANDNBLK: Unsupported: Blocking and non-blocking assignments to
+#                      same non-packed variable: 'Nanod'
+#
+# So synthesis takes hdl/ (which is upstream's code) and simulation takes
+# hdl/verilator/. Using ijor's directly would mean the 68000 is the one block in
+# this project with no simulation harness.
 
 DEPS=(
   "template|MiSTer-devel/Template_MiSTer|master|core skeleton and sys/ framework|GPL-2.0-or-later|yes"
-  "fx68k|ijor/fx68k|master|68000 main CPU|GPL-3.0-only|yes"
+  "fx68k|jtfpga/fx68k|master|68000 main CPU|GPL-3.0-only|yes"
   "jt49|jotego/jt49|master|YM2149 PSG, 2x on the base board|GPL-3.0-or-later|yes"
   "jt6295|jotego/jt6295|master|OKI M6295 ADPCM, 1-2x depending on title|GPL-3.0-or-later|yes"
   "jt51|jotego/jt51|master|YM2151 FM, Blaze On / Wing Force sound path|GPL-3.0-or-later|yes"
@@ -264,6 +274,16 @@ mv "$LOCK.tmp" "$LOCK"
 
 # --------------------------------------------------------------------- report
 
+# fx68k reads its microcode with $readmemb at RUN time, relative to the working
+# directory rather than to the source file. Symlinked into the root so a
+# harness started from there finds them; without these fx68k elaborates and
+# then executes an all-X microcode, which looks like a CPU that fetches once
+# and stops.
+if [ -f "$VENDOR/fx68k/hdl/microrom.mem" ]; then
+    ln -sf third_party/fx68k/hdl/microrom.mem "$ROOT/microrom.mem"
+    ln -sf third_party/fx68k/hdl/nanorom.mem  "$ROOT/nanorom.mem"
+fi
+
 # ------------------------------------------------------------------- sys/
 #
 # A MiSTer core builds against the framework's sys/ directory. Most cores commit
@@ -345,7 +365,8 @@ Useful paths now available:
   third_party/mame/src/mame/kaneko/kaneko_spr.cpp      VU-002/KC-002   (novel RTL)
   third_party/mame/src/mame/kaneko/kaneko_calc3.cpp    CALC3 MCU, tier 2
   third_party/mame/src/mame/kaneko/kaneko_toybox.cpp   TOYBOX MCU, tier 3
-  third_party/fx68k/fx68k.sv                           68000
+  third_party/fx68k/hdl/fx68k.sv                       68000 (synthesis)
+  third_party/fx68k/hdl/verilator/                     68000 (simulation)
   third_party/template/sys/                            MiSTer framework
 
 The two files that matter first are kaneko_tmap.cpp and kaneko_spr.cpp. They

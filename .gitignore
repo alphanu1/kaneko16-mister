@@ -119,6 +119,11 @@ obj_dir/
 .DS_Store
 Thumbs.db
 
+# fx68k loads these with $readmemb at runtime, relative to the working
+# directory, so bootstrap symlinks them into the repo root. Upstream files.
+/microrom.mem
+/nanorom.mem
+
 # ------------------------------------------------------------------- local
 # Local working instructions, kept on disk but not published.
 /CLAUDE.md

@@ -1,7 +1,7 @@
 # Pinned upstream revisions. Regenerate with tools/bootstrap.sh --update
-# 2026-08-20T18:44:29Z
+# 2026-08-20T22:15:30Z
 template       MiSTer-devel/Template_MiSTer df59d675a1e11a2390fb0f6ba577909977380b7b
-fx68k          ijor/fx68k 0602ee4627b10f301298f2673d826cdd6baa9327
+fx68k          jtfpga/fx68k 1217ab8dc600de070c6adb71ea6fe69de8855362
 jt49           jotego/jt49 47301ed51374d6d41db4db846b7643fecf75e417
 jt6295         jotego/jt6295 7d76b0be8cd8f85f3ae741178c9830b20e2071a1
 jt51           jotego/jt51 985a573dcfc1ff135553a39f7eae21d18ba57cbe

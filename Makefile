@@ -26,7 +26,7 @@ RTL_DIRS  := rtl/video rtl/cpu rtl/sound rtl/mem rtl/io rtl/pll
 RTL       := $(wildcard $(patsubst %,%/*.sv,$(RTL_DIRS)))
 # Simulation-only SystemVerilog (harness wrappers). Compiled into harnesses but
 # never linted as core RTL and never instantiated from rtl/.
-SIM_SV    := $(wildcard sim/*/*.sv)
+SIM_SV    := $(wildcard sim/*/*.sv) $(wildcard third_party/fx68k/hdl/verilator/*.sv)
 
 # -Wno-DECLFILENAME: a file holds a group of related modules, not one module
 #   named after the file.
@@ -44,7 +44,8 @@ HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_vuspr_draw:kaneko_vuspr_draw:sim/video/tb_kaneko_vuspr_draw.cpp \
              kaneko_sdram:kaneko_sdram_harness:sim/mem/tb_kaneko_sdram.cpp \
              kaneko_romload:kaneko_romload_harness:sim/io/tb_kaneko_romload.cpp \
-             kaneko_romstream:kaneko_romstream_harness:sim/io/tb_kaneko_romstream.cpp
+             kaneko_romstream:kaneko_romstream_harness:sim/io/tb_kaneko_romstream.cpp \
+             kaneko_cpu:kaneko_cpu_harness:sim/cpu/tb_kaneko_cpu.cpp
 
 # The frame gate is separate from `make test`: it needs a MAME dump and
 # assembled ROM regions, neither of which is in the repo. `make frame` builds

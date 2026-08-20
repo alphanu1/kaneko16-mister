@@ -1907,3 +1907,66 @@ appears: `FX68K_ALTERA_REGS` trades two M10K blocks for roughly 2000 logic
 cells. At 18% utilisation today there is no pressure, and the define is off by
 default in jotego's too — so adopting it would be a deliberate choice, not a
 consequence of switching repos.
+
+---
+
+## 2026-08-20 — the 68000 executes Explosive Breaker's boot code
+
+`make test` now includes a CPU harness: fx68k plus `rtl/cpu/kaneko_bus.sv`,
+booting out of the real `explbrkr` program ROM. The trace is the result; the
+assertions are only the ones that need no oracle.
+
+```
+  #   addr      r/w  data   uds lds
+  0   000000    R   0010    1   1     SSP high
+  1   000002    R   f7fc    1   1     SSP low   -> 0010f7fc, inside work RAM
+  2   000004    R   0000    1   1     PC high
+  3   000006    R   0914    1   1     PC low    -> 00000914, inside ROM
+  4   000914    R   007c    1   1  \
+  5   000916    R   0700    1   1  /  ori #$0700,SR   — mask interrupts
+  6   000918    R   4ef9    1   1  \
+  8   00091a    R   0000    1   1   > jmp $0000c8a8
+  9   00091c    R   c8a8    1   1  /
+ 10   00c8a8    R   13fc    1   1  \
+ 11   00c8aa    R   0000    1   1   |  move.b #$00, $900009
+ 12   00c8ac    R   0090    1   1   |
+ 13   00c8ae    R   0009    1   1  /
+ 15   900008    W   0000    0   1     byte write, LDS only -> 900009
+```
+
+That is a textbook 68000 boot — vectors, mask interrupts, long jump — and the
+first thing the game does is write the **sprite registers** at `0x900009`, which
+`bakubrkr_map` decodes exactly there. Later in the trace it is clearing sprite
+RAM at `0x600014` upward.
+
+### Two bugs fixed getting here
+
+**The burst lane selection was wrong.** `kaneko_bus` selected a word from the
+64-bit read by `a[2:1]`, as if the controller aligned a burst down to four
+words. It does not — `kaneko_sdram.sv` starts a burst at the **exact** address
+given and increments (`xfer_addr[COL_BITS:1] + 1`). So word 0 of the burst *is*
+the requested word, and lane selection returned the right data only when
+`a[2:1]` was 0. Every odd word read as zero, and the reset vectors came back
+`0010 0000 0000 0000` instead of `0010 f7fc 0000 0914` — recognisably half
+right, which is what made it findable.
+
+**fx68k cannot be simulated from upstream.** `ijor/fx68k` trips
+`%Error-BLKANDNBLK: Unsupported: Blocking and non-blocking assignments to same
+non-packed variable: 'Nanod'`. `jtfpga/fx68k` — the repo the user pointed at —
+ships `hdl/verilator/`, a variant that flattens the `s_nanod` struct into
+individual wires and elaborates cleanly. Its `hdl/` is byte-identical to ijor's,
+so synthesis is unaffected. **This is the concrete reason to prefer that fork,
+and without it the 68000 would be the one block here with no harness.**
+
+### Open: four addresses the map does not decode
+
+`e40000`, `e80000`, `ec0000` and `c00000`. The first three look like mirrors of
+the input ports at `e00000-e00007` from partial decoding on the PCB; `c00000` is
+*mgcrystl*'s DSW port, which `bakubrkr_map` does not have at all. MAME decodes
+none of them either.
+
+The bus **acknowledges** them and returns `0xffff`, because a 68000 waiting on a
+DTACK that never comes simply stops, with no error and nothing to see. They are
+counted and printed rather than failed: failing would encode a guess as a
+requirement, and ignoring would lose the question. Settling it is part of the
+trace comparison against MAME, which is the next step and the real gate.
