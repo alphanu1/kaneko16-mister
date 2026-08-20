@@ -112,9 +112,14 @@ It is the same author's work, so reuse is unencumbered — but take it as a
 ## Ported from the Model 1 core
 
 ### `rtl/mem/kaneko_sdram.sv`, `rtl/mem/bw_monitor.sv`
-Ported 2026-08-20 from `sega-model1-mister` (`rtl/mem/m1_sdram.sv`,
-`bw_monitor.sv`), renamed and otherwise unchanged. Same author, GPL-3.0-or-later,
-so no licence friction — an or-later grant may be used as GPL-3.0-only.
+Ported 2026-08-20 from **`sega-model2-mister`** (`rtl/mem/m2_sdram.sv`,
+`bw_monitor.sv`), renamed and otherwise unchanged. Same author,
+GPL-3.0-or-later, so no licence friction — an or-later grant may be used as
+GPL-3.0-only.
+
+Ported from Model 2 and **not** Model 1. The Model 1 file is an earlier version
+of the same controller; it passes its own suite and would fail on hardware.
+See `docs/findings.md` for the four differences.
 
 Ported rather than rewritten because the controller is generic (a parameterised
 array of ports, no Model-1-specific dependency) and because its header records

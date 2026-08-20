@@ -22,14 +22,19 @@
 
 `timescale 1ns/1ps
 
-module kaneko_sdram_harness (
+module kaneko_sdram_harness #(
+  // Set with -GCOL_BITS at build time. 9 = 32 MB module, 11 = 128 MB. The
+  // device model follows the same number, so a geometry the controller decodes
+  // wrongly shows up as a read mismatch rather than silently aliasing.
+  parameter int unsigned COL_BITS = 9
+) (
   input  logic        clk,
   input  logic        rst_n,
   output logic        ready,
 
   // ROM download
   input  logic        wr_req,
-  input  logic [24:1] wr_addr,
+  input  logic [COL_BITS+15:1] wr_addr,
   input  logic [15:0] wr_din,
   input  logic [1:0]  wr_be,
   output logic        wr_ack,
@@ -38,7 +43,7 @@ module kaneko_sdram_harness (
   // p4 MultiPCM. See docs/00-decisions.md D8.
   input  logic        p0_req, p1_req, p2_req, p3_req, p4_req,
   input  logic        p0_we,
-  input  logic [24:1] p0_addr, p1_addr, p2_addr, p3_addr, p4_addr,
+  input  logic [COL_BITS+15:1] p0_addr, p1_addr, p2_addr, p3_addr, p4_addr,
   input  logic [15:0] p0_din,
   input  logic [1:0]  p0_be,
   output logic [63:0] p0_dout, p1_dout, p2_dout, p3_dout, p4_dout,
@@ -73,7 +78,7 @@ module kaneko_sdram_harness (
   localparam int unsigned INIT_NOP = 600;
 
   logic [NP-1:0]       p_req, p_we, p_ack;
-  logic [NP-1:0][24:1] p_addr;
+  logic [NP-1:0][COL_BITS+15:1] p_addr;
   logic [NP-1:0][15:0] p_din;
   logic [NP-1:0][1:0]  p_be;
   logic [NP-1:0][63:0] p_dout;
@@ -99,11 +104,16 @@ module kaneko_sdram_harness (
   logic        dq_oe_c, dq_oe_m;
 
   kaneko_sdram #(
+    .COL_BITS(COL_BITS),
     .NP(NP), .T_RCD(T_RCD), .T_RP(T_RP), .T_RC(T_RC), .T_RAS(T_RAS),
     .T_WR(T_WR), .CL(CL), .T_REFI(T_REFI), .INIT_NOP(INIT_NOP), .ACK_HOLD(2)
   ) dut (
     .clk(clk), .rst_n(rst_n), .ready(ready),
-    .rd_lat_sel(2'd0),   // CL+3, what this harness is baselined on
+    // CL+3, what the device MODEL needs, and after the selector range moved
+    // earlier for the board that is selector 3, not 0. The renumbering broke
+    // this test immediately -- 23,744 mismatches -- which is the harness doing
+    // its job: the model's correct value is not the board's.
+    .rd_lat_sel(2'd3),
     .sd_cke(cke), .sd_cs_n(cs_n), .sd_ras_n(ras_n), .sd_cas_n(cas_n),
     .sd_we_n(we_n), .sd_ba(ba), .sd_a(a), .sd_dqm(dqm),
     .sd_dq_o(dq_c2m), .sd_dq_oe(dq_oe_c), .sd_dq_i(dq_m2c),
@@ -116,8 +126,17 @@ module kaneko_sdram_harness (
 
   // The same timing numbers, so the checker is checking the clock the
   // controller was built for.
+  // THE MODEL TAKES THE SAME COL_BITS AS THE CONTROLLER, AND THAT IS A BLIND
+  // SPOT, not an oversight to fix here: a geometry mismatch with the REAL part
+  // is invisible to this suite, because the model and the controller agree with
+  // each other while both are wrong about the board. 74,729 checks passed at
+  // COL_BITS=11 while the hardware aliased.
+  //
+  // This is the trap docs/differential-testing.md names: a reference written
+  // from the same reading as the implementation catches a slip between the two,
+  // never a shared misreading. Geometry can only be settled on hardware.
   sdram_model #(
-    .COL_BITS(9),
+    .COL_BITS(COL_BITS),
     .T_RCD(T_RCD), .T_RP(T_RP), .T_RC(T_RC), .T_RAS(T_RAS), .T_WR(T_WR),
     .CL(CL), .T_REFI(781), .REFI_SLACK(9)
   ) device (

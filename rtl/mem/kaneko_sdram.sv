@@ -3,16 +3,34 @@
 // Kaneko 16-bit arcade core for MiSTer FPGA
 // Copyright (C) 2026 alphanu1
 //
-// PORTED from the Sega Model 1 core (same author), rtl/mem/m1_sdram.sv, on
-// 2026-08-20. Renamed and otherwise unchanged. It carries its own provenance
-// note below, which still applies and must not be dropped: the state machine
-// follows meathax's System 32 controller and encodes two hazards that are
-// invisible from a datasheet.
+// PORTED from the Sega Model 2 core (same author), rtl/mem/m2_sdram.sv, on
+// 2026-08-20. Renamed, otherwise unchanged.
 //
-// Ported rather than rewritten deliberately. The controller is generic — a
-// parameterised array of ports rather than a Model-1-specific design — and it
-// has no dependency on anything from that project. Rewriting it would have
-// meant rediscovering the two hazards.
+// **Ported from Model 2, NOT Model 1, deliberately.** The Model 1 file is an
+// earlier version of the same controller and was ported here first. It passes
+// its simulation suite and would fail on hardware. Four differences, every one
+// of them found on a real board:
+//
+//   1. GEOMETRY IS FIXED AT 32 MB. Model 1 hardcodes `localparam COL_BITS = 9`
+//      and a [24:1] address. It cannot address a 64 MB module at all.
+//   2. A10 ALIASING. Column bits map to A0..A9 then A11, A12 — skipping A10,
+//      which is the auto-precharge flag. A straight slice is correct only up to
+//      nine column bits; at ten it puts a column bit where the precharge flag
+//      lives. Model 1 never hits this because it is fixed at nine, so the bug
+//      is latent rather than absent.
+//   3. PORT 0 RETURNED A SINGLE WORD. A single-word read carries A10 on its
+//      FIRST command, because the first word is also the last, so the row
+//      closes tRCD+1 cycles after activation — inside tRAS on a real device and
+//      tolerated by a behavioural model. On the board the CPU port read zero
+//      while the other ports read correctly from the same SDRAM. All ports now
+//      burst four.
+//   4. CAPTURE DEPTH RANGE WAS TOO LATE. Model 1 offers CL+2..CL+5; the board
+//      needs CL+1 or earlier. A write-then-read of AA55/5AA5/FF00/00FF came
+//      back shifted by exactly one 16-bit word, and NO setting in the old range
+//      could correct it — which is why cycling the option produced garbage at
+//      every position and was misread as "the phase is not involved".
+//
+// Configured for 64 MB here (COL_BITS = 10), matching the module in use.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -71,19 +89,16 @@
 
 // LINT WAIVERS, deliberately narrow and listed rather than blanket.
 //
-// This file is PORTED and is kept diffable against its origin, so it is not
-// edited for cosmetics. The warnings below are all width-of-an-int or
-// dead-signal notes in code that carries its own passing testbenches
-// (tb_sdram_model, tb_kaneko_sdram). Fixing them here would fork the file from
-// the Model 1 version for no behavioural gain and make future syncs manual.
+// This file is PORTED and kept diffable against its origin, so it is not edited
+// for cosmetics. These are width-of-an-int and dead-signal notes in code that
+// carries its own passing testbench.
 //
-//   WIDTHEXPAND   int arithmetic in the round-robin arbiter and a function
-//                 argument; functionally correct, just not width-matched
-//   UNUSEDPARAM   COL_BITS, kept for documentation of the address map
-//   UNUSEDSIGNAL  rd_captured and cap_buf, dead in the original
+//   WIDTHEXPAND   int arithmetic in the round-robin arbiter, and a function
+//                 argument; functionally correct, not width-matched
+//   UNUSEDPARAM / UNUSEDSIGNAL   documentation params and signals dead in the
+//                 original
 //
-// If this file is ever edited for real, fix these properly and drop the
-// waivers rather than extending them.
+// If this file is ever edited for real, fix these and drop the waivers.
 /* verilator lint_off WIDTHEXPAND */
 /* verilator lint_off UNUSEDPARAM */
 /* verilator lint_off UNUSEDSIGNAL */
@@ -91,6 +106,20 @@
 `timescale 1ns/1ps
 
 module kaneko_sdram #(
+  // GEOMETRY. COL_BITS is the only free variable: the MiSTer SDRAM connector
+  // gives 13 address pins and 2 bank pins, so with 13 row bits the module size is
+  // decided entirely by the column count.
+  //
+  //    9 -> 8192 x 512  x 4 =  32 MB   (the 32 MB modules)
+  //   10 -> 8192 x 1024 x 4 =  64 MB
+  //   11 -> 8192 x 2048 x 4 = 128 MB
+  //
+  // Column bits map to A0..A9 then A11, A12 -- SKIPPING A10, which is the
+  // auto-precharge flag. That is why ten column bits taken as [10:1] aliases:
+  // it puts a column bit where the precharge flag lives. See the note below.
+  parameter int unsigned COL_BITS = 9,
+  parameter int unsigned ROW_BITS = 13,
+  parameter int unsigned BA_BITS  = 2,
   parameter int unsigned NP = 5,      // read/write ports, see D8
 
   // Device timing, in clk cycles. Defaults suit -7E parts around 100 MHz.
@@ -149,7 +178,7 @@ module kaneko_sdram #(
   // ROM download. Highest priority while it is active; game logic is held in
   // reset during download, so starving the other ports costs nothing.
   input  logic                 wr_req,
-  input  logic [24:1]          wr_addr,
+  input  logic [AW:1]          wr_addr,
   input  logic [15:0]          wr_din,
   input  logic [1:0]           wr_be,
   output logic                 wr_ack,
@@ -157,7 +186,7 @@ module kaneko_sdram #(
   // Masters. Word-addressed; a burst port's address must be burst-aligned.
   input  logic [NP-1:0]        p_req,
   input  logic [NP-1:0]        p_we,
-  input  logic [NP-1:0][24:1]  p_addr,
+  input  logic [NP-1:0][AW:1]  p_addr,
   input  logic [NP-1:0][15:0]  p_din,
   input  logic [NP-1:0][1:0]   p_be,
   output logic [NP-1:0][63:0]  p_dout,
@@ -180,9 +209,26 @@ module kaneko_sdram #(
   // from cap[2], cap[1], cap[0], so a length of 2 would take two of those from
   // stale slots. So it bursts 4 and the requester picks its half — see
   // m1_integrated, which aligns the address down and selects on bit 1.
+  // PORT 0 BURSTS FOUR TOO. It used to return a single word, and a single-word
+  // read carries A10 -- auto-precharge -- on its FIRST command, because the
+  // first word is also the last. The row therefore closes tRCD+1 cycles after
+  // it was activated, which is inside tRAS on a real device and tolerated by a
+  // behavioural model. Ports 1 to 3 burst four and issue the precharge on the
+  // fourth, comfortably clear of it.
+  //
+  // That is the asymmetry the board showed: the tilemap copy engine and the
+  // character fetch read correctly on ports 2 and 3 while the CPU on port 0
+  // read zero from the same SDRAM, at every capture depth the OSD offers.
+  //
+  // A 64-bit p_dout holds four words, so the CPU's 32-bit access now takes ONE
+  // transaction instead of two -- which also removes the held-acknowledge
+  // hazard of study R32 rather than working around it.
   function automatic logic [3:0] blen(input int unsigned p);
     case (p)
-      1, 2, 3: blen = 4'd4;
+      // ALL FOUR PORTS BURST FOUR. Port 4 joined them for the read-back sweep,
+      // which folds four words per request; and a single-word read auto-
+      // precharges on its first command, which R33 records.
+      0, 1, 2, 3, 4: blen = 4'd4;
       default: blen = 4'd1;
     endcase
   endfunction
@@ -244,10 +290,17 @@ module kaneko_sdram #(
   always_ff @(posedge clk) begin
     if (!rst_n) cap_depth <= 4'(RD_LAT_DEF);
     else case (rd_lat_sel)
-      2'd0:    cap_depth <= 4'(CL + 3);   // unconnected lands here, by design
-      2'd1:    cap_depth <= 4'(CL + 2);
-      2'd2:    cap_depth <= 4'(CL + 4);
-      default: cap_depth <= 4'(CL + 5);
+      // RANGE MOVED EARLIER, on hardware evidence. It was CL+2..CL+5, and the
+      // board needs EARLIER than CL+2: a write-then-read self-test of AA55,
+      // 5AA5, FF00, 00FF came back as 5AA5, FF00, 00FF, 00FF -- the burst
+      // shifted by exactly one 16-bit word, meaning capture starts one cycle
+      // too late. No setting in the old range could correct that, which is why
+      // cycling the OSD option produced garbage at every position and was
+      // wrongly read as "the phase is not involved".
+      2'd0:    cap_depth <= 4'(CL + 1);   // unconnected lands here, by design
+      2'd1:    cap_depth <= 4'(CL + 0);
+      2'd2:    cap_depth <= 4'(CL + 2);
+      default: cap_depth <= 4'(CL + 3);
     endcase
   end
 
@@ -256,7 +309,7 @@ module kaneko_sdram #(
   // ADDRESS DECODE
   //
   // A 32 MB module is 8192 rows x 512 columns x 4 banks of 16-bit words, so
-  // 13 + 9 + 2 = 24 bits, which is exactly the [24:1] word address the ports
+  // 13 + 9 + 2 = 24 bits, which is exactly the [AW:1] word address the ports
   // supply. Column is therefore NINE bits.
   //
   // s32's controller takes the column from [10:1] — ten bits — which with 13
@@ -264,7 +317,19 @@ module kaneko_sdram #(
   // between row and column. Copying that here would have aliased every
   // address pair differing only in bit 10 onto one location, which reads as
   // sporadic data corruption rather than as an address fault.
-  localparam int unsigned COL_BITS = 9;
+  // Word-address width implied by the geometry: bank + row + column.
+  localparam int unsigned AW = BA_BITS + ROW_BITS + COL_BITS;
+
+  // Column value placed on the address bus, skipping A10.
+  function automatic logic [12:0] col_a(input logic [AW:1] a);
+    logic [11:0] c;
+    c = 12'(a[COL_BITS:1]);
+    col_a       = '0;
+    col_a[9:0]  = c[9:0];
+    col_a[10]   = 1'b0;      // no auto-precharge: the row stays open
+    col_a[11]   = c[10];
+    col_a[12]   = c[11];
+  endfunction
 
   logic [3:0]  cmd;
   assign {sd_cs_n, sd_ras_n, sd_cas_n, sd_we_n} = cmd;
@@ -280,12 +345,12 @@ module kaneko_sdram #(
   // Metadata is captured with the request because arbitration may delay a
   // port long after the producer moved on to its next address.
   logic [NP-1:0]        pend;
-  logic [NP-1:0][24:1]  addr_p;
+  logic [NP-1:0][AW:1]  addr_p;
   logic [NP-1:0][15:0]  din_p;
   logic [NP-1:0][1:0]   be_p;
   logic [NP-1:0]        we_p;
   logic                 wr_pend;
-  logic [24:1]          wr_addr_p;
+  logic [AW:1]          wr_addr_p;
   logic [15:0]          wr_din_p;
   logic [1:0]           wr_be_p;
 
@@ -360,7 +425,7 @@ module kaneko_sdram #(
   // ------------------------------------------------------------- transfer
   logic [$clog2(NP+1)-1:0] grant;
   logic                    grant_is_wr;
-  logic [24:1]             xfer_addr;
+  logic [AW:1]             xfer_addr;
   logic [3:0]              rd_total, rd_issued, rd_captured;
   logic                    is_write;
   logic [15:0]             din_r;
@@ -378,16 +443,16 @@ module kaneko_sdram #(
   // masters coexist, because D8 puts them in different address regions and
   // therefore usually in different banks.
   logic [3:0]  bank_open;
-  logic [12:0] bank_row [4];
+  logic [ROW_BITS-1:0] bank_row [4];
   // Cycles still owed to tRAS before that bank's row may be precharged. With
   // auto-precharge the device enforced this internally; taking that back means
   // taking the obligation back with it.
   logic [3:0]  ras_cnt [4];
 
   logic [1:0]  tbank;
-  logic [12:0] trow;
-  assign tbank = xfer_addr[24:23];
-  assign trow  = xfer_addr[22:10];
+  logic [ROW_BITS-1:0] trow;
+  assign tbank = xfer_addr[AW:AW-1];
+  assign trow  = xfer_addr[AW-2:COL_BITS+1];
 
   // A transfer whose bank and row are already open skips PRECHARGE and
   // ACTIVATE. This is the entire reason locality is worth anything: measured
@@ -479,29 +544,6 @@ module kaneko_sdram #(
   // lock, so the first clocked edges after lock perform the reset. Nothing in this
   // controller needs to be reset while its clock is stopped.
   always_ff @(posedge clk) begin
-    // HOLD sd_a EXPLICITLY, so it has no ENABLE.
-    //
-    // Quartus refuses to pack sd_a into the I/O cells - sixteen copies of
-    // "cannot simultaneously use clear and load signals" - and a Cyclone V I/O
-    // register has one or the other. sd_a is never assigned in the reset branch,
-    // so the CLEAR is the block's; the LOAD is sd_a being assigned only in some
-    // states, which synthesises as an enable. Writing the hold explicitly makes
-    // the D input an unconditional mux and removes the enable, leaving a
-    // register the pin can hold.
-    //
-    // Behaviourally identical: a register with no assignment already holds.
-    //
-    // WHY IT MATTERS. The framework constrains this interface not at all - no
-    // generated clock on SDRAM_CLK, no input or output delay, in sys_top.sdc or
-    // ours - so the address path leaves through fabric with uncontrolled delay.
-    // Skewed address bits select the wrong row or column, which is written into
-    // this file's own history: a build whose only change was a debug counter
-    // produced a garbage picture with +0.296 ns reported slack and no new
-    // warnings. The board now reads back a 4096-burst sweep of the math tables
-    // as 04FFFB where the model gives 991AF0 - correct data written, different
-    // data returned - and unpacked address registers are the best candidate for
-    // that in the whole design.
-    sd_a <= sd_a;
     if (!rst_n) begin
       // cmd IS RESET AND THE OTHERS ARE NOT, deliberately.
       //
@@ -627,7 +669,7 @@ module kaneko_sdram #(
               // A write drives DQ, so it may not be issued while read data is
               // still returning on the same wires. Reads have no such
               // restriction, which is what lets them overlap.
-              logic [24:1] sel;
+              logic [AW:1] sel;
               if (wr_pend && !wr_inflight && !pipe_busy) begin
                 grant       <= ($clog2(NP+1))'(WIDX);
                 grant_is_wr <= 1'b1;
@@ -696,8 +738,8 @@ module kaneko_sdram #(
 
           S_ACT: begin
             cmd       <= C_ACT;
-            sd_ba     <= xfer_addr[24:23];
-            sd_a      <= xfer_addr[22:10];
+            sd_ba     <= xfer_addr[AW:AW-1];
+            sd_a      <= 13'(xfer_addr[AW-2:COL_BITS+1]);
             bank_row[tbank]  <= trow;
             bank_open[tbank] <= 1'b1;
             ras_cnt[tbank]   <= 4'(T_RAS - 1);
@@ -712,8 +754,8 @@ module kaneko_sdram #(
 
           S_WR: begin
             cmd      <= C_WRITE;
-            sd_ba    <= xfer_addr[24:23];
-            sd_a     <= {3'b000, 1'b0, xfer_addr[9:1]};  // A10 low: keep row open
+            sd_ba    <= xfer_addr[AW:AW-1];
+            sd_a     <= col_a(xfer_addr);   // A10 low inside col_a: keep row open
             sd_dq_o  <= din_r;
             sd_dq_oe <= 1'b1;
             sd_dqm   <= ~be_r;
@@ -742,13 +784,13 @@ module kaneko_sdram #(
             // One READ per cycle. The last one carries A10, requesting
             // auto-precharge, so the row closes without a separate command.
             cmd        <= C_READ;
-            sd_ba      <= xfer_addr[24:23];
+            sd_ba      <= xfer_addr[AW:AW-1];
             // A10 low: the row stays open so the next transfer to it can skip
             // PRECHARGE and ACTIVATE entirely. A10 is the auto-precharge bit
             // and the column is nine bits, so A9 is padded explicitly — a
             // packing of {3'b000, x, col} would land x on A9, which the device
             // ignores.
-            sd_a       <= {2'b00, 1'b0, 1'b0, xfer_addr[9:1]};
+            sd_a       <= col_a(xfer_addr);
             // Injected at the selected depth, not at the top of the
             // pipeline: the tag reaches slot 0 after cap_depth cycles, which
             // is what decides which bus word is called word 0.
@@ -760,7 +802,7 @@ module kaneko_sdram #(
             // Bursts wrap inside the open row: incrementing the full address
             // would walk off the end of the row on the last column and read
             // from a row that was never activated.
-            xfer_addr[9:1] <= xfer_addr[9:1] + 1'b1;
+            xfer_addr[COL_BITS:1] <= xfer_addr[COL_BITS:1] + 1'b1;
             rd_issued  <= rd_issued + 1'b1;
             if (rd_issued + 1'b1 == rd_total) begin
               // Straight back to arbitration. The row stays open, and the data

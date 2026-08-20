@@ -37,7 +37,10 @@
 static const int NP = 5;
 
 // Burst length per port, mirroring blen() in kaneko_sdram.sv.
-static int burst_of(int p) { return (p == 1 || p == 2) ? 4 : 1; }
+// MIRRORS blen() IN kaneko_sdram.sv, and it did not: it said ports 1 and 2 burst
+// four where blen() said 1, 2 AND 3, so port 3's burst was only ever checked
+// one word deep. All five ports burst four now.
+static int burst_of(int p) { (void)p; return 4; }
 
 struct Harness {
   Vkaneko_sdram_harness* d;
@@ -62,7 +65,7 @@ struct Harness {
   uint32_t wr_addr = 0;
   uint16_t wr_data = 0;
 
-  long fails = 0, checks = 0, max_latency = 0;
+  long fails = 0, checks = 0, max_latency = 0, races = 0;
 
   Harness() {
     d = new Vkaneko_sdram_harness;
@@ -138,9 +141,20 @@ struct Harness {
             uint16_t want = shadow.count(a) ? shadow[a] : 0;
             uint16_t g = (uint16_t)((got >> (16 * w)) & 0xffff);
             checks++;
+
+            // If a write to this address landed after this read was issued,
+            // the pre-write value is equally correct.
+            const bool raced = last_write_cyc.count(a) &&
+                               last_write_cyc[a] >= port[p].issued_at;
+            if (raced && pre_write_val.count(a) && g == pre_write_val[a]) {
+              races++;
+              continue;
+            }
+
             if (g != want && fails < 20) {
-              printf("  FAIL p%d addr=%06x word=%d got=%04x want=%04x\n",
-                     p, a, w, g, want);
+              printf("  FAIL p%d addr=%06x word=%d got=%04x want=%04x%s\n",
+                     p, a, w, g, want,
+                     raced ? "  (raced, and matched neither value)" : "");
               fails++;
             } else if (g != want) {
               fails++;
@@ -159,6 +173,15 @@ struct Harness {
     wr_ack_prev = wack;
   }
 
+  // A write to an address that a read is ALREADY in flight over may land
+  // either side of that read: the controller gives no ordering guarantee
+  // between independent ports, and never claimed to. So for such an address
+  // both the pre-write and post-write values are correct answers, and the
+  // shadow model — which updates at issue time — cannot express that on its
+  // own. These two maps record what a raced read is allowed to return.
+  std::map<uint32_t,long>     last_write_cyc;   // address -> cycle of last write
+  std::map<uint32_t,uint16_t> pre_write_val;    // address -> value before it
+
   void issue(int p, uint32_t addr, bool write, uint16_t data, uint8_t be = 3) {
     int words = write ? 1 : burst_of(p);
     if (words > 1) addr &= ~(uint32_t)(words - 1);   // bursts are aligned
@@ -171,10 +194,13 @@ struct Harness {
     port[p].req_held = true;
     if (write) {
       if (be & 1) shadow[addr] = (shadow.count(addr) ? shadow[addr] : 0);
-      uint16_t cur = shadow.count(addr) ? shadow[addr] : 0;
+      const uint16_t before = shadow.count(addr) ? shadow[addr] : 0;
+      uint16_t cur = before;
       if (be & 1) cur = (cur & 0xff00) | (data & 0x00ff);
       if (be & 2) cur = (cur & 0x00ff) | (data & 0xff00);
       shadow[addr] = cur;
+      last_write_cyc[addr] = cyc;
+      pre_write_val[addr]  = before;
     }
   }
 
@@ -212,11 +238,23 @@ int main(int argc, char** argv) {
   // bit 1: bank is [23:22], row is [21:9], column is [8:0]. Getting these
   // shifts wrong puts the shadow memory and the device at different
   // locations, which looks exactly like a broken read path.
+  // GEOMETRY-DRIVEN, not hardcoded. TB_COL_BITS must match the -GCOL_BITS the
+  // harness was built with: 9 for a 32 MB module, 11 for 128 MB. If the two
+  // disagree the shadow memory and the device sit at different locations, which
+  // looks exactly like a broken read path -- the trap the comment above names.
+#ifndef TB_COL_BITS
+#define TB_COL_BITS 9
+#endif
+  const uint32_t CB = TB_COL_BITS;
+  const uint32_t AWB = 2 + 13 + CB;             // total word-address bits
+  printf("test: geometry %u column bits -> %u MB module\n",
+         CB, (1u << AWB) / (1024u * 1024u) * 2u);
   auto pick_addr = [&](std::mt19937& r) -> uint32_t {
     uint32_t bank = r() & 3;
-    uint32_t row  = r() % 6;          // few rows, so conflicts are common
-    uint32_t col  = r() & 0x1ff;      // 9 column bits on a 32 MB module
-    return (bank << 22) | (row << 9) | col;
+    uint32_t row  = r() % 6;                    // few rows, so conflicts happen
+    uint32_t col  = r() & ((1u << CB) - 1u);
+    // 0-based value bit 0 is address bit 1, so bank sits at AWB-2.
+    return (bank << (AWB - 2)) | (row << CB) | col;
   };
 
   printf("test: ROM download writes, then read back through every port\n");
@@ -431,6 +469,11 @@ int main(int argc, char** argv) {
     h.fails++;
   }
 
+  // Reported rather than hidden. A run showing zero here has not exercised the
+  // concurrent write/read path at all, and this number drifting to 0 would mean
+  // the test quietly stopped covering the case it was added for.
+  printf("  reads accepted as raced (returned the legal pre-write value): %ld\n",
+         h.races);
   printf("kaneko_sdram: checks=%ld fails=%ld violations=%u reads=%u writes=%u\n",
          h.checks, h.fails, h.d->violations, h.d->reads_served,
          h.d->writes_served);

@@ -1553,3 +1553,94 @@ carries its own passing testbenches. Blanket-waiving was avoided.
 
 Also added `` `timescale 1ns/1ps `` to our own RTL, which previously had none —
 Verilator warns when some modules have one and others do not.
+
+---
+
+## 2026-08-20 — SDRAM re-ported from Model 2; the Model 1 version would fail on hardware
+
+**Raised by the user**, who asked whether the Model 2 controller was better and
+whether it was set up for 64 MB before trusting the port. Both halves of that
+question were worth asking.
+
+**Model 2 is configured for 64 MB**: `SDR_COL = 10` (8192 x 1024 x 4), 25-bit
+word address. Model 1 hardcodes `localparam COL_BITS = 9` and a `[24:1]`
+address — 32 MB, and it cannot address a 64 MB module at all.
+
+**Model 2's controller is a later, hardware-corrected version of the same
+file.** Four differences, every one found on a real board and every one
+invisible in simulation:
+
+1. **Geometry fixed at 32 MB** in Model 1, parameterised in Model 2.
+2. **A10 aliasing.** Column bits map to A0..A9 then A11, A12 — skipping A10,
+   the auto-precharge flag. A straight `a[COL_BITS-1:0]` slice is correct only
+   up to nine column bits; at ten it puts a column bit where the precharge flag
+   lives. Model 1 never reaches it because it is fixed at nine, so the bug is
+   latent rather than absent. The device *model* had the same fault and it
+   "made a correct 128 MB controller look broken: 3,965 data mismatches with
+   ZERO protocol violations".
+3. **Port 0 returned a single word.** A single-word read carries A10 on its
+   FIRST command, because the first word is also the last, so the row closes
+   tRCD+1 cycles after activation — inside tRAS on a real device and tolerated
+   by a behavioural model. On the board the CPU port read zero while other
+   ports read correctly from the same SDRAM. All ports now burst four.
+4. **Capture depth range too late.** Model 1 offers CL+2..CL+5; the board needs
+   CL+1 or earlier. A write-then-read of AA55/5AA5/FF00/00FF came back shifted
+   by exactly one 16-bit word, and no setting in the old range could correct
+   it — which is why cycling the OSD option produced garbage at every position
+   and was misread as "the phase is not involved".
+
+The Model 1 port would have passed every test here and failed on hardware.
+
+---
+
+## 2026-08-20 — the two SDRAM "failures" were a testbench race, not an RTL bug
+
+The Model 2 controller reported 2 failures out of 123,927 in its concurrent
+test. Building the **pristine, unmodified** Model 2 sources reproduced them
+exactly — same addresses, same values — so the port was faithful and the
+question was whether the controller or the test was wrong.
+
+Bisected by removing stimulus:
+
+```
+writes with byte-enables:  2 fails
+writes, full words only:   1 fail
+no writes at all:          0 fails
+```
+
+So it needed a write concurrent with reads. Instrumenting the check to ask
+whether the failing address had been written *while that read was already in
+flight* answered it: **both were.**
+
+**The controller is correct.** It gives no ordering guarantee between
+independent ports with concurrent outstanding transactions, and never claimed
+to — so a read that overlaps a write to the same address may legitimately
+return either value. The harness's shadow model updates at write *issue* time
+and therefore expected only the post-write value. `pick_addr` deliberately uses
+just 6 rows and 4 banks ("few rows, so conflicts happen"), which makes such
+collisions common rather than exotic.
+
+Fixed in the harness, not the RTL: a raced read now accepts the pre-write value
+as equally correct, and the count is **reported** rather than silently
+absorbed —
+
+```
+reads accepted as raced (returned the legal pre-write value): 2
+kaneko_sdram: checks=123927 fails=0 violations=0
+```
+
+Reporting it matters: a run showing zero there has not exercised the concurrent
+write/read path at all, and the number quietly drifting to 0 would mean the
+test stopped covering the case it exists for.
+
+Clean at all three geometries:
+
+| COL_BITS | module | result |
+|---|---|---|
+| 9 | 32 MB | checks=123927 fails=0 violations=0 |
+| 10 | **64 MB** | checks=103267 fails=0 violations=0 |
+| 11 | 128 MB | checks=95475 fails=0 violations=0 |
+
+**Worth feeding back to the Model 2 project**, where the same two failures are
+live in its own suite. The fix is to the testbench's expectation, not to the
+controller.
