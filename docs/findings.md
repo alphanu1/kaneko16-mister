@@ -3393,3 +3393,29 @@ makes there are unmapped in MAME as well as here. The earlier boot trace's
 `unmapped 4, first at E40000` was therefore correct behaviour, not a missing
 decode. Other titles in the driver do use `coin_lockout_w`, and it arrives with
 their memory maps.
+
+### The build: sprites and controls fit comfortably
+
+```
+Logic utilization (ALMs)  13,896 / 41,910  (33%)
+Total block memory bits    3,177,885 / 5,662,720  (56%)
+M10K blocks                  414 / 553  (75%)
+```
+
+All five timing summaries positive: setup 0.483, hold 0.174, recovery 3.557,
+removal 0.486, minimum pulse width 1.041. Checked by reading each section and
+counting its rows (7/7/4/4/11) — an earlier check on this core reported "all
+timing met" from a parser that had matched zero rows, which is the same as not
+checking.
+
+**The sprite memory came in cheaper than budgeted and it is worth knowing why.**
+The estimate was 2.28 Mbit for two 256x256 surfaces plus masks and the table;
+the actual delta is 1.55 Mbit. `bmp_data <= {b_prio, 4'd0, b_colour, b_pix}`
+carries four constant zero bits, and Quartus stored 12 bits per pixel instead
+of 16. Splitting priority into its own narrow memory by hand had been
+considered to save exactly this; measuring first rather than hand-optimising
+was the right call, and the fitter did it for free.
+
+75% of M10K is the number to watch. Sprites doubled the block-RAM demand, and
+the remaining 139 blocks are what rotation, a second VIEW2 configuration and
+the Blaze On board's larger surfaces have to come out of.
