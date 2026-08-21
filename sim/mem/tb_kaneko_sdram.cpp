@@ -29,17 +29,23 @@
 #include "Vkaneko_sdram_harness.h"
 #include "verilated.h"
 #include <cstdio>
+#include <cstdlib>
 #include <cstdint>
 #include <map>
 #include <random>
 #include <vector>
 
-static const int NP = 5;
+// MUST MATCH Kaneko16.sv's NPORTS. It did not: the core ran six ports and this
+// tested five, so the OKI's port was the one port never arbitrated in a test —
+// and it was also the one port blen() forgot, which is how a single-word burst
+// reached hardware and made the sound path silent.
+static const int NP = 6;
 
-// Burst length per port, mirroring blen() in kaneko_sdram.sv.
-// MIRRORS blen() IN kaneko_sdram.sv, and it did not: it said ports 1 and 2 burst
-// four where blen() said 1, 2 AND 3, so port 3's burst was only ever checked
-// one word deep. All five ports burst four now.
+// Burst length per port. This mirrored a per-port blen() in kaneko_sdram.sv and
+// got it wrong twice — once claiming ports 1 and 2 burst four where the RTL said
+// 1, 2 and 3, and once by not growing when a sixth port was added. The RTL side
+// is now a single constant for every read port, so there is nothing left to
+// mirror incorrectly.
 static int burst_of(int p) { (void)p; return 4; }
 
 struct Harness {
@@ -71,40 +77,55 @@ struct Harness {
     d = new Vkaneko_sdram_harness;
     d->clk = 0; d->rst_n = 0;
     d->wr_req = 0; d->wr_addr = 0; d->wr_din = 0; d->wr_be = 3;
-    d->p0_req = d->p1_req = d->p2_req = d->p3_req = d->p4_req = 0;
+    d->p0_req = d->p1_req = d->p2_req = d->p3_req = d->p4_req = d->p5_req = 0;
     d->p0_we = 0; d->p0_din = 0; d->p0_be = 3;
-    d->p0_addr = d->p1_addr = d->p2_addr = d->p3_addr = d->p4_addr = 0;
+    d->p0_addr = d->p1_addr = d->p2_addr = d->p3_addr = d->p4_addr =
+        d->p5_addr = 0;
     d->mon_sel = 0; d->mon_snap = 0;
     d->eval();
   }
   ~Harness() { delete d; }
 
+  // NO `default:` IN ANY OF THESE. Each one used to end in one, which routed
+  // an out-of-range port number onto port 4 rather than complaining. When NP
+  // grew to 6 the testbench drove port 4 twice and never touched port 5, so
+  // the port the OKI uses was the one port that was never exercised — and it
+  // was also the one port kaneko_sdram's blen() forgot. Two silent defaults,
+  // one on each side, agreeing with each other about a port neither served.
+  void abortPort(int p) const {
+    std::printf("  FATAL: port %d is out of range; NP is %d\n", p, NP);
+    std::abort();
+  }
   void setReq(int p, int v) {
     switch (p) {
       case 0: d->p0_req = v; break; case 1: d->p1_req = v; break;
       case 2: d->p2_req = v; break; case 3: d->p3_req = v; break;
-      default: d->p4_req = v; break;
+      case 4: d->p4_req = v; break; case 5: d->p5_req = v; break;
+      default: abortPort(p);
     }
   }
   void setAddr(int p, uint32_t a) {
     switch (p) {
       case 0: d->p0_addr = a; break; case 1: d->p1_addr = a; break;
       case 2: d->p2_addr = a; break; case 3: d->p3_addr = a; break;
-      default: d->p4_addr = a; break;
+      case 4: d->p4_addr = a; break; case 5: d->p5_addr = a; break;
+      default: abortPort(p);
     }
   }
   bool getAck(int p) {
     switch (p) {
       case 0: return d->p0_ack; case 1: return d->p1_ack;
       case 2: return d->p2_ack; case 3: return d->p3_ack;
-      default: return d->p4_ack;
+      case 4: return d->p4_ack; case 5: return d->p5_ack;
+      default: abortPort(p); return false;
     }
   }
   uint64_t getDout(int p) {
     switch (p) {
       case 0: return d->p0_dout; case 1: return d->p1_dout;
       case 2: return d->p2_dout; case 3: return d->p3_dout;
-      default: return d->p4_dout;
+      case 4: return d->p4_dout; case 5: return d->p5_dout;
+      default: abortPort(p); return 0;
     }
   }
 

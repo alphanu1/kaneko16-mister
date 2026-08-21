@@ -375,6 +375,15 @@ int main(int argc, char** argv) {
     delete dut;
     std::printf("\n");
 
+    // ------------------------------------------------------- OKI telemetry
+    // The same four links the hardware overlay counts, so a run here and a
+    // photograph of the debug rows answer the same question. Every one of
+    // these is zero if the sample ROM never reaches the chip.
+    std::printf("    OKI writes      %u\n", (unsigned)dut->oki_wr_cnt);
+    std::printf("    OKI ROM fetches %u\n", (unsigned)dut->oki_ok_cnt);
+    std::printf("    OKI busy clocks %u\n", (unsigned)dut->oki_busy_cnt);
+    std::printf("    OKI sample clks %u\n", (unsigned)dut->oki_snd_cnt);
+
     // ------------------------------------------------------------ verdict
     std::printf("== verdict\n");
     const bool a_ok = a.got_vectors && a.reset_ssp == want_ssp && a.reset_pc == want_pc;

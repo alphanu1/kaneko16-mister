@@ -223,15 +223,27 @@ module kaneko_sdram #(
   // A 64-bit p_dout holds four words, so the CPU's 32-bit access now takes ONE
   // transaction instead of two -- which also removes the held-acknowledge
   // hazard of study R32 rather than working around it.
-  function automatic logic [3:0] blen(input int unsigned p);
-    case (p)
-      // ALL FOUR PORTS BURST FOUR. Port 4 joined them for the read-back sweep,
-      // which folds four words per request; and a single-word read auto-
-      // precharges on its first command, which R33 records.
-      0, 1, 2, 3, 4: blen = 4'd4;
-      default: blen = 4'd1;
-    endcase
-  endfunction
+  // EVERY READ PORT BURSTS FOUR, AND THIS IS NO LONGER A LIST.
+  //
+  // It was `case (p) 0,1,2,3,4: 4; default: 1;`, a hand-maintained list that
+  // had to be extended every time a port was added. Port 5 was added for the
+  // OKI M6295's sample fetch and this was not, so the OKI alone got a
+  // single-word burst.
+  //
+  // That does not fail cleanly. p_dout is 64 bits and the capture registers
+  // hold their previous contents, so a one-word burst returns two correct
+  // bytes and six stale ones. kaneko_tilerom treats the whole 64 bits as its
+  // cache line, and jt6295 reads a six-byte phrase header out of it to get a
+  // sample's start and stop addresses — so the chip was handed two good bytes
+  // and four bytes of the last thing another port had read, and decoded a
+  // sample from nowhere. Silence, with every link in the chain reporting that
+  // it worked.
+  //
+  // There is no port that wants one word. A write is a single word and asks
+  // for that explicitly at the call site; a read always fills all four. So the
+  // per-port form is gone rather than corrected — a default that is wrong for
+  // every future port is a trap, not a default.
+  localparam logic [3:0] RD_BLEN = 4'd4;
 
   localparam logic [3:0] C_NOP   = 4'b0111;   // {cs,ras,cas,we}
   localparam logic [3:0] C_ACT   = 4'b0011;
@@ -686,7 +698,7 @@ module kaneko_sdram #(
                 din_r       <= din_p[rr_grant];
                 be_r        <= be_p[rr_grant];
                 is_write    <= we_p[rr_grant];
-                rd_total    <= we_p[rr_grant] ? 4'd1 : blen(rr_grant);
+                rd_total    <= we_p[rr_grant] ? 4'd1 : RD_BLEN;
                 // Writes take it too: a port writing is equally in flight and
                 // equally must not be re-selected before it completes.
                 inflight[rr_grant] <= 1'b1;

@@ -281,10 +281,10 @@ boot: regions
 	@mkdir -p build/tmp
 	@$(VERILATOR) $(VBUILD) $(VFLAGS) --top-module kaneko_cpumem_harness \
 	  --Mdir build/obj_kaneko_cpumem -o kaneko_cpumem \
-	  $(RTL) $(SIM_SV) $(FX68K_SIM) $(JT49_SIM) sim/top/tb_kaneko_cpumem.cpp >/dev/null 2>&1 || { \
+	  $(RTL) $(SIM_SV) $(FX68K_SIM) $(JT49_SIM) $(JT6295_SIM) sim/top/tb_kaneko_cpumem.cpp >/dev/null 2>&1 || { \
 	    $(VERILATOR) $(VBUILD) $(VFLAGS) --top-module kaneko_cpumem_harness \
 	      --Mdir build/obj_kaneko_cpumem -o kaneko_cpumem \
-	      $(RTL) $(SIM_SV) $(FX68K_SIM) $(JT49_SIM) sim/top/tb_kaneko_cpumem.cpp; \
+	      $(RTL) $(SIM_SV) $(FX68K_SIM) $(JT49_SIM) $(JT6295_SIM) sim/top/tb_kaneko_cpumem.cpp; \
 	    echo "BUILD FAILED: kaneko_cpumem"; exit 1; }
 	@[ -f $(ROM_DIR)/$(SET)_maincpu.bin ] || { \
 	  echo "boot: $(SET) has no maincpu region."; \

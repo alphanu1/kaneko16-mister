@@ -2996,3 +2996,70 @@ region and played the wrong sample rather than failing, which is exactly the
 failure mode hard rule 9 exists for.
 It is now `kaneko_oki_bank`'s `MAX_BANK` parameter, checked at ten points
 against MAME's rule, and it joins the game table with everything else.
+
+### The bug: the OKI's SDRAM port burst one word instead of four
+
+`kaneko_sdram` chose a burst length per port from a hand-written list:
+
+```systemverilog
+function automatic logic [3:0] blen(input int unsigned p);
+  case (p)
+    0, 1, 2, 3, 4: blen = 4'd4;
+    default: blen = 4'd1;
+  endcase
+endfunction
+```
+
+Port 5 was added for the OKI's sample fetch. This was not. So the OKI, alone
+among six masters, got a single-word burst.
+
+That does not fail cleanly, which is why every link in the chain reported
+success. `p_dout` is 64 bits and the capture registers hold their previous
+contents, so a one-word burst returns **two correct bytes and six stale ones**
+— whatever the last port to use that capture slot happened to read.
+`kaneko_tilerom` takes the whole 64 bits as its cache line and reports a hit,
+so `rom_ok` asserted normally. jt6295 then read a six-byte phrase header out of
+it to get a sample's start and stop addresses, got two good bytes and four
+bytes of somebody else's tile data, and decoded a sample from nowhere.
+
+Silence, with the CPU writing correctly, the ROM feeder answering, and the
+cache hitting. Nothing in the isolated `sim/sound` harness could see it: its
+SDRAM model returns all eight bytes, because that is what the protocol says.
+
+#### Two `default:` clauses agreeing about a port neither served
+
+The reason this survived is worth more than the fix. `sim/mem/tb_kaneko_sdram.cpp`
+tested `NP = 5` while `Kaneko16.sv` ran `NPORTS = 6`, and every port accessor in
+the testbench ended in
+
+```c++
+default: return d->p4_dout;
+```
+
+so a request for port 5 was quietly answered with port 4. The testbench drove
+port 4 twice and never touched port 5. One silent default in the RTL and one in
+the testbench, each hiding the same port, each looking correct in isolation.
+
+Bumping the harness to `NP = 6` produced 3,954 immediate failures on p5 and
+`req=0 grant=0` from the bandwidth monitor. With the port properly plumbed and
+the burst fixed, all six ports serve and p5 takes a fair share of grants
+(49,247 against p4's 49,280).
+
+Both defaults are gone. The RTL has one `RD_BLEN = 4` for every read port —
+there is no port that wants one word, and a write asks for a single word
+explicitly at its call site. The testbench aborts on an out-of-range port
+instead of aliasing it.
+
+This is the second time this exact mirror has been wrong: a comment in the
+testbench already recorded that it once claimed ports 1 and 2 burst four where
+the RTL said 1, 2 and 3. A hand-maintained list in two places, checked by
+neither, fails the same way every time.
+
+#### The rule this earns
+
+**A port count, or any other size the core picks, is a number the harness must
+be forced to agree with — not one it restates.** `NPORTS` in `Kaneko16.sv` and
+`NP` in the SDRAM harness were independent constants that happened to match
+until they did not. Where two files must agree on a width, the test has to fail
+loudly when they diverge, and `default:` is exactly the construct that stops it
+failing.

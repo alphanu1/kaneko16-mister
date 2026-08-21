@@ -20,7 +20,7 @@
 module kaneko_cpumem_harness #(
     parameter int unsigned SDR_AW  = 25,
     parameter int unsigned SDR_COL = 10,
-    parameter int unsigned NPORTS  = 5
+    parameter int unsigned NPORTS  = 6
 ) (
     input  wire        clk,
     input  wire        rst,
@@ -35,6 +35,12 @@ module kaneko_cpumem_harness #(
 
     // Set to stop the video port requesting, to test the CPU uncontended.
     input  wire        video_idle,
+
+    // OKI sound telemetry, the four links the hardware overlay counts.
+    output logic [31:0] oki_wr_cnt,
+    output logic [31:0] oki_ok_cnt,
+    output logic [31:0] oki_busy_cnt,
+    output logic [31:0] oki_snd_cnt,
 
     // TEST ONLY: force an interrupt level onto the CPU, bypassing kaneko_irq.
     //
@@ -119,6 +125,14 @@ module kaneko_cpumem_harness #(
     wire        p1_req;
     wire [SDR_AW:1] p1_addr;
 
+    // Port 5, the OKI's sample fetch. Present here so the sound path is tested
+    // against the REAL controller and the REAL ROM image rather than the ideal
+    // memory in sim/sound — an arbiter that starves the sixth port, or samples
+    // that are not at 0x4c0000, both look exactly like a chip that does not
+    // work, and neither is visible in an isolated harness.
+    wire            p5_req;
+    wire [SDR_AW:1] p5_addr;
+
     kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300)) u_sdram
     (
         .clk(clk), .rst_n(~rst), .ready(mem_ready),
@@ -132,11 +146,11 @@ module kaneko_cpumem_harness #(
         .wr_req(ldr_wr_req), .wr_addr(ldr_wr_addr), .wr_din(ldr_wr_din),
         .wr_be(ldr_wr_be), .wr_ack(ldr_wr_ack),
 
-        .p_req  ({3'b0, p1_req, p0_req}),
-        .p_addr ({{3{{SDR_AW{1'b0}}}}, p1_addr, p0_addr}),
-        .p_din  ({5{16'd0}}),
-        .p_be   ({5{2'b11}}),
-        .p_we   (5'b0),
+        .p_req  ({p5_req, 3'b0, p1_req, p0_req}),
+        .p_addr ({p5_addr, {3{{SDR_AW{1'b0}}}}, p1_addr, p0_addr}),
+        .p_din  ({6{16'd0}}),
+        .p_be   ({6{2'b11}}),
+        .p_we   (6'b0),
         .p_ack  (p_ack_bus),
         .p_dout (p_dout_bus),
         .dbg_req(), .dbg_grant()
@@ -250,6 +264,7 @@ module kaneko_cpumem_harness #(
     wire [3:0]  ym_addr;
     wire [7:0]  ym_din, eeprom_din;
     wire [7:0]  ym0_q, ym1_q, ym1_iob_out;
+    wire [7:0]  ym0_iob_out;   // OKI bank register, MAME's oki_bank0_w<7>
     wire        eeprom_do;
 
     jt49 u_ym0 (
@@ -258,7 +273,7 @@ module kaneko_cpumem_harness #(
         .sel(1'b1), .dout(ym0_q),
         .sound(), .A(), .B(), .C(), .sample(),
         .IOA_in(8'hff), .IOA_out(), .IOA_oe(),
-        .IOB_in(8'hff), .IOB_out(), .IOB_oe()
+        .IOB_in(8'hff), .IOB_out(ym0_iob_out), .IOB_oe()
     );
 
     jt49 u_ym1 (
@@ -307,7 +322,7 @@ module kaneko_cpumem_harness #(
         .ym0_we(ym0_we), .ym1_we(ym1_we), .ym_addr(ym_addr), .ym_din(ym_din),
         .ym0_q(ym0_q), .ym1_q(ym1_q),
         .eeprom_we(eeprom_we), .eeprom_din(eeprom_din),
-        .oki_we(), .oki_din(), .oki_dout(8'h00),
+        .oki_we(oki_we), .oki_din(oki_din), .oki_dout(oki_dout),
 
         .v2r0_we(), .v2r1_we(), .sprreg_we(),
         .reg_addr(), .reg_din(),
@@ -318,6 +333,62 @@ module kaneko_cpumem_harness #(
 
         .unmapped_hit(unmapped_hit), .unmapped_addr(unmapped_addr)
     );
+
+    // ------------------------------------------------------------- OKI
+    // Identical wiring to Kaneko16.sv. ym0_iob_out is the bank register; the
+    // YM2149s are not instantiated here, so it is held at the reset value the
+    // chip would present until the game writes one.
+    wire       oki_we;
+    wire [7:0] oki_din;
+    wire [7:0] oki_dout;
+
+    localparam [SDR_AW:1] OKI_BASE = SDR_AW'(25'h260000);
+
+    wire [17:0] oki_rom_addr;
+    wire [7:0]  oki_rom_data;
+    wire [0:0]  oki_rom_ok;
+    wire [23:0] oki_region_addr;
+    wire signed [13:0] oki_snd;
+
+    kaneko_oki_bank #(.MAX_BANK(7)) u_okibank (
+        .chip_addr(oki_rom_addr),
+        .bank(ym0_iob_out[2:0]),
+        .region_addr(oki_region_addr)
+    );
+
+    kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_okirom (
+        .clk(clk), .rst(rst),
+        .req_addr(oki_region_addr),
+        .base_addr(OKI_BASE),
+        .req_data(oki_rom_data),
+        .port_ready(oki_rom_ok),
+        .sdr_req(p5_req), .sdr_addr(p5_addr),
+        .sdr_ack(p_ack_bus[5]), .sdr_dout(p_dout_bus[5])
+    );
+
+    jt6295 u_oki (
+        .rst(rst), .clk(clk), .cen(ym_cen),
+        .ss(1'b1),
+        .wrn(~oki_we), .din(oki_din), .dout(oki_dout),
+        .rom_addr(oki_rom_addr), .rom_data(oki_rom_data),
+        .rom_ok(oki_rom_ok[0]),
+        .sound(oki_snd), .sample()
+    );
+
+    // The same four counts the hardware overlay shows, so a hardware
+    // photograph and a simulation run are directly comparable.
+    reg oki_ok_d;
+    always_ff @(posedge clk) begin
+        oki_ok_d <= oki_rom_ok[0];
+        if (rst) begin
+            oki_wr_cnt <= 0; oki_ok_cnt <= 0; oki_busy_cnt <= 0; oki_snd_cnt <= 0;
+        end else begin
+            if (oki_we)                     oki_wr_cnt   <= oki_wr_cnt   + 1;
+            if (oki_rom_ok[0] && !oki_ok_d) oki_ok_cnt   <= oki_ok_cnt   + 1;
+            if (oki_dout[3:0] != 4'd0)      oki_busy_cnt <= oki_busy_cnt + 1;
+            if (oki_snd != 14'sd0)          oki_snd_cnt  <= oki_snd_cnt  + 1;
+        end
+    end
 
     kaneko_vmem u_vmem
     (
