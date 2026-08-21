@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
 
         // Stall until every port has its byte, exactly as the core will.
         int guard = 0;
-        while (!dut->ready && guard++ < 500) { tick(); stall_cycles++; }
+        while (dut->port_ready != 0xf && guard++ < 500) { tick(); stall_cycles++; }
         if (guard >= 500) { std::printf("  FAIL feeder never became ready\n"); fails++; break; }
 
         ck("layer 0 byte", dut->d0, rom[(base[0] + addr[0]) % rom.size()]);

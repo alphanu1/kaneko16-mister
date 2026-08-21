@@ -620,7 +620,7 @@ wire [43:0] lay_dy = { 11'(V2_DY), 11'(V2_DY), 11'(V2_DY), 11'(V2_DY) };
 // ------------------------------------------------------- tile ROM feeder
 wire [95:0] trom_addr_f;
 wire [31:0] trom_data_f;
-wire        trom_ready;
+wire [3:0]  trom_ready;
 wire [SDR_AW*4-1:0] trom_base_f = { TROM1_BASE, TROM1_BASE,
                                     TROM0_BASE, TROM0_BASE };
 
@@ -630,7 +630,7 @@ kaneko_tilerom #(.NREQ(4), .SDR_AW(SDR_AW)) u_trom
 	.req_addr(trom_addr_f),
 	.base_addr(trom_base_f),
 	.req_data(trom_data_f),
-	.ready(trom_ready),
+	.port_ready(trom_ready),
 	// One port per layer. p1 is the 68000; the rest are the tile feeder's.
 	.sdr_req({p4_req, p3_req, p2_req, p0_req}),
 	.sdr_addr({p4_addr, p3_addr, p2_addr, p0_addr}),
@@ -818,15 +818,16 @@ wire [7:0] out_b = in_dbg ? 8'h00 : src_b;
 // Everything the framework looks at is delayed by the same two clocks instead,
 // so the relationship between colour, blanking, syncs and the pixel strobe is
 // exactly what the timing generator produced.
+// The COLOUR IS NOT DELAYED. It already carries the two clocks — the line
+// buffer read and the palette read are both registered — so delaying it again
+// put it two clocks behind the syncs and the framework sampled the previous
+// pixel. Only the syncs and the pixel strobe move.
 reg [1:0] hs_d, vs_d, de_d, cep_d;
-reg [7:0] r_d0, g_d0, b_d0, r_d1, g_d1, b_d1;
 always @(posedge clk_sys) begin
 	hs_d  <= {hs_d[0],  hs};
 	vs_d  <= {vs_d[0],  vs};
 	de_d  <= {de_d[0],  de};
 	cep_d <= {cep_d[0], ce_pix};
-	r_d0 <= out_r; g_d0 <= out_g; b_d0 <= out_b;
-	r_d1 <= r_d0;  g_d1 <= g_d0;  b_d1 <= b_d0;
 end
 
 assign CLK_VIDEO = clk_sys;
@@ -834,9 +835,9 @@ assign CE_PIXEL  = cep_d[1];
 assign VGA_DE    = de_d[1];
 assign VGA_HS    = hs_d[1];
 assign VGA_VS    = vs_d[1];
-assign VGA_R     = r_d1;
-assign VGA_G     = g_d1;
-assign VGA_B     = b_d1;
+assign VGA_R     = out_r;
+assign VGA_G     = out_g;
+assign VGA_B     = out_b;
 
 endmodule
 

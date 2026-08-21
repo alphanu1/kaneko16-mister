@@ -2833,3 +2833,36 @@ Not yet snapshotted: the line-scroll RAM. MAME copies all 512 rows of it in the
 same `prepare_common()`, and the core still reads it live per line. A game that
 rewrites scroll RAM mid-frame would tear the same way. Nothing has shown that
 yet, and snapshotting it costs 2048 words, so it is recorded rather than done.
+
+### Block RAM inference, narrower than the rule already recorded
+
+The per-layer line buffers went through three shapes before Quartus would infer
+them, and only the first one produced a warning:
+
+| declaration | result |
+| --- | --- |
+| `lbuf [0:1][0:H_VIS-1]` | "EDA Netlist Writer cannot regroup multidimensional array into its bus" — flip-flops |
+| `lbuf [0:2*H_VIS-1]`, indexed `lbuf[{bank, x_wr}]` | **no message at all**, still flip-flops |
+| `lb0`/`lb1`, plain arrays, plain address signal | inferred |
+
+The middle case is the one worth remembering. It obeys the rule already written
+down for `kaneko_vmem` — one plain one-dimensional array per memory — and still
+did not infer, because the *index* was a concatenation. Quartus said nothing.
+
+The only symptoms were the resource numbers: **26,949 ALMs against 12,412**, and
+a block-memory total that fell by exactly 28,672 bits, the size of the memory
+that had vanished. `kaneko_tmap_line` alone showed 14,014 ALMs in the fitter's
+hierarchy report, which is how it was localised.
+
+So the rule is narrower than previously recorded: a memory needs a plain array
+AND a plain address signal. Four things are now known to prevent inference,
+none of which look wrong when read:
+
+- bit-slice writes (`mem[a][15:8] <= ...`)
+- conditional reads (a read inside a mux)
+- a reset that clears every location
+- an array of arrays, **or a concatenated index**
+
+And the cheap check for all of them is `quartus_map` alone — two minutes against
+the full flow's eighteen — grepping for `Inferred altsyncram` per array. That
+found this one before a build was spent on it.

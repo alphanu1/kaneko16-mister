@@ -65,14 +65,22 @@ void feed() {
         rd |= (mix(held_rom[g] + g * 0x555) & 0xff) << (g * 8);
     dut->rom_data_f = rd;
 
-    dut->rom_ready = stall_enabled ? ((rng() % 5) != 0) : 1;
+    // Four bits now, one per layer, stalled independently. That independence
+    // is the point of the change under test: the layers no longer share a
+    // clock enable, so a miss in one must not hold up the other three.
+    if (!stall_enabled) dut->rom_ready = 0xf;
+    else {
+        uint8_t r = 0;
+        for (int g = 0; g < 4; g++) if ((rng() % 5) != 0) r |= 1u << g;
+        dut->rom_ready = r;
+    }
 }
 
 // Capture what this cycle asked for, so the next one can answer it — and only
 // when the pipeline advanced, which is what makes a stall transparent.
 void capture() {
-    if (!dut->rom_ready) return;
     for (int g = 0; g < 4; g++) {
+        if (!((dut->rom_ready >> g) & 1)) continue;
         held_scr[g]  = (uint32_t)((dut->scr_addr_f  >> (g * 9))  & 0x1ff);
         held_vram[g] = (uint32_t)((dut->vram_addr_f >> (g * 10)) & 0x3ff);
         const int lo = g * 24;
@@ -133,7 +141,7 @@ int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
     dut = new Vkaneko_tmap_line;
 
-    dut->rst = 1; dut->start = 0; dut->rom_ready = 1; dut->rd_x = 0;
+    dut->rst = 1; dut->start = 0; dut->rom_ready = 0xf; dut->rd_x = 0;
     dut->layer_en = 0xf; dut->linescroll_en = 0xf;
     dut->dx_f = 0; dut->dy_f = 0; dut->scroll_x_f = 0; dut->scroll_y_f = 0;
     for (int i = 0; i < 8; i++) tick();

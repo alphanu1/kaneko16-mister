@@ -56,8 +56,9 @@ module kaneko_tilerom #(
     input  wire [NREQ-1:0][SDR_AW:1] base_addr,   // region base, word address
     output wire [NREQ-1:0][7:0]      req_data,
 
-    // Low while any port is missing. Drives kaneko_tmap_fetch's ce.
-    output wire ready,
+    // Per-port hit. Each layer advances on its own, so a miss in one does not
+    // hold up the other three — see the note in kaneko_tmap_line.
+    output wire [NREQ-1:0] port_ready,
 
     // ONE SDRAM PORT PER LAYER, not one shared between them.
     //
@@ -91,7 +92,7 @@ module kaneko_tilerom #(
         end
     endgenerate
 
-    assign ready = &hit;
+    assign port_ready = hit;
 
     // Per-port fill, entirely independent: one burst, one block.
     typedef enum logic { S_IDLE, S_WAIT } state_t;

@@ -54,7 +54,7 @@ module kaneko_tmap_line #(
     input  wire [127:0] vram_data_f,   // 4 x 32
     output wire [95:0] rom_addr_f,     // 4 x 24
     input  wire [31:0] rom_data_f,     // 4 x 8
-    input  wire        rom_ready,      // kaneko_tilerom: all ports hit
+    input  wire [3:0]  rom_ready,      // kaneko_tilerom: per-port hit
 
     // Display read port. Combinational address, data one clock later.
     input  wire [8:0]  rd_x,
@@ -68,31 +68,51 @@ module kaneko_tmap_line #(
 
     // Which bank the fetch writes. The display reads the other one.
     logic bank;
-
-    logic [9:0] x_req;                 // pixel being requested
-    logic [9:0] x_wr;                  // pixel being written back
-    logic       running;
+    logic running;
 
     assign busy = running;
 
-    wire ce = rom_ready;               // a miss stalls every layer together
+    // EACH LAYER ADVANCES ON ITS OWN
+    //
+    // A single `ce = &hit` made every layer wait for the slowest, so their
+    // stalls SUMMED: about seventeen misses per layer became sixty-eight
+    // serialised waits per line, and the fetch ran out of time whenever the
+    // screen got busy. The four layers are independent — different scroll, so
+    // they cross tile boundaries at different x — and nothing about the line
+    // buffer requires them to be in step, because each writes its own slice.
+    //
+    // Per-layer enables make the misses overlap instead, so a line costs the
+    // WORST layer rather than the sum of all four.
+    logic [9:0] x_req [0:3];
+    logic [9:0] x_wr  [0:3];
+    wire  [3:0] ce = rom_ready;
+    wire  [3:0] req_valid;
+    wire  [3:0] layer_done;
 
-    always_ff @(posedge clk) begin
-        if (rst) begin
-            bank <= 1'b0; x_req <= '0; x_wr <= '0; running <= 1'b0;
-        end else if (start) begin
-            bank    <= ~bank;
-            x_req   <= '0;
-            x_wr    <= '0;
-            running <= 1'b1;
-        end else if (running && ce) begin
-            if (x_req < 10'(H_VIS + LAT)) x_req <= x_req + 10'd1;
-            else                          running <= 1'b0;
-            if (wr_en) x_wr <= x_wr + 10'd1;
+    genvar gi;
+    generate
+        for (gi = 0; gi < 4; gi = gi + 1) begin : g_seq
+            assign req_valid[gi]  = running && (x_req[gi] < 10'(H_VIS));
+            assign layer_done[gi] = (x_wr[gi] >= 10'(H_VIS));
+
+            always_ff @(posedge clk) begin
+                if (rst || start) begin
+                    x_req[gi] <= '0;
+                    x_wr[gi]  <= '0;
+                end else if (ce[gi]) begin
+                    if (x_req[gi] < 10'(H_VIS + LAT)) x_req[gi] <= x_req[gi] + 10'd1;
+                    if (l_valid[gi] && !layer_done[gi]) x_wr[gi] <= x_wr[gi] + 10'd1;
+                end
+            end
         end
-    end
+    endgenerate
 
-    wire req_valid = running && (x_req < 10'(H_VIS));
+    // The line is finished when every layer has written its 256 pixels.
+    always_ff @(posedge clk) begin
+        if (rst)          begin bank <= 1'b0; running <= 1'b0; end
+        else if (start)   begin bank <= ~bank; running <= 1'b1; end
+        else if (&layer_done) running <= 1'b0;
+    end
 
     // ------------------------------------------------------------ layers
     wire [3:0]  l_valid;
@@ -105,9 +125,10 @@ module kaneko_tmap_line #(
     generate
         for (g = 0; g < 4; g = g + 1) begin : g_layer
             kaneko_tmap_fetch u_fetch (
-                .clk(clk), .rst(rst), .ce(ce),
-                .req_valid(req_valid),
-                .screen_x(x_req[8:0]),
+                .clk(clk), .rst(rst),
+                .ce(ce[g]),
+                .req_valid(req_valid[g]),
+                .screen_x(x_req[g][8:0]),
                 .screen_y(line_y),
 
                 .dx($signed(dx_f[g*11 +: 11])),
@@ -133,42 +154,65 @@ module kaneko_tmap_line #(
         end
     endgenerate
 
-    // All four run in lockstep on the same ce and req_valid, so their valids
-    // should always agree. ANDing rather than taking layer 0's stalls instead
-    // of writing three good pixels and one stale one if they ever do not.
-    wire wr_en = &l_valid;
-
     // ------------------------------------------------------- line buffer
-    // 4 layers x (4-bit pixel + 6-bit colour + 3-bit category + solid) = 56
-    // bits per pixel, two banks.
-    localparam int unsigned W = 56;
-    logic [W-1:0] lbuf [0:1][0:H_VIS-1];
-
-    wire [W-1:0] wr_data = {l_solid, l_cat, l_colour, l_pix};
+    // One buffer PER LAYER, 14 bits each: 4-bit pixel, 6-bit colour, 3-bit
+    // category, solid. Split per layer rather than one 56-bit word because the
+    // layers no longer advance together — each writes its own slice at its own
+    // x, and a shared word would need all four before it could be stored.
+    localparam int unsigned W  = 14;
+    localparam int unsigned XW = $clog2(H_VIS);
 
     // Out of range reads entry 0 rather than aliasing back into the line: the
     // display should never ask, and if it does the fault should look like a
     // stuck column rather than a plausible repeat of the left edge.
-    localparam int unsigned XW = $clog2(H_VIS);
     wire [XW-1:0] rd_i = (rd_x >= 9'(H_VIS)) ? '0 : rd_x[XW-1:0];
 
-    logic [W-1:0] rd_q;
-    always_ff @(posedge clk) begin
-        // Gated by ce as well as pix_valid, so the write and the x_wr
-        // increment are driven by the same condition. kaneko_tmap_fetch holds
-        // its outputs while ce is low and pix_valid stays asserted through a
-        // stall, so writing on pix_valid alone would rewrite a slot repeatedly
-        // — harmless while x_wr is also held, and a trap the moment either
-        // gate changes.
-        if (ce && wr_en && running && x_wr < 10'(H_VIS))
-            lbuf[bank][x_wr[XW-1:0]] <= wr_data;
-        rd_q <= lbuf[~bank][rd_i];
-    end
+    generate
+        for (gi = 0; gi < 4; gi = gi + 1) begin : g_buf
+            // TWO PLAIN ARRAYS, ONE PER BANK, PLAIN ADDRESSES
+            //
+            // This memory has been through three shapes before inferring:
+            //
+            //   lbuf [0:1][0:H_VIS-1]        "cannot regroup multidimensional
+            //                                array into its bus" — flip-flops
+            //   lbuf [0:2*H_VIS-1] with
+            //     lbuf[{bank, x_wr}]         no warning at all, still
+            //                                flip-flops: 14,014 ALMs in this
+            //                                module alone
+            //   lb0/lb1, plain addresses     inferred
+            //
+            // The rule that comes out of it is narrower than the one already
+            // recorded for kaneko_vmem: not merely "one-dimensional", but a
+            // plain array with a plain address signal. A concatenation in the
+            // index is enough to lose it, and Quartus says nothing — the only
+            // symptom is the ALM count and a block-memory total that falls by
+            // exactly the size of the memory that vanished.
+            logic [W-1:0] lb0 [0:H_VIS-1];
+            logic [W-1:0] lb1 [0:H_VIS-1];
+            logic [W-1:0] q0, q1;
 
-    assign out_pix_f    = rd_q[15:0];
-    assign out_colour_f = rd_q[39:16];
-    assign out_cat_f    = rd_q[51:40];
-    assign out_solid    = rd_q[55:52];
+            wire [XW-1:0] wa = x_wr[gi][XW-1:0];
+            wire          we = ce[gi] && l_valid[gi] && running && !layer_done[gi];
+
+            wire [W-1:0] wr_data = {l_solid[gi], l_cat[gi*3 +: 3],
+                                    l_colour[gi*6 +: 6], l_pix[gi*4 +: 4]};
+
+            always_ff @(posedge clk) begin
+                if (we && !bank) lb0[wa] <= wr_data;
+                if (we &&  bank) lb1[wa] <= wr_data;
+                q0 <= lb0[rd_i];
+                q1 <= lb1[rd_i];
+            end
+
+            // The display reads the bank the fetch is NOT writing.
+            wire [W-1:0] rq = bank ? q0 : q1;
+
+            assign out_pix_f[gi*4 +: 4]    = rq[3:0];
+            assign out_colour_f[gi*6 +: 6] = rq[9:4];
+            assign out_cat_f[gi*3 +: 3]    = rq[12:10];
+            assign out_solid[gi]           = rq[13];
+        end
+    endgenerate
 
 endmodule
 
