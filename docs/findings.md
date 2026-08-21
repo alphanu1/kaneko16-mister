@@ -2789,3 +2789,47 @@ Candidates, most likely first:
 The distinguishing test is cheap: cold boot twice with an OSD open in between,
 and see whether the SECOND cold boot is fast. If it is, reset is the problem;
 if it is not, the save was never written and reset is innocent.
+
+### The white flash is the game, not the core
+
+*Instrument: a per-frame palette census in MAME.*
+
+Reported from hardware as a bug: the whole screen flashes bright white now and
+then. It is correct. MAME does the same thing, in four-frame bursts:
+
+```
+frame 305: 515/544 live entries near-white (94%)
+frame 306: 515/544 ...
+frame 313-316, 321-324 ...
+```
+
+The game floods the palette with near-white for four frames at a time — a
+screen-flash effect. 515 of the 544 live entries go white together, which is
+what makes it look like an output fault rather than a picture.
+
+Worth keeping as a shape: a full-screen artefact that appears intermittently
+looks like a video-path failure and can just as easily be the game. The census
+cost two minutes and settled it; guessing at the video path would have cost a
+build per guess.
+
+### Scroll registers are read once per frame, not per line
+
+*Reported from hardware: horizontal tearing.*
+
+`kaneko_tmap.cpp` reads the scroll registers in `prepare_common()`, which runs
+once before a frame is rendered. The core read them live out of the register
+bank, so a register the IRQ handler changed mid-frame applied to part of the
+screen and not the rest.
+
+Worse than per-frame tearing, in fact: the line fetch spans about 1800 clocks,
+so a single scanline was not guaranteed to be built from one set of values
+either.
+
+Latched at the start of the visible area — so the frame being drawn uses the
+values the game set for it — rather than at vblank, which would use the values
+from the end of the previous one.
+
+Not yet snapshotted: the line-scroll RAM. MAME copies all 512 rows of it in the
+same `prepare_common()`, and the core still reads it live per line. A game that
+rewrites scroll RAM mid-frame would tear the same way. Nothing has shown that
+yet, and snapshotting it costs 2048 words, so it is recorded rather than done.

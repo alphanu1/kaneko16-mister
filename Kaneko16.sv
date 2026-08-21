@@ -575,11 +575,39 @@ wire [15:0] c1r3 = v2r1_flat[ 3*16 +: 16];
 wire [15:0] c1r4 = v2r1_flat[ 4*16 +: 16];
 
 // Enables are ACTIVE LOW in the register.
-wire [3:0] lay_en = { ~c1r4[4], ~c1r4[12], ~c0r4[4], ~c0r4[12] };
-wire [3:0] lay_ls = {  c1r4[3],  c1r4[11],  c0r4[3],  c0r4[11] };
+wire [3:0] lay_en_live = { ~c1r4[4], ~c1r4[12], ~c0r4[4], ~c0r4[12] };
+wire [3:0] lay_ls_live = {  c1r4[3],  c1r4[11],  c0r4[3],  c0r4[11] };
 
-wire [63:0] lay_sx = { c1r0, c1r2, c0r0, c0r2 };   // L1 uses reg0, L0 uses reg2
-wire [63:0] lay_sy = { c1r1, c1r3, c0r1, c0r3 };
+wire [63:0] lay_sx_live = { c1r0, c1r2, c0r0, c0r2 };  // L1 reg0, L0 reg2
+wire [63:0] lay_sy_live = { c1r1, c1r3, c0r1, c0r3 };
+
+// LATCHED ONCE PER FRAME, AS MAME DOES
+//
+// kaneko_tmap.cpp reads these in prepare_common(), which runs once before the
+// frame is rendered. Reading them live instead lets a scroll register the IRQ
+// handler updates mid-frame apply to only part of the screen — and because the
+// line fetch spans about 1800 clocks, not even a whole line is guaranteed to
+// use one value. That is horizontal tearing, and it is exactly what the board
+// does not do.
+//
+// Latched at the start of the visible area rather than at vblank so the frame
+// being drawn uses the values the game set for it.
+reg vb_d;
+always @(posedge clk_sys) vb_d <= vb;
+wire frame_start = vb_d && !vb;
+
+reg [3:0]  lay_en, lay_ls;
+reg [63:0] lay_sx, lay_sy;
+always @(posedge clk_sys) begin
+	if (rst_sys) begin
+		lay_en <= 4'd0; lay_ls <= 4'd0; lay_sx <= 64'd0; lay_sy <= 64'd0;
+	end else if (frame_start) begin
+		lay_en <= lay_en_live;
+		lay_ls <= lay_ls_live;
+		lay_sx <= lay_sx_live;
+		lay_sy <= lay_sy_live;
+	end
+end
 
 // Layer 1's dx is two further along than layer 0's: MAME sets scrolldx to
 // -(m_dx + 2) for tmap[1].
