@@ -508,6 +508,11 @@ always @(posedge clk_sys) begin
 	else if (~DTACKn && !dtack_d) bus_cycles <= bus_cycles + 20'd1;
 end
 
+// Which view the OSD is showing. Declared here because the tilewall's SDRAM
+// requests are gated on it — see the note at its instantiation.
+wire [1:0] show      = status[10:9];
+wire       show_game = (show == 2'd0);
+
 // ------------------------------------------------------------------ video
 wire [9:0] hcnt, vcnt;
 wire [8:0] screen_x, screen_y;
@@ -526,7 +531,15 @@ wire [7:0] r, g, b;
 kaneko_tilewall #(.SDR_AW(SDR_AW)) u_wall
 (
 	.clk(clk_sys), .rst(rst_sys), .ce_pix(ce_pix),
-	.rom_loaded(rom_loaded),
+	// GATED ON BEING DISPLAYED, and this is not cosmetic.
+	//
+	// The tilewall asks SDRAM for a burst every sixteen pixels whenever
+	// rom_loaded is set, regardless of what the OSD is showing. Left running
+	// behind the game view it took roughly half the bus, and the tile feeder
+	// could not finish a line in time — which showed up as tiles shifting out
+	// of step, tearing both horizontally and vertically. The line-fetch budget
+	// of 58% of a line assumes the feeder actually has the bus.
+	.rom_loaded(rom_loaded && !show_game),
 	.mode({1'b0, status[9]}),
 	.screen_x(screen_x), .screen_y(screen_y), .de(de),
 	.sdr_req(p0_req), .sdr_addr(p0_addr), .sdr_ack(p0_ack), .sdr_dout(p0_dout),
@@ -714,8 +727,6 @@ wire [4:0] sw_row = 5'((screen_y - 9'(16)) / 9'd7);
 
 // One palette read port, two customers: the game path asks for the pen the
 // mixer chose, the swatch view walks the whole table.
-wire [1:0] show = status[10:9];
-wire       show_game = (show == 2'd0);
 assign pal_rd_addr = show_game ? mix_pen : {sw_row, sw_col};
 
 wire [7:0] pal_r = {pal_rd_q[9:5],   pal_rd_q[9:7]};
