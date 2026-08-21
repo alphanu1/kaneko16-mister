@@ -585,6 +585,31 @@ always @(posedge clk_sys) begin
 	else if (cpu_iack && !iack_d) irq_cnt <= irq_cnt + 16'd1;
 end
 
+// OKI TELEMETRY: where does the sound path stop?
+//
+// The YM2149s are correctly silent (the game zeroes their volumes) and the OKI
+// makes no sound either, so the question is which link is broken: the CPU not
+// writing, the sample ROM not answering, or the chip writing no samples. Three
+// counters, one per link, beat another round of reading the datasheet.
+reg [15:0] oki_wr_cnt, oki_wr_lat;
+reg [15:0] oki_ok_cnt, oki_ok_lat;
+reg [15:0] oki_snd_cnt, oki_snd_lat;
+reg        oki_ok_d;
+always @(posedge clk_sys) begin
+	oki_ok_d <= oki_rom_ok[0];
+	if (rst_sys) begin
+		oki_wr_cnt <= 0; oki_ok_cnt <= 0; oki_snd_cnt <= 0;
+	end else if (vbl_rise) begin
+		oki_wr_lat  <= oki_wr_cnt;  oki_wr_cnt  <= 0;
+		oki_ok_lat  <= oki_ok_cnt;  oki_ok_cnt  <= 0;
+		oki_snd_lat <= oki_snd_cnt; oki_snd_cnt <= 0;
+	end else begin
+		if (oki_we)                        oki_wr_cnt  <= oki_wr_cnt  + 1'd1;
+		if (oki_rom_ok[0] && !oki_ok_d)    oki_ok_cnt  <= oki_ok_cnt  + 1'd1;
+		if (oki_snd != 14'sd0)             oki_snd_cnt <= oki_snd_cnt + 1'd1;
+	end
+end
+
 // CPU liveness, counted per frame. A number the display can show beats
 // inferring "it is running" from a picture that might be static for other
 // reasons.
@@ -859,6 +884,17 @@ wire in_irq_row = (screen_y >= 9'd24) && (screen_y < 9'(24 + 6))
 wire [2:0] irq_bit = 3'(IRQ_BITS - 1) - 3'(screen_x[5:3]);
 wire       irq_set = irq_cnt_lat[irq_bit];
 
+// Rows 3-5, magenta: the OKI sound path, per frame. Top to bottom, CPU writes
+// to the chip, sample-ROM fetches answered, and clocks where the chip produced
+// a non-zero sample. The first dark row is where the path breaks.
+wire in_oki_row = (screen_y >= 9'd40) && (screen_y < 9'(40 + 18))
+               && (screen_x < 9'(16 * ALV_BIT_W));
+wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? oki_wr_lat
+                        : (screen_y < 9'd52) ? oki_ok_lat
+                                             : oki_snd_lat;
+wire       oki_set = oki_row_val[oki_bit];
+
 // Row 2, cyan: line fetches that overran, per frame, 16 bits. All dark means
 // the feeder is keeping up and the tearing is somewhere else entirely.
 wire in_ovr_row = (screen_y >= 9'd32) && (screen_y < 9'(32 + 6))
@@ -872,13 +908,14 @@ wire       ovr_set = overrun_lat[ovr_bit];
 // diagnosed and they stay in the build for the next time something stops, but
 // they sit on top of the picture, so the picture wins unless asked otherwise.
 wire dbg_on   = status[11];
-wire in_dbg   = dbg_on && (in_alive_row || in_irq_row || in_ovr_row)
+wire in_dbg   = dbg_on && (in_alive_row || in_irq_row || in_ovr_row || in_oki_row)
               && (screen_x[2:0] != 3'd7);
-wire dbg_set  = in_alive_row ? alive_set : in_irq_row ? irq_set : ovr_set;
+wire dbg_set  = in_alive_row ? alive_set : in_irq_row ? irq_set
+              : in_ovr_row ? ovr_set : oki_set;
 
-wire [7:0] dbg_r = dbg_set ? (in_irq_row ? 8'hff : 8'h00) : 8'h40;
-wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : 8'hff) : 8'h00;
-wire [7:0] dbg_b = dbg_set && in_ovr_row ? 8'hff : 8'h00;
+wire [7:0] dbg_r = dbg_set ? ((in_irq_row || in_oki_row) ? 8'hff : 8'h00) : 8'h40;
+wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : in_oki_row ? 8'h00 : 8'hff) : 8'h00;
+wire [7:0] dbg_b = dbg_set && (in_ovr_row || in_oki_row) ? 8'hff : 8'h00;
 
 // The game picture and the palette swatches both come out of the palette RAM,
 // so they share the same decode.
