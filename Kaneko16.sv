@@ -68,11 +68,11 @@ localparam CONF_STR = {
 	"O[11],Debug overlay,Off,On;",
 	"-;",
 	"O[13],Flip screen,Off,On;",
-	"O[14],Service mode,Off,On;",
+	"O[14],Service switch,Off,On;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
-	"J1,Shot,Bomb,Start,Coin,Pause,Service;",
+	"J1,Shot,Bomb,Start,Coin,Pause,Service Coin;",
 	"V,v",`BUILD_DATE
 };
 
@@ -982,7 +982,17 @@ wire start2 = joystick_1[6] | joystick_1[11];
 wire coin1  = joystick_0[7] | joystick_0[10];
 wire coin2  = joystick_1[7] | joystick_1[10];
 wire pause  = joy[8];
-wire service = joy[9];
+// SERVICE COIN, not the service switch. This board has three separate service
+// inputs and conflating them is easy:
+//
+//   P1 bit 1     PORT_SERVICE_DIPLOC   a DIP SWITCH  -> OSD toggle below
+//   SYSTEM b12   PORT_SERVICE_NO_TOGGLE  momentary test button, left unpressed
+//   SYSTEM b14   IPT_SERVICE1          service COIN, momentary -> this button
+//
+// The switch is the one that gets you into the test menu and it belongs in the
+// OSD, where it is. This is the credit-without-a-coin button, which is
+// momentary by nature and cannot be a toggle.
+wire svc_coin = joy[9];
 
 // Flip screen and service are DIPs, not buttons: held, and off by default.
 // Active low, so 1 is "not set".
@@ -993,7 +1003,7 @@ wire [15:0] in_p1 = { 2'b11, ~p1_b2, ~p1_b1, ~p1_right, ~p1_left, ~p1_down, ~p1_
                       6'b111111, dip_service, dip_flip };
 wire [15:0] in_p2 = { 2'b11, ~p2_b2, ~p2_b1, ~p2_right, ~p2_left, ~p2_down, ~p2_up,
                       8'hff };
-wire [15:0] in_system = { 1'b1, ~service, ~pause, 1'b1,
+wire [15:0] in_system = { 1'b1, ~svc_coin, ~pause, 1'b1,
                           ~coin2, ~coin1, ~start2, ~start1, 8'hff };
 
 // ----------------------------------------------------- palette / CPU view

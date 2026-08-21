@@ -93,11 +93,13 @@ arriving and the chip accepting a command.
 | Start / Start button | Start |
 | Select / Coin button | Insert coin |
 | R | Pause (the board's TILT input) |
-| L | Service |
+| L | Service coin — adds a credit without a coin |
 
-`Flip screen` and `Service mode` in the OSD are the board's two physical DIP
+`Flip screen` and `Service switch` in the OSD are the board's two physical DIP
 switches — everything else this game configures through its own test mode,
-which is why there is no DIP menu.
+which is why there is no DIP menu. **`Service switch` is the way into the test
+menu**; the L button is a different input, the service coin, which adds a
+credit without dropping one in.
 
 ## Save Backup RAM
 
