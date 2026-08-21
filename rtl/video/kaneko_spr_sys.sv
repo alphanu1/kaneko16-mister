@@ -25,13 +25,23 @@
 // miss the sample-ROM cache, so rendering spans a frame rather than fitting in
 // vblank. The mixer must therefore read a surface nobody is drawing on.
 //
-// THE MASK IS NEVER CLEARED
+// THE MASK IS CLEARED, AND THE CLEVER VERSION DID NOT WORK
 //
-// Clearing 65,536 mask bits every frame is a pass the frame does not have to
-// spare. Instead each buffer carries a parity bit that flips when it becomes
-// the back buffer, and a pixel counts as marked when its stored bit EQUALS
-// that parity. Two frames of staleness therefore read as clear for free. The
-// bitmap needs no clearing either, because the mixer gates on the mask.
+// The first attempt gave each surface a parity bit that flipped when it became
+// the back buffer, so a pixel counted as marked when its stored bit EQUALED
+// that parity and two frames of staleness read as clear for nothing. That is
+// wrong, and wrong in a way a short test cannot see.
+//
+// It holds only for locations that some pass has written. A location NEVER
+// written holds its power-up 0 for ever, so it reads as marked exactly when
+// the parity is 0 — and the parities alternate, so the untouched parts of the
+// screen show stale bitmap for two frames out of every four. On hardware that
+// is a flickering field of garbage where no sprite has ever been, which is
+// precisely what "sprites are not being cleared" looks like.
+//
+// So the back surface's mask is cleared at the start of every pass: 65,536
+// writes at one per clock, against a frame of about 811,000. The bitmap still
+// needs no clearing, because the mixer gates on the mask.
 //
 // The mask is a two-port memory and stays one: while a buffer is the back
 // buffer the renderer reads and writes it, and while it is the front buffer
@@ -216,7 +226,14 @@ module kaneko_spr_sys #(
     logic        q_msk0, q_msk1;
 
     logic back;              // which surface the renderer is drawing on
-    logic par0, par1;        // "marked" parity, per surface
+
+    // Clear walker, and the write port the mask sees: the clear owns it during
+    // S_CLEAR, the renderer for the rest of the pass.
+    logic [AW-1:0] clr_addr;
+    logic          clearing;
+    wire  [AW-1:0] msk_wa = clearing ? clr_addr : dr_mask_waddr;
+    wire           msk_we = clearing ? 1'b1     : dr_mask_we;
+    wire           msk_wd = clearing ? 1'b0     : 1'b1;
 
     wire [AW-1:0] mix_addr = {rd_y, rd_x};
 
@@ -226,10 +243,10 @@ module kaneko_spr_sys #(
     wire [AW-1:0] m1_ra = back ? dr_mask_raddr : mix_addr;
 
     always_ff @(posedge clk) begin
-        if (dr_bmp_we  && !back) bmp0[dr_bmp_addr]  <= dr_bmp_data;
-        if (dr_bmp_we  &&  back) bmp1[dr_bmp_addr]  <= dr_bmp_data;
-        if (dr_mask_we && !back) msk0[dr_mask_waddr] <= par0;
-        if (dr_mask_we &&  back) msk1[dr_mask_waddr] <= par1;
+        if (dr_bmp_we  && !back) bmp0[dr_bmp_addr] <= dr_bmp_data;
+        if (dr_bmp_we  &&  back) bmp1[dr_bmp_addr] <= dr_bmp_data;
+        if (msk_we && !back) msk0[msk_wa] <= msk_wd;
+        if (msk_we &&  back) msk1[msk_wa] <= msk_wd;
 
         q_bmp0 <= bmp0[mix_addr];
         q_bmp1 <= bmp1[mix_addr];
@@ -254,16 +271,16 @@ module kaneko_spr_sys #(
     // The renderer tests the surface it is drawing on; the mixer reads the
     // other one. `back` is registered and changes only between passes, so
     // using it directly on the one-clock-late read results is correct.
-    assign dr_mask_q = back ? (q_msk1 == par1) : (q_msk0 == par0);
+    assign dr_mask_q = back ? q_msk1 : q_msk0;
 
-    wire         mix_marked = back ? (q_msk0 == par0) : (q_msk1 == par1);
+    wire         mix_marked = back ? q_msk0 : q_msk1;
     wire [15:0]  mix_word   = back ? q_bmp0 : q_bmp1;
 
     assign spr_pix  = mix_marked ? mix_word[13:0] : 14'd0;
     assign spr_prio = mix_word[15:14];
 
     // ------------------------------------------------------------- sequence
-    typedef enum logic [1:0] { S_IDLE, S_PARSE, S_DRAW } state_t;
+    typedef enum logic [1:0] { S_IDLE, S_CLEAR, S_PARSE, S_DRAW } state_t;
     state_t st;
 
     assign busy = (st != S_IDLE);
@@ -273,35 +290,47 @@ module kaneko_spr_sys #(
         dr_start  <= 1'b0;
 
         if (rst) begin
-            st      <= S_IDLE;
-            back    <= 1'b0;
-            par0    <= 1'b0;
-            par1    <= 1'b0;
-            overrun <= 16'd0;
+            st       <= S_IDLE;
+            back     <= 1'b0;
+            clearing <= 1'b0;
+            clr_addr <= '0;
+            overrun  <= 16'd0;
         end else begin
+            // A frame arriving before the pass finishes is an overrun wherever
+            // the pass happens to be — counting it only in some states makes
+            // the readout depend on which phase is slowest, which is exactly
+            // what it is supposed to reveal. The clear is most of a pass now,
+            // so leaving it out hid every overrun.
+            if (frame_start && st != S_IDLE) overrun <= overrun + 16'd1;
+
             case (st)
                 S_IDLE: if (frame_start) begin
-                    // Swap, then flip the new back surface's parity so every
-                    // mark left from two frames ago reads as clear.
-                    back      <= ~back;
-                    if (back) par0 <= ~par0;
-                    else      par1 <= ~par1;
-                    par_start <= 1'b1;
-                    st        <= S_PARSE;
+                    back     <= ~back;
+                    clearing <= 1'b1;
+                    clr_addr <= '0;
+                    st       <= S_CLEAR;
+                end
+
+                // One write per clock over the whole surface. It is 65,536
+                // clocks of a frame that has about 811,000, and it happens
+                // before the parser so nothing else wants the port.
+                S_CLEAR: begin
+                    clr_addr <= clr_addr + 1'b1;
+                    if (clr_addr == {AW{1'b1}}) begin
+                        clearing  <= 1'b0;
+                        par_start <= 1'b1;
+                        st        <= S_PARSE;
+                    end
                 end
 
                 S_PARSE: begin
-                    if (frame_start) overrun <= overrun + 16'd1;
                     if (par_done) begin
                         dr_start <= 1'b1;
                         st       <= S_DRAW;
                     end
                 end
 
-                S_DRAW: begin
-                    if (frame_start) overrun <= overrun + 16'd1;
-                    if (dr_done) st <= S_IDLE;
-                end
+                S_DRAW: if (dr_done) st <= S_IDLE;
 
                 default: st <= S_IDLE;
             endcase

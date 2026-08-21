@@ -309,7 +309,7 @@ int main(int argc, char** argv) {
     // ------------------------------------------------------------------ 4
     // The parity mask: with an empty list now in front, every pixel must read
     // as nothing — with no clearing pass having run.
-    printf("== parity mask clears without a clearing pass\n");
+    printf("== the surface clears between frames\n");
     run_frame();      // swap the empty surface to the front
     readback(got);
     long leftover = 0;
@@ -328,6 +328,86 @@ int main(int argc, char** argv) {
     tick(4);
     check(dut->overrun == (uint16_t)(before + 1), "overrun did not count");
     g = 0; while (dut->busy && g++ < 4000000) tick();
+
+    // --------------------------------------------------------------- 5.5
+    // EVERY FRAME, NOT ONE FRAME.
+    //
+    // The first version of this checked the surface after a single swap and
+    // passed while the RTL showed stale garbage on hardware. The scheme it was
+    // testing had a four-frame cycle — two good frames then two bad — and one
+    // sample landed on a good one. Any test of "does it clear" has to run long
+    // enough to cover the whole cycle of whatever scheme is underneath, and
+    // since that cycle is not known from outside, the answer is to check every
+    // frame for a good many frames.
+    printf("== the surface clears on EVERY frame, not just some\n");
+    {
+        // A sprite list drawn once, then emptied. From then on every frame
+        // must read completely blank, for as long as we care to look.
+        dut->sprite_count = N;
+        run_frame(); run_frame();
+        dut->sprite_count = 0;
+        run_frame();
+
+        long bad_frames = 0, worst = 0;
+        for (int f = 0; f < 10; f++) {
+            run_frame();
+            readback(got);
+            long left = 0;
+            for (size_t o = 0; o < got.size(); o++) if (got[o]) left++;
+            if (left) { bad_frames++; if (left > worst) worst = left; }
+        }
+        printf("  %ld of 10 consecutive frames had leftover pixels"
+               " (worst %ld)\n", bad_frames, worst);
+        check(bad_frames == 0, "the surface does not clear on every frame");
+        dut->sprite_count = N;
+    }
+
+    // ------------------------------------------------------------------ 6
+    // FRAMES ARRIVE ON A CLOCK, NOT WHEN THE RENDERER IS READY.
+    //
+    // Every test above waits for a pass to finish before starting the next.
+    // Hardware does not: vbl_rise fires every frame whether the renderer has
+    // finished or not, and a pass over 1024 sprites whose every pixel can miss
+    // a 2.25 MB ROM does not reliably fit in one. This drives frame_start on a
+    // fixed period and checks the surface is still exactly one frame's worth of
+    // sprites — not an accumulation of several.
+    printf("== frames on a fixed period\n");
+    dut->sprite_count = N;
+    long period = 0;
+    {   // Time one unobstructed pass, then run frames at 60%% of it so passes
+        // genuinely overlap the next frame boundary.
+        long t0 = 0;
+        dut->frame_start = 1; tick(); dut->frame_start = 0;
+        while (dut->busy && t0 < 4000000) { tick(); t0++; }
+        period = t0 * 3 / 5;
+        printf("  one pass takes %ld clocks; driving frames every %ld\n",
+               t0, period);
+    }
+
+    uint16_t ov0 = dut->overrun;
+    for (int f = 0; f < 12; f++) {
+        seen.clear();
+        dut->frame_start = 1; tick(); dut->frame_start = 0;
+        for (long i = 0; i < period; i++) tick();
+    }
+    // Let whatever is in flight finish, then two clean frames so the surface
+    // in front of the mixer is a completed pass.
+    long gg = 0; while (dut->busy && gg++ < 4000000) tick();
+    printf("  overruns counted: %d\n", (int)(uint16_t)(dut->overrun - ov0));
+    run_frame(); run_frame();
+    if (seen.size() > (size_t)N) seen.resize(N);
+
+    readback(got);
+    reference(seen, want, x0, x1, y0, y1);
+    long acc = 0, missing = 0;
+    for (size_t o = 0; o < want.size(); o++) {
+        if (got[o] && !want[o]) acc++;         // a pixel no sprite put there
+        if (!got[o] && want[o]) missing++;
+    }
+    printf("  %ld pixels present that no current sprite drew, %ld missing\n",
+           acc, missing);
+    check(acc == 0, "sprites accumulate across frames");
+    check(missing == 0, "sprites missing after overlapping frames");
 
     printf("\ntb_kaneko_spr_sys: %ld checks, %ld fails\n", checks, fails);
     delete dut;

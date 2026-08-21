@@ -3419,3 +3419,60 @@ was the right call, and the fitter did it for free.
 75% of M10K is the number to watch. Sprites doubled the block-RAM demand, and
 the remaining 139 blocks are what rotation, a second VIEW2 configuration and
 the Blaze On board's larger surfaces have to come out of.
+
+### Two bugs from the first hardware run of sprites
+
+Sprites drew, which is the important part. Two faults, and both are worth
+recording for what they say about the tests that missed them.
+
+#### The sprite surface was read 16 lines too low
+
+`kaneko_video_timing.sv` says it plainly:
+
+```systemverilog
+output logic [8:0] screen_y,     // V_START .. V_START+V_VIS-1, i.e. the
+                                 // RAW scanline
+```
+
+`screen_y` already runs 16..239, in MAME's coordinate space, because
+`V_START` is the visible area's `min_y`. The sprite surface is indexed the
+same way — the parser folds `visarea().min_y` into every record. Reading it at
+`screen_y + 16` therefore applied the offset twice and put every sprite a
+sixteenth of the screen out of place.
+
+The mistake was reasoning from the frame gate's `sy = VIS_MIN_Y + row` without
+checking whether our `screen_y` was its `row` or its `sy`. It is `sy`. The
+answer was in a comment on the port being read.
+
+#### The parity mask does not clear locations nothing ever wrote
+
+The clever version gave each surface a parity bit that flipped when it became
+the back buffer, so a pixel counted as marked when its stored bit **equalled**
+that parity, and two frames of staleness read as clear for nothing.
+
+It is wrong for locations no pass has **ever** written. Those hold their
+power-up 0 for ever, so they read as marked exactly when the parity is 0 — and
+since the parities alternate, the untouched parts of the screen show stale
+bitmap for two frames out of every four. On hardware that is a flickering field
+of garbage where no sprite has ever been.
+
+Replaced with an explicit clear: 65,536 mask writes at one per clock at the
+start of every pass. A pass goes from about 27,000 clocks to 92,000, against a
+frame of roughly 811,000, so it costs about 11% of a frame and buys certainty.
+
+**The test that missed it is the interesting part.** It checked the surface
+after a single buffer swap and passed, because the broken scheme has a
+four-frame cycle — two good frames, then two bad — and one sample landed on a
+good one. A test of "does this clear" cannot sample once: the cycle length of
+whatever scheme is underneath is not visible from outside, so it has to check
+**every frame, for many frames.** It now does, and would have failed the parity
+version on the third frame.
+
+#### And a third, found while fixing the second
+
+Adding the clear introduced a new state, and the overrun counter was written
+per-state — so a frame arriving during the clear went uncounted. Since the
+clear is now most of a pass, that hid every overrun: the periodic-frame test
+reported 0 where the truth was 6. Counting moved to "any frame arriving while
+not idle", which is what the readout is supposed to mean and does not need
+revisiting each time a phase is added.

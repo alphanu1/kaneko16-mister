@@ -888,7 +888,11 @@ wire        spr_busy;
 wire [15:0] spr_overrun;
 wire [11:0] spr_ram_addr;
 wire [15:0] spr_ram_q;
-wire [8:0]  spr_rd_y = screen_y + 9'(SPR_VIS_MIN_Y);
+// screen_y is ALREADY in MAME's coordinate space — kaneko_video_timing
+// documents it as "V_START .. V_START+V_VIS-1, the RAW scanline", so it runs
+// 16..239 and not 0..223. The sprite surface is indexed the same way, because
+// the parser folds visarea().min_y into every record. Adding the offset again
+// here shifted every sprite 16 lines, which is a sixteenth of the screen.
 
 kaneko_spr_sys #(
 	.BMP_W_LOG2(8), .BMP_H_LOG2(8), .SPRITES(1024), .SDR_AW(SDR_AW)
@@ -912,7 +916,7 @@ kaneko_spr_sys #(
 	.sdr_req(p6_req), .sdr_addr(p6_addr),
 	.sdr_ack(p6_ack), .sdr_dout(p6_dout),
 
-	.rd_x(screen_x[7:0]), .rd_y(spr_rd_y[7:0]),
+	.rd_x(screen_x[7:0]), .rd_y(screen_y[7:0]),
 	.spr_pix(spr_pix), .spr_prio(spr_prio),
 
 	.busy(spr_busy), .overrun(spr_overrun)
