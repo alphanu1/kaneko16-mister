@@ -3070,3 +3070,46 @@ more harnesses still on five ports the moment it was written
 (`kaneko_romload_harness`, `kaneko_romstream_harness`), neither of which
 exercises the read ports but both of which would have drifted the same way. It
 runs as part of `make all` and gates `make quartus`.
+
+### Confirmed on hardware
+
+Sound plays on the board with the burst fix. The chain the four yellow rows
+count is intact end to end, and the diagnosis holds: the OKI, its bank map and
+its ROM feeder were all correct, and the SDRAM port beneath them was handing
+out two valid bytes in eight.
+
+Worth keeping because it was the hard part: **nothing in the sound path was
+wrong.** Three rounds of "still no sound" were spent inside jt6295, the M6295
+command protocol, the bank arithmetic and the byte lane, all of which checked
+out against MAME. The fault was one level below the lowest layer anyone was
+looking at, in a module that had passed its own tests for weeks — because its
+test had been written for five ports and the core had grown to six.
+
+The general shape, which will recur: **when every layer of a stack verifies and
+the stack does not work, the fault is in the layer nobody counted as part of
+the stack.** The SDRAM controller was "already working"; it was not part of the
+sound investigation until it was the whole of it.
+
+### What is NOT fixed, and is a separate problem
+
+Frame pacing is uneven when a large detailed object is on screen. Reported on
+the same build that fixed the sound, so it is not a regression from the burst
+change — it was visible before and is unrelated to the OKI.
+
+The mechanism is credible but not yet measured: `kaneko_tilerom` holds **one
+eight-byte entry per layer**, so a scanline crossing many distinct tiles costs
+one full SDRAM round trip per sixteen pixels per layer, and nothing hides the
+latency. A flat background of one repeated tile hits the single entry across
+tile boundaries and costs almost nothing; a detailed object misses every time.
+That is exactly the "gets worse when the big ship arrives" the owner describes.
+
+The 600M-tick boot run measures the 68000 at **18.4 ticks per bus cycle against
+the 16 a 12 MHz part needs** — about 87% speed — with 1.8% of ROM accesses
+missing the CPU's own cache. That harness deliberately hammers the video port
+as the arbiter's worst case, so it is a pessimistic bound rather than a
+representative figure, and it is not yet evidence. The green debug row (bus
+cycles per frame) dropping as the object appears would be.
+
+Do not fix this by guessing. Two tearing diagnoses have already been shipped on
+this core that were each plausible, each fixed something real, and neither was
+the symptom.

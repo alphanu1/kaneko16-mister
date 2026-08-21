@@ -3,10 +3,13 @@
 Read `CLAUDE.md` first, then this. `docs/findings.md` is the measured record;
 `docs/00-decisions.md` is what was decided and what would reverse it.
 
-**Status: Explosive Breaker boots and renders on hardware.** The 68000 runs its
-main loop, the tilemap layers draw with no visible artefacts, the EEPROM saves
-and restores, and the OKI sample path is fixed but not yet confirmed on the
-board. Sprites and inputs are the two blocks between here and a playable core.
+**Status: Explosive Breaker boots, renders and makes sound on hardware.** The
+68000 runs its main loop, the tilemap layers draw, the EEPROM saves and
+restores, and OKI sample playback works. Sprites and inputs are the two blocks
+between here and a playable core.
+
+One open defect: frame pacing is uneven when a large detailed object is on
+screen. Suspected tile-fetch bandwidth, not measured yet — see `findings.md`.
 
 Bring-up title is **Explosive Breaker**, changed from Magical Crystals on
 2026-08-20 (`docs/00-decisions.md` D4).
@@ -25,7 +28,7 @@ Bring-up title is **Explosive Breaker**, changed from Magical Crystals on
 | VIEW2 / sprite register files | `kaneko_regs16`, byte-enabled |
 | 93C46 EEPROM | 20,910 reads replayed against MAME, zero mismatches; Save Backup RAM works |
 | YM2149 x2 (jt49) | wired and mixed; the game keeps their volumes at zero |
-| OKI M6295 (jt6295) | wired, **fix pending hardware confirmation** — see below |
+| OKI M6295 (jt6295) | **working on hardware** — sound effects play |
 
 ## What is left
 
@@ -33,11 +36,11 @@ Ordered as the owner asked for it: **sound, then finish video, then I/O.**
 
 ### 1. Sound
 
-- **OKI M6295 — fix in hand, unconfirmed on hardware.** The SDRAM port serving
-  the OKI burst one word instead of four, so the chip read a sample header made
-  of two good bytes and six stale ones. Root cause and the two `default:`
-  clauses that hid it are in `findings.md`. Verify with the debug overlay: rows
-  4-7 are yellow and count the four links in the chain.
+- ~~OKI M6295~~ — **done and confirmed on hardware.** Root cause and the two
+  `default:` clauses that hid it are in `findings.md`.
+- **Music is absent and may not be a fault.** This board's music is OKI
+  samples; the game keeps the YM2149 volumes at zero. Check against MAME
+  before treating it as a bug.
 - Z80 + YM2151 subsystem for Blaze On and Wing Force. Different board: the
   68000 writes a latch at `e00000`, which NMIs the Z80, which drives the
   YM2151 on ports 0x02/0x03. T80 and jt51 are already pinned in `deps.lock`.

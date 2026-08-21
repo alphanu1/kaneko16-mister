@@ -230,6 +230,16 @@ static void report(const char* name, const Stats& s, uint64_t run_ticks) {
     if (s.unmapped)
         std::printf("    unmapped        %llu, first at %06X\n",
                     (unsigned long long)s.unmapped, s.first_unmapped);
+
+    // ------------------------------------------------------- OKI telemetry
+    // The same four links the hardware overlay counts, so a run here and a
+    // photograph of the debug rows answer the same question. Reported per run
+    // rather than once at the end — the counters reset with the DUT, so a
+    // single report at the end only ever describes the last sub-run, which is
+    // the deliberately-broken byte-order probe.
+    std::printf("    OKI wr/fetch/busy/sample  %u / %u / %u / %u\n",
+                (unsigned)dut->oki_wr_cnt, (unsigned)dut->oki_ok_cnt,
+                (unsigned)dut->oki_busy_cnt, (unsigned)dut->oki_snd_cnt);
 }
 
 int main(int argc, char** argv) {
@@ -374,15 +384,6 @@ int main(int argc, char** argv) {
     report("result", b, RUN);
     delete dut;
     std::printf("\n");
-
-    // ------------------------------------------------------- OKI telemetry
-    // The same four links the hardware overlay counts, so a run here and a
-    // photograph of the debug rows answer the same question. Every one of
-    // these is zero if the sample ROM never reaches the chip.
-    std::printf("    OKI writes      %u\n", (unsigned)dut->oki_wr_cnt);
-    std::printf("    OKI ROM fetches %u\n", (unsigned)dut->oki_ok_cnt);
-    std::printf("    OKI busy clocks %u\n", (unsigned)dut->oki_busy_cnt);
-    std::printf("    OKI sample clks %u\n", (unsigned)dut->oki_snd_cnt);
 
     // ------------------------------------------------------------ verdict
     std::printf("== verdict\n");

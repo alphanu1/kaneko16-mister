@@ -36,7 +36,7 @@ Miles Rally 1/2.
 | Scanline interrupts | IRQ5/4/3 autovectored; the game takes all three, once per frame |
 | VIEW2 / sprite register files | `kaneko_regs16`, byte-enabled, read back correctly |
 | YM2149 x2 (jt49) | wired and mixed to the audio output; the game keeps their volumes at zero |
-| OKI M6295 (jt6295) | wired and verified in simulation against the bytes the CPU really writes; **silent on hardware**, four telemetry rows added to localise it |
+| OKI M6295 (jt6295) | **working on hardware** — sound effects play. Bank map is a per-game parameter |
 | EEPROM (93C46) | working; 20,910 reads replayed against MAME, zero mismatches |
 | Inputs, coin lockout | **not started** — inputs read as 0xffff |
 

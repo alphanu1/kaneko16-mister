@@ -12,8 +12,8 @@ names them. Nothing here contains ROM data.
 
 ## What works
 
-**Explosive Breaker only.** The 68000, memory system, interrupts, EEPROM and
-the VIEW2 tilemap path run; sound and sprites are in progress.
+**Explosive Breaker only.** The 68000, memory system, interrupts, EEPROM, the
+VIEW2 tilemap path and OKI M6295 sound all run. Sprites are in progress.
 
 Everything game-specific is still compiled in for this one title — the memory
 map is `bakubrkr_map`, and the screen offsets, colour base, sprite priorities
@@ -29,13 +29,13 @@ change as the RBF that fixes it, so if an item is still here it is still true
 of the newest build in this directory.
 
 - Sprites are not drawn.
-- Sound is wired but silent — the OKI M6295 path is being debugged. The chip
-  and everything around it are verified in simulation against the bytes the
-  game really writes, so the fault is in the SDRAM port, the sample data's
-  placement, or the audio output stage. Turn on `Debug` in the OSD: rows 4-7
-  are yellow and count the four links in the chain, and the first dark row is
-  where it breaks.
 - No inputs; the game runs its attract loop only.
+- Music is absent: the YM2149s are wired and mixed, but this board's music is
+  OKI samples and the game keeps the PSG volumes at zero. Verify against MAME
+  before treating that as a fault.
+- Frame pacing is uneven when a large detailed object is on screen. Under
+  investigation — the tile fetch cache holds one entry per layer, so a busy
+  scanline costs more SDRAM round trips and leaves the 68000 less bandwidth.
 - Screen timing is not PCB-verified (384x264 at 6 MHz, 59.1856 Hz).
 
 ## Save Backup RAM
