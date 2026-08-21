@@ -357,9 +357,22 @@ int main(int argc, char** argv)
         dut->s_wide_screen = (W > 0x100);
         dut->s_fliptype = 0;
 
+        // SYNCHRONOUS sprite RAM, as kaneko_vmem's port actually is: the
+        // address is held at the edge and its word presented on the following
+        // cycle. Feeding the current cycle's address instead is a combinational
+        // ROM, and against a parser that expects one clock of latency it reads
+        // every record's four words one place early.
+        //
+        // Fourth occurrence of this trap in this repository, and the worst of
+        // them: tb_kaneko_vuspr.cpp was corrected for exactly this and `make
+        // gate` — which hard rule 9 requires before any change to shared video
+        // code — was not run afterwards, so this one sat wrong.
+        uint32_t held_sram = 0;
         auto tick = [&]() {
             dut->clk = 0; dut->eval();
-            dut->s_ram_data = rd16(sram, dut->s_ram_addr % (uint32_t)(G->nsprites * 4));
+            dut->s_ram_data = rd16(sram, held_sram % (uint32_t)(G->nsprites * 4));
+            dut->eval();
+            held_sram = dut->s_ram_addr;
             dut->clk = 1; dut->eval();
         };
         dut->rst = 1; dut->s_start = 0; tick(); tick();

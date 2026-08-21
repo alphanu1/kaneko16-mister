@@ -125,6 +125,21 @@ wire        ioctl_upload;
 wire [15:0] ioctl_din;
 wire        nv_sel = (ioctl_index[7:0] == NVRAM_INDEX);
 
+// GAME ID, from MRA <rom index="1">.
+//
+// One bitstream serves every game and selects its memory-map pages and video
+// constants from this byte. It arrives before the ROM stream, so it is settled
+// long before the 68000 leaves reset. Held through a core reset and cleared
+// only by power-on, because the OSD reset must not lose which game is loaded.
+localparam [7:0] CFG_INDEX = 8'd1;
+reg [7:0] game_id;
+always @(posedge clk_sys) begin
+	if (rst_por)
+		game_id <= 8'd0;
+	else if (ioctl_wr && (ioctl_index[7:0] == CFG_INDEX))
+		game_id <= ioctl_dout[7:0];
+end
+
 // WIDE=1, so ioctl_addr counts bytes and advances by two per word.
 wire [5:0]  bk_addr = ioctl_addr[6:1];
 wire [15:0] bk_din  = ioctl_dout;
@@ -429,8 +444,11 @@ reg [4:0] ym_div;
 always @(posedge clk_sys) ym_div <= (ym_div == 5'd23) ? 5'd0 : ym_div + 5'd1;
 wire ym_cen = (ym_div == 5'd0);        // 48 MHz / 24 = 2 MHz
 
-// oki1 sits at byte 0x4c0000 in the stream (D6, SDRAM_MAP), so word 0x260000.
-localparam [SDR_AW:1] OKI_BASE = SDR_AW'(25'h260000);
+// oki1 sits at byte 0x500000 in the stream (SDRAM_MAP), so word 0x280000. It
+// moved when kan_spr grew from 0x240000 to 0x280000 to hold Magical Crystals'
+// larger sprite ROM; one layout serves every game, sized to the largest of
+// each region.
+localparam [SDR_AW:1] OKI_BASE = SDR_AW'(25'h280000);
 
 wire [7:0] ym0_q, ym1_q;
 wire [7:0] ym0_iob_out;
@@ -707,7 +725,33 @@ kaneko_video_timing u_timing
 localparam signed [10:0] V2_DX = 11'sd91;      // 0x5b
 localparam signed [10:0] V2_DY = -11'sd8;
 localparam [10:0] TILE_COLBASE = 11'h400;
-localparam        VIEW2_2_PRI  = 1'b1;
+
+// ------------------------------------------------------- the game table
+// Hard rule 9: a per-game fact belongs here, not wired into shared code. Every
+// entry below differs between the two games and every one of them, wrong,
+// renders a plausible picture rather than failing.
+//
+// Pages are a[23:16] of each window that moves; sizes do not move and stay in
+// kaneko_bus. Read from bakubrkr_map / mgcrystl_map and from the frame gate's
+// table, which is pixel-exact on both.
+//
+//   id 0  explbrkr    id 1  mgcrystl
+wire mg = (game_id == 8'd1);
+
+wire [7:0] PG_WRAM = mg ? 8'h30 : 8'h10;
+wire [7:0] PG_V2W0 = mg ? 8'h60 : 8'h50;
+wire [7:0] PG_V2W1 = mg ? 8'h68 : 8'h58;
+wire [7:0] PG_SPR  = mg ? 8'h70 : 8'h60;
+wire [7:0] PG_PAL  = mg ? 8'h50 : 8'h70;
+wire [7:0] PG_WDOG = mg ? 8'ha0 : 8'ha8;
+wire [7:0] PG_IN   = mg ? 8'hc0 : 8'he0;
+
+// m_view2_2_pri: chip 1 writes its category, or zero. 1 for explbrkr, 0 for
+// mgcrystl — the single most load-bearing per-game bit in the mixer.
+wire VIEW2_2_PRI = ~mg;
+// set_priorities(): {8,8,8,8} above everything on explbrkr, {2,3,5,7}
+// interleaved with the tile layers on mgcrystl.
+wire [15:0] SPR_PRI_SEL = mg ? 16'h7532 : 16'h8888;
 
 // Sprites, per game (hard rule 9). These are explbrkr's, read from
 // bakubrkr(machine_config) and the frame gate's table, which is pixel-exact on
@@ -727,7 +771,6 @@ localparam [8:0]  SPR_VIS_MIN_Y = 9'd16;
 localparam        SPR_WIDE      = 1'b0;      // screen width is 0x100, not > 0x100
 localparam        SPR_FLIPTYPE  = 1'b0;
 localparam [10:0] SPR_COLBASE   = 11'd0;
-localparam [15:0] SPR_PRI_F     = 16'h8888;  // {8,8,8,8}: above all
 // kan_spr sits at byte 0x280000 in the stream (SDRAM_MAP), so word 0x140000.
 localparam [SDR_AW:1] SPR_BASE  = SDR_AW'(25'h140000);
 
@@ -965,7 +1008,7 @@ kaneko_mixer u_mix
 	.spr_pix(spr_pix), .spr_prio(spr_prio),
 
 	.view2_2_pri(VIEW2_2_PRI),
-	.spr_pri_f(SPR_PRI_F),
+	.spr_pri_f(SPR_PRI_SEL),
 	.tile_colbase(TILE_COLBASE),
 	.spr_colbase(SPR_COLBASE),
 

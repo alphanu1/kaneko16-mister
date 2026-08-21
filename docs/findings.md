@@ -3766,3 +3766,58 @@ started at 128%. Half the remaining time is the mask clear, which is a fixed
 path is untouched — 39,221 bursts and 315,881 stall cycles, unchanged. Tiles
 walk seventeen different tiles per scanline and revisit none, so neither the
 second entry nor a second port would buy anything there.
+
+## 2026-08-21 — the game table, and a gate that had been red without anyone looking
+
+Magical Crystals is the cheap second title: no Z80, no MCU, and its map is the
+same set of windows as Explosive Breaker's at different addresses. Every window
+that moves does so on a 64 KB boundary and keeps its size, so the movable part
+is exactly `a[23:16]`:
+
+```
+             explbrkr   mgcrystl        size
+  work RAM     0x10       0x30          64 KB
+  VIEW2 0      0x50       0x60          16 KB
+  VIEW2 1      0x58       0x68          16 KB
+  sprite RAM   0x60       0x70           8 KB
+  palette      0x70       0x50           4 KB
+  watchdog     0xa8       0xa0
+  inputs       0xe0       0xc0
+```
+
+ROM, both YM2149s, the OKI, all three register blocks, the coin lockout and
+the EEPROM are at the same address in both. The input bit layouts are
+identical too — `DSW_P1` is `P1` under another name — so only the page moves.
+
+The game id arrives as MRA `<rom index="1">`, one byte, before the ROM stream.
+`SDRAM_MAP` grew so a single layout serves both: `kan_spr` is 0x240000 on
+Explosive Breaker and 0x280000 on Magical Crystals, so the slot is the larger
+and the smaller game leaves its tail zero-filled. `oki1` moved to 0x500000 with
+it, which makes the RBF and the MRA a matched pair from here on.
+
+### The gate had been red for hours
+
+```
+before          after
+mgcrystl 74.6%  99.48%
+explbrkr 96.9%  100.00%
+blazeonj 100%   100.00%
+wingforc 74.4%  100.00%
+```
+
+`make gate` was run for the first time since the parser gained its `S_PRIME`
+state and three of four games had regressed. The cause was the same trap as
+ever — `tb_kaneko_frame.cpp` feeding the parser sprite RAM combinationally
+while `kaneko_vmem`'s port is synchronous — and it is the **fourth** occurrence
+in this repository.
+
+What makes this one different is that it was already known. `tb_kaneko_vuspr.cpp`
+had been corrected for exactly this, in the same change that added `S_PRIME`,
+and the second harness was simply not thought of. Hard rule 9 says to run
+`make gate` before committing any change to shared video code, and it was not
+run — for several commits and four hardware builds.
+
+The rule did not need discovering. It needed following. The lesson is narrower
+and more useful than "model memories correctly": **when a fix is applied to one
+harness, the same fault is in every other harness that models the same thing**,
+and the multi-game gate is what finds them.

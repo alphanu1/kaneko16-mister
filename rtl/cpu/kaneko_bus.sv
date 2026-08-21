@@ -115,6 +115,10 @@ module kaneko_bus #(
     // ---- inputs, active low as the hardware presents them
     input  wire [15:0]  in_p1, in_p2, in_system, in_unk,
 
+    // Per-game window pages, from the game table in the top level.
+    input  wire [7:0]   pg_wram, pg_v2w0, pg_v2w1, pg_spr, pg_pal,
+    input  wire [7:0]   pg_wdog, pg_in,
+
     // Observability. An unmapped access is acknowledged so the CPU cannot hang
     // on it, but it must not pass silently.
     output logic        unmapped_hit,
@@ -127,21 +131,41 @@ module kaneko_bus #(
     wire        wr = ~eRWn;   // reads need no strobe of their own: the read mux
                               // is combinational and the CPU latches on DTACK
 
+    // WINDOWS THAT MOVE BETWEEN GAMES ARE PAGES, NOT CONSTANTS.
+    //
+    // Comparing the whole address against a literal only works for one game.
+    // Every window that moves between bakubrkr_map and mgcrystl_map moves on a
+    // 64 KB boundary and keeps its size, so the movable part is exactly
+    // a[23:16] and the size stays a fixed mask on the bits below:
+    //
+    //             explbrkr   mgcrystl        size
+    //   work RAM    0x10       0x30          64 KB
+    //   VIEW2 0     0x50       0x60          16 KB
+    //   VIEW2 1     0x58       0x68          16 KB
+    //   sprite RAM  0x60       0x70           8 KB
+    //   palette     0x70       0x50           4 KB
+    //   watchdog    0xa8       0xa0
+    //   inputs      0xe0       0xc0
+    //
+    // Everything else — ROM, both YM2149s, the OKI, all three register blocks,
+    // the coin lockout and the EEPROM — is at the same address in both, so it
+    // stays a literal. A page that is wired to a constant is a per-game fact
+    // hiding in shared code, which is what hard rule 9 is about.
     wire sel_rom   = (a[23:19] == 5'b00000);                    // 000000-07ffff
-    wire sel_wram  = (a[23:16] == 8'h10);                       // 100000-10ffff
+    wire sel_wram  = (a[23:16] == pg_wram);
     wire sel_ym0   = (a[23:8]  == 16'h4000) && (a[7:5] == 3'd0);
     wire sel_ym1   = (a[23:8]  == 16'h4002) && (a[7:5] == 3'd0);
     wire sel_oki   = (a[23:1]  == 23'h200200);                  // 400401 byte
-    wire sel_v2w0  = (a[23:14] == 10'b0101000000);              // 500000-503fff
-    wire sel_v2w1  = (a[23:14] == 10'b0101100000);              // 580000-583fff
-    wire sel_spr   = (a[23:13] == 11'b01100000000);             // 600000-601fff
-    wire sel_pal   = (a[23:12] == 12'h700);                     // 700000-700fff
+    wire sel_v2w0  = (a[23:16] == pg_v2w0) && (a[15:14] == 2'd0);
+    wire sel_v2w1  = (a[23:16] == pg_v2w1) && (a[15:14] == 2'd0);
+    wire sel_spr   = (a[23:16] == pg_spr)  && (a[15:13] == 3'd0);
+    wire sel_pal   = (a[23:16] == pg_pal)  && (a[15:12] == 4'd0);
     wire sel_v2r0  = (a[23:5]  == 19'h40000);                   // 800000-80001f
     wire sel_sprr  = (a[23:5]  == 19'h48000);                   // 900000-90001f
-    wire sel_wdog  = (a[23:1]  == 23'h540000);                  // a80000
+    wire sel_wdog  = (a[23:16] == pg_wdog) && (a[15:1] == 15'd0);
     wire sel_v2r1  = (a[23:5]  == 19'h58000);                   // b00000-b0001f
     wire sel_ctrl  = (a[23:1]  == 23'h680000);                  // d00000/1
-    wire sel_in    = (a[23:3]  == 21'h1C0000);                  // e00000-e00007
+    wire sel_in    = (a[23:16] == pg_in)   && (a[15:3] == 13'd0);
 
     wire decoded = sel_rom | sel_wram | sel_ym0 | sel_ym1 | sel_oki | sel_v2w0
                  | sel_v2w1 | sel_spr | sel_pal | sel_v2r0 | sel_sprr | sel_wdog

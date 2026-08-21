@@ -101,6 +101,16 @@ SETS = {
     },
 }
 
+# Game id, handed to the core as MRA <rom index="1">. The core has one
+# bitstream for every game and selects its memory-map pages and video
+# constants from this. Adding a game means adding it here AND to the table in
+# Kaneko16.sv; the two are checked against each other by nothing, so they are
+# listed adjacently in both files with the same order.
+GAME_ID = {
+    "explbrkr": 0,
+    "mgcrystl": 1,
+}
+
 # set name -> zip basename, where they differ
 ZIPNAME = {"blazeonj": "blazeon"}
 
@@ -131,7 +141,7 @@ PRIMARY = {"explbrkr", "mgcrystl", "wingforc"}
 # it looks like a supported title and fails in a way the player cannot
 # diagnose. This set grows when the per-game configuration table lands, and
 # not before.
-SUPPORTED = {"explbrkr"}
+SUPPORTED = {"explbrkr", "mgcrystl"}
 ALT_PARENT = {"blazeonj": "Blaze On"}
 
 # SDRAM layout: region -> (base, size). This IS the MRA's emission order, and
@@ -140,14 +150,22 @@ ALT_PARENT = {"blazeonj": "Blaze On"}
 # Sized for the Tier 1 games. Later tiers have larger sprite ROMs and the map
 # will grow; because the MRA owns the layout, growing it means editing the MRA
 # and this table together, not changing address arithmetic in RTL.
+# ONE LAYOUT FOR EVERY GAME, SIZED TO THE LARGEST OF EACH REGION.
+#
+# The core carries one set of base addresses, so the layout cannot move between
+# games — only the contents. kan_spr is 0x240000 on Explosive Breaker and
+# 0x280000 on Magical Crystals, so the slot is the larger of the two and the
+# smaller game simply leaves the tail zero-filled. Sizing it to whichever game
+# was implemented first is how you get a second game that renders garbage from
+# the end of somebody else's sprite ROM.
 SDRAM_MAP = [
     ("maincpu", 0x000000, 0x080000),
     ("view2_0", 0x080000, 0x100000),
     ("view2_1", 0x180000, 0x100000),
-    ("kan_spr", 0x280000, 0x240000),
-    ("oki1",    0x4c0000, 0x100000),
+    ("kan_spr", 0x280000, 0x280000),
+    ("oki1",    0x500000, 0x100000),
 ]
-SDRAM_END = 0x5c0000        # 5.75 MB
+SDRAM_END = 0x600000        # 6 MB
 
 REGION_SIZE = {
     "mgcrystl": {"view2_0": 0x100000, "view2_1": 0x100000,
@@ -319,6 +337,10 @@ def build_mra(setname, rompath, outdir):
     # finds a blank part every time, and the game spends about four seconds
     # reformatting it before it will start.
     ET.SubElement(root, "nvram", index="2", size="128")
+
+    # Index 1: one byte of configuration, read before the ROM stream.
+    cfg = ET.SubElement(root, "rom", index="1")
+    ET.SubElement(cfg, "part").text = f"{GAME_ID.get(setname, 0):02X}"
 
     rom = ET.SubElement(root, "rom", index="0", zip=f"{zname}.zip", md5="none")
     cursor = 0
