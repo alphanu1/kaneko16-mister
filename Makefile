@@ -247,7 +247,7 @@ release:
 	  echo "  releases/Kaneko16_$$d.rbf"
 	@for gf in $(GATE_GAMES); do g=$${gf%%:*}; \
 	  $(MAKE) --no-print-directory mra SET=$$g >/dev/null 2>&1 || true; done
-	@tools/stage_release.py mra releases
+	@tools/stage_release.py build/mra releases
 	@find releases -type f | sort | sed 's/^/  /'
 
 # ---------------------------------------------------------------- deploy
@@ -368,11 +368,11 @@ gate: $(ROM_ALIAS)/blazeonj.zip
 # loads without error and shows up much later as a game booting to garbage.
 .PHONY: mra
 mra:
-	@mkdir -p mra $(ROM_DIR)
+	@mkdir -p build/mra $(ROM_DIR)
 	@tools/build_rom_regions.py $(SET) $(ROMPATH) $(ROM_DIR) --stream --mra
 	@# The MRA is named after the GAME, because that filename is what the
 	@# MiSTer arcade menu displays. Find it rather than assuming the set name.
-	@f=$$(ls -t mra/*.mra | head -1); tools/verify_mra.py "$$f" $(ROMPATH) $(ROM_DIR)/$(SET)_stream.bin
+	@f=$$(ls -t build/mra/*.mra | head -1); tools/verify_mra.py "$$f" $(ROMPATH) $(ROM_DIR)/$(SET)_stream.bin
 
 # Hard rule 10: one directory holds everything generated, so a clean is
 # complete and git status stays readable.

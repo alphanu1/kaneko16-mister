@@ -393,4 +393,8 @@ if __name__ == "__main__":
     if "--stream" in sys.argv:
         build_stream(args[0], args[2])
     if "--mra" in sys.argv:
-        build_mra(args[0], args[1], "mra")
+        # MRAs are a build product: they are generated from the ROM layout
+        # and staged into releases/ by make release. Under build/ with
+        # everything else generated (rule 10) — releases/ is the published
+        # copy, this is the intermediate.
+        build_mra(args[0], args[1], "build/mra")
