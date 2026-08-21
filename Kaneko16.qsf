@@ -52,7 +52,7 @@ set_global_assignment -name ALM_REGISTER_PACKING_EFFORT MEDIUM
 # fault: the framework's HDMI output PLL runs at 148.5 MHz, and one build closed
 # at zero negative slack with MORE logic than the build that missed it by 84 ps.
 # Pinned so the result is reproducible instead of re-rolled every compile.
-set_global_assignment -name SEED 3
+set_global_assignment -name SEED 7
 
 #set_global_assignment -name VERILOG_MACRO "MISTER_FB=1"
 
@@ -100,6 +100,16 @@ set_global_assignment -name SYSTEMVERILOG_FILE third_party/fx68k/hdl/uaddrPla.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/mem/bw_monitor.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/io/kaneko_rom_loader.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/io/kaneko_eeprom93c46.sv
+set_global_assignment -name VERILOG_FILE third_party/jt6295/hdl/jt6295.v
+set_global_assignment -name VERILOG_FILE third_party/jt6295/hdl/jt6295_acc.v
+set_global_assignment -name VERILOG_FILE third_party/jt6295/hdl/jt6295_adpcm.v
+set_global_assignment -name VERILOG_FILE third_party/jt6295/hdl/jt6295_ctrl.v
+set_global_assignment -name VERILOG_FILE third_party/jt6295/hdl/jt6295_rom.v
+set_global_assignment -name VERILOG_FILE third_party/jt6295/hdl/jt6295_serial.v
+set_global_assignment -name VERILOG_FILE third_party/jt6295/hdl/jt6295_sh_rst.v
+set_global_assignment -name VERILOG_FILE third_party/jt6295/hdl/jt6295_timing.v
+set_global_assignment -name VERILOG_FILE third_party/jt6295/hdl/jt12_comb.v
+set_global_assignment -name VERILOG_FILE third_party/jt6295/hdl/jt12_interpol.v
 set_global_assignment -name VERILOG_FILE third_party/jt49/hdl/jt49.v
 set_global_assignment -name VERILOG_FILE third_party/jt49/hdl/jt49_cen.v
 set_global_assignment -name VERILOG_FILE third_party/jt49/hdl/jt49_div.v

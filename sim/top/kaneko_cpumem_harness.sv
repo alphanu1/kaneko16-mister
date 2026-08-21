@@ -307,6 +307,7 @@ module kaneko_cpumem_harness #(
         .ym0_we(ym0_we), .ym1_we(ym1_we), .ym_addr(ym_addr), .ym_din(ym_din),
         .ym0_q(ym0_q), .ym1_q(ym1_q),
         .eeprom_we(eeprom_we), .eeprom_din(eeprom_din),
+        .oki_we(), .oki_din(), .oki_dout(8'h00),
 
         .v2r0_we(), .v2r1_we(), .sprreg_we(),
         .reg_addr(), .reg_din(),

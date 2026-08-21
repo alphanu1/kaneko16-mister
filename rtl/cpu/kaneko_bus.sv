@@ -101,6 +101,12 @@ module kaneko_bus #(
     output logic        eeprom_we,
     output wire  [7:0]  eeprom_din,
 
+    // OKI M6295 at 400401 — an 8-bit device on the ODD byte of a 16-bit word,
+    // so the write is qualified by LDS and never by UDS.
+    output logic        oki_we,
+    output wire  [7:0]  oki_din,
+    input  wire  [7:0]  oki_dout,
+
     output logic        v2r0_we, v2r1_we, sprreg_we,
     output logic [3:0]  reg_addr,
     output logic [15:0] reg_din,
@@ -182,6 +188,7 @@ module kaneko_bus #(
     // (kaneko16.cpp ym2149_w).
     assign ym_din    = ~LDSn ? oEdb[7:0] : oEdb[15:8];
     assign eeprom_din = oEdb[7:0];
+    assign oki_din    = oEdb[7:0];
 
     // ---------------------------------------------------------- sequencing
     typedef enum logic [1:0] { S_IDLE, S_ROM, S_DONE } state_t;
@@ -246,6 +253,7 @@ module kaneko_bus #(
         vram0_we <= 1'b0; vram1_we <= 1'b0; spr_we <= 1'b0; pal_we <= 1'b0;
         v2r0_we  <= 1'b0; v2r1_we  <= 1'b0; sprreg_we <= 1'b0;
         ym0_we   <= 1'b0; ym1_we   <= 1'b0; eeprom_we <= 1'b0;
+        oki_we   <= 1'b0;
         unmapped_hit <= 1'b0;
 
         if (rst) begin
@@ -292,6 +300,7 @@ module kaneko_bus #(
                                 // Only the low byte of d00000/d00001 is the
                                 // EEPROM; the high byte is coin lockout.
                                 eeprom_we <= sel_ctrl && ~LDSn;
+                                oki_we    <= sel_oki  && ~LDSn;
                             end
                             // Everything else answers in one cycle, INCLUDING
                             // addresses nothing decodes — a 68000 waiting on a
@@ -379,6 +388,8 @@ module kaneko_bus #(
         // matching it keeps the bus traces comparable.
         else if (sel_ym0)  iEdb = {8'h00, ym0_q};
         else if (sel_ym1)  iEdb = {8'h00, ym1_q};
+        // The OKI's status byte, on the low half like its writes.
+        else if (sel_oki)  iEdb = {8'h00, oki_dout};
         // The watchdog reads back as zero. MAME's watchdog_timer_device
         // reset16_r returns 0, and this was the first place the core's bus
         // trace differed from MAME's during boot — 55,400 data accesses in,

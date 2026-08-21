@@ -36,7 +36,7 @@ assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DD
 // an unsigned 10-bit level, not a signed sample.
 //
 // The OKI M6295 is not connected yet; when it is, it mixes in here.
-assign AUDIO_S   = 0;
+assign AUDIO_S   = 1;
 assign AUDIO_L   = ym_mix;
 assign AUDIO_R   = ym_mix;
 assign AUDIO_MIX = 0;
@@ -211,7 +211,7 @@ localparam int unsigned SDR_AW  = 2 + 13 + SDR_COL;   // 25
 // elaborate. Five is also the configuration its testbench covers, so this build
 // runs the arrangement that is actually verified. Port 0 is the tile fetch;
 // 1..4 are tied idle and cost nothing but arbiter slots.
-localparam int unsigned NPORTS  = 5;
+localparam int unsigned NPORTS  = 6;
 
 wire              mem_ready;
 wire              ldr_wr_req, ldr_wr_ack;
@@ -225,6 +225,8 @@ wire              p1_req;          // 68000 ROM fetch
 wire [SDR_AW:1]   p1_addr;
 wire              p2_req, p3_req, p4_req;   // tile feeder, one per layer
 wire [SDR_AW:1]   p2_addr, p3_addr, p4_addr;
+wire              p5_req;                   // OKI M6295 sample fetch
+wire [SDR_AW:1]   p5_addr;
 wire [NPORTS-1:0]       p_ack_bus;
 wire [NPORTS-1:0][63:0] p_dout_bus;
 wire              p0_ack  = p_ack_bus[0];
@@ -237,6 +239,8 @@ wire              p3_ack  = p_ack_bus[3];
 wire [63:0]       p3_dout = p_dout_bus[3];
 wire              p4_ack  = p_ack_bus[4];
 wire [63:0]       p4_dout = p_dout_bus[4];
+wire              p5_ack  = p_ack_bus[5];
+wire [63:0]       p5_dout = p_dout_bus[5];
 
 wire sd_dq_oe;
 wire [15:0] sd_dq_o;
@@ -259,11 +263,11 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300)) u_sdram
 	.wr_req(ldr_wr_req), .wr_addr(ldr_wr_addr), .wr_din(ldr_wr_din),
 	.wr_be(ldr_wr_be), .wr_ack(ldr_wr_ack),
 
-	.p_req  ({p4_req, p3_req, p2_req, p1_req, p0_req}),
-	.p_addr ({p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
-	.p_din  ({5{16'd0}}),
-	.p_be   ({5{2'b11}}),
-	.p_we   (5'b0),
+	.p_req  ({p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}),
+	.p_addr ({p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
+	.p_din  ({6{16'd0}}),
+	.p_be   ({6{2'b11}}),
+	.p_we   (6'b0),
 	.p_ack  (p_ack_bus),
 	.p_dout (p_dout_bus)
 );
@@ -317,7 +321,8 @@ fx68k u_cpu
 );
 
 wire        vram0_we, vram1_we, spr_we, pal_we;
-wire        ym0_we, ym1_we, eeprom_we;
+wire        ym0_we, ym1_we, eeprom_we, oki_we;
+wire [7:0]  oki_din, oki_dout;
 wire [3:0]  ym_addr;
 wire [7:0]  ym_din, eeprom_din;
 wire        v2r0_we, v2r1_we, sprreg_we;
@@ -352,6 +357,7 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.ym0_we(ym0_we), .ym1_we(ym1_we), .ym_addr(ym_addr), .ym_din(ym_din),
 	.ym0_q(ym0_q), .ym1_q(ym1_q),
 	.eeprom_we(eeprom_we), .eeprom_din(eeprom_din),
+	.oki_we(oki_we), .oki_din(oki_din), .oki_dout(oki_dout),
 
 	.v2r0_we(v2r0_we), .v2r1_we(v2r1_we), .sprreg_we(sprreg_we),
 	.reg_addr(reg_addr), .reg_din(reg_din),
@@ -409,7 +415,11 @@ reg [4:0] ym_div;
 always @(posedge clk_sys) ym_div <= (ym_div == 5'd23) ? 5'd0 : ym_div + 5'd1;
 wire ym_cen = (ym_div == 5'd0);        // 48 MHz / 24 = 2 MHz
 
+// oki1 sits at byte 0x4c0000 in the stream (D6, SDRAM_MAP), so word 0x260000.
+localparam [SDR_AW:1] OKI_BASE = SDR_AW'(25'h260000);
+
 wire [7:0] ym0_q, ym1_q;
+wire [7:0] ym0_iob_out;
 wire [9:0] ym0_snd, ym1_snd;
 
 // Two 10-bit unsigned levels summed to 11 bits, then shifted up to fill the
@@ -417,7 +427,13 @@ wire [9:0] ym0_snd, ym1_snd;
 // same gain in MAME (add_route(ALL_OUTPUTS, "mono", 0.5) each), so a plain sum
 // is the right mix and the 0.5 is just MAME avoiding clipping its own bus.
 wire [10:0] ym_sum = {1'b0, ym0_snd} + {1'b0, ym1_snd};
-wire [15:0] ym_mix = {ym_sum, 5'd0};
+
+// Both parts made signed before mixing. jt49's level is unsigned around a
+// midpoint; jt6295's sample is already signed. AUDIO_S is 1 accordingly.
+wire signed [11:0] ym_ctr = $signed({1'b0, ym_sum}) - 12'sd1024;
+wire signed [16:0] snd_mix = {{3{ym_ctr[11]}}, ym_ctr, 2'd0}      // YM, scaled
+                           + {{3{oki_snd[13]}}, oki_snd};         // OKI
+wire [15:0] ym_mix = snd_mix[16:1];
 wire [7:0] ym1_ioa_in = {7'h7f, eeprom_do};
 wire [7:0] ym1_iob_out;
 
@@ -428,7 +444,7 @@ jt49 u_ym0
 	.sel(1'b1), .dout(ym0_q),
 	.sound(ym0_snd), .A(), .B(), .C(), .sample(),
 	.IOA_in(8'hff), .IOA_out(), .IOA_oe(),
-	.IOB_in(8'hff), .IOB_out(), .IOB_oe()
+	.IOB_in(8'hff), .IOB_out(ym0_iob_out), .IOB_oe()
 );
 
 jt49 u_ym1
@@ -460,6 +476,61 @@ kaneko_eeprom93c46 u_eeprom
 	.bk_addr(bk_addr), .bk_din(bk_din), .bk_we(bk_we), .bk_q(bk_q),
 	.dirty(bk_dirty), .dirty_clr(bk_dirty_clr),
 	.dbg_state(), .dbg_busy(), .dbg_wen(), .dbg_cmd(), .dbg_cmd_valid()
+);
+
+// --------------------------------------------------------------- OKI M6295
+//
+// This is the whole soundtrack. The YM2149s are wired up and audible in
+// principle, but explbrkr sets all their channel volumes to zero at frame 229
+// and never raises them — it uses those chips for the EEPROM's port pins and
+// nothing else. Everything you hear is samples from here.
+//
+// 12 MHz / 6 = 2 MHz with PIN7 high, so the same clock enable the YM2149s use.
+// jt6295 documents cen as 1 MHz; at 2 MHz every rate doubles and the sample
+// rate lands on 2 MHz / 132 = 15.15 kHz, which is what MAME runs.
+wire [17:0] oki_rom_addr;
+wire [7:0]  oki_rom_data;
+wire [0:0]  oki_rom_ok;
+wire signed [13:0] oki_snd;
+
+// Bank switching: chip 0's port B drives oki_bank0_w<7>, and the OKI's window
+// is laid out by common_oki_bank_install(0, 0x20000, 0x20000):
+//
+//   0x00000-0x1ffff   fixed, the first 128 KB of the region
+//   0x20000-0x3ffff   bank b at region offset 0x20000 * (b + 1)
+//
+// Bank 7 aliases bank 6 — MAME fills the entries past max_bank with the last
+// block, because the ROM is 1 MB and only seven banked windows fit above the
+// fixed one.
+wire [2:0] oki_bank = ym0_iob_out[2:0];
+wire [2:0] oki_bank_c = (oki_bank > 3'd6) ? 3'd6 : oki_bank;
+
+wire [23:0] oki_region_addr =
+	oki_rom_addr[17] ? (24'h20000 + ({21'd0, oki_bank_c} << 17)
+	                    + {6'd0, oki_rom_addr[16:0]})
+	                 : {6'd0, oki_rom_addr[17:0]};
+
+// One byte port from SDRAM, the same feeder the tile layers use. The OKI reads
+// a nibble per sample at 15 kHz across four channels — a few tens of kB a
+// second, against the tile path's tens of megabytes.
+kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_okirom
+(
+	.clk(clk_sys), .rst(rst_sys),
+	.req_addr(oki_region_addr),
+	.base_addr(OKI_BASE),
+	.req_data(oki_rom_data),
+	.port_ready(oki_rom_ok),
+	.sdr_req(p5_req), .sdr_addr(p5_addr),
+	.sdr_ack(p5_ack), .sdr_dout(p5_dout)
+);
+
+jt6295 u_oki
+(
+	.rst(rst_sys), .clk(clk_sys), .cen(ym_cen),
+	.ss(1'b1),                       // PIN7_HIGH: divide by 132
+	.wrn(~oki_we), .din(oki_din), .dout(oki_dout),
+	.rom_addr(oki_rom_addr), .rom_data(oki_rom_data), .rom_ok(oki_rom_ok[0]),
+	.sound(oki_snd), .sample()
 );
 
 // VIEW2 and VU-002 register banks. These decoded but stored nothing until now:
