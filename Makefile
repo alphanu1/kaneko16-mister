@@ -31,6 +31,13 @@ SIM_SV    := $(wildcard sim/*/*.sv)
 # Building it into every harness cost ~2 MB of objects each and, at -j 32,
 # exhausted a 16 GB tmpfs through GCC's temporaries.
 FX68K_SIM := $(wildcard third_party/fx68k/hdl/verilator/*.sv)
+# jt6295 and its dependencies, needed only by the OKI harness. Listed rather
+# than wildcarded: the directory also holds jt6295_up4*.hex and a .m script.
+JT6295_SIM := third_party/jt6295/hdl/jt6295.v third_party/jt6295/hdl/jt6295_acc.v \
+              third_party/jt6295/hdl/jt6295_adpcm.v third_party/jt6295/hdl/jt6295_ctrl.v \
+              third_party/jt6295/hdl/jt6295_rom.v third_party/jt6295/hdl/jt6295_serial.v \
+              third_party/jt6295/hdl/jt6295_sh_rst.v third_party/jt6295/hdl/jt6295_timing.v \
+              third_party/jt6295/hdl/jt12_comb.v third_party/jt6295/hdl/jt12_interpol.v
 JT49_SIM  := third_party/jt49/hdl/jt49.v third_party/jt49/hdl/jt49_cen.v \
              third_party/jt49/hdl/jt49_div.v third_party/jt49/hdl/jt49_eg.v \
              third_party/jt49/hdl/jt49_exp.v third_party/jt49/hdl/jt49_noise.v
@@ -58,6 +65,7 @@ HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_regs16:kaneko_regs16:sim/video/tb_kaneko_regs16.cpp \
              kaneko_tilerom:kaneko_tilerom_harness:sim/video/tb_kaneko_tilerom.cpp \
              kaneko_tmap_line:kaneko_tmap_line:sim/video/tb_kaneko_tmap_line.cpp \
+             kaneko_oki:kaneko_oki_harness:sim/sound/tb_kaneko_oki.cpp:JT6295 \
              kaneko_cpu:kaneko_cpu_harness:sim/cpu/tb_kaneko_cpu.cpp:FX68K
 
 # The frame gate is separate from `make test`: it needs a MAME dump and
@@ -160,7 +168,10 @@ test:
 	for h in $(HARNESSES); do \
 	  name=$${h%%:*}; rest=$${h#*:}; top=$${rest%%:*}; rest2=$${rest#*:}; \
 	  src=$${rest2%%:*}; extra=""; \
-	  case "$$rest2" in *:FX68K) extra="$(FX68K_SIM)";; esac; \
+	  case "$$rest2" in \
+	    *:FX68K)  extra="$(FX68K_SIM)";; \
+	    *:JT6295) extra="$(JT6295_SIM)";; \
+	  esac; \
 	  $(VERILATOR) $(VBUILD) $(VFLAGS) --top-module $$top \
 	    --Mdir build/obj_$$name -o $$name $(RTL) $(SIM_SV) $$extra $$src >/dev/null 2>&1 || { \
 	      echo "BUILD FAILED: $$name"; \

@@ -27,23 +27,39 @@ Miles Rally 1/2.
 |---|---|
 | VIEW2 tilemap address engine | fuzzed clean (3.0M checks), oracle-verified |
 | VU-002 sprite list parser | fuzzed clean (41k checks), oracle-verified |
-| Tilemap pixel fetch, sprite bitmap renderer, mixer | fuzzed clean; **not yet instantiated in the core** |
+| Tilemap pixel fetch and line buffers | fuzzed clean; rendering on hardware, no visible artefacts |
+| Sprite bitmap renderer, mixer | fuzzed clean; **not yet instantiated in the core** |
 | Video timing | 384x264 at 6 MHz, 59.1856 Hz; running on hardware |
 | SDRAM controller, ROM loader | running on hardware |
 | 68000 (fx68k) + bus decode | running on hardware; matches MAME exactly over 100k bus accesses |
 | ROM line cache | 16 lines x 4 words, 0.1% miss; CPU back to MAME's bus rate |
 | Scanline interrupts | IRQ5/4/3 autovectored; the game takes all three, once per frame |
-| VIEW2 / sprite register files | **stubbed** — the CPU's writes go nowhere and read back as 0 |
-| YM2149 x2 (jt49) | register files and ports wired; sound outputs not connected |
-| OKI M6295 | **not started** |
+| VIEW2 / sprite register files | `kaneko_regs16`, byte-enabled, read back correctly |
+| YM2149 x2 (jt49) | wired and mixed to the audio output; the game keeps their volumes at zero |
+| OKI M6295 (jt6295) | wired and verified in simulation against the bytes the CPU really writes; **silent on hardware**, four telemetry rows added to localise it |
 | EEPROM (93C46) | working; 20,910 reads replayed against MAME, zero mismatches |
 | Inputs, coin lockout | **not started** — inputs read as 0xffff |
 
 The 68000 completes explbrkr's self-test, formats a blank EEPROM, enables
-interrupts and runs its main loop. The core still shows debug views (tile
-contact sheet, palette, CPU liveness, interrupts per frame) rather than the
-game: the pixel path exists and is verified, but nothing in the core drives it
-yet.
+interrupts and runs its main loop, and the tilemap layers render on hardware.
+Sprites and inputs are the two blocks still missing from a playable core, and
+the OKI is wired but silent.
+
+The debug overlay (OSD: Debug) puts seven rows of per-frame telemetry over the
+picture, each a binary count with the MSB at the left:
+
+| Row | Colour | Count |
+|---|---|---|
+| 1 | green | bus cycles |
+| 2 | amber | interrupts acknowledged |
+| 3 | cyan | line fetches that overran |
+| 4 | yellow | CPU writes reaching the OKI |
+| 5 | yellow | OKI sample-ROM fetches answered |
+| 6 | yellow | clocks with an OKI channel busy |
+| 7 | yellow | clocks with a non-zero OKI sample |
+
+Rows 4-7 are a chain: the first dark one is where the sound path breaks, and
+each rules out everything above it.
 
 M0 frame gate, RTL rendered against a frame MAME actually produced:
 
@@ -120,6 +136,24 @@ any source was vendored, and reading MAME has since corrected it on several
 checkable points — tile priority bits, the BG disable bit, the line-scroll
 index, the CALC3 ROM status, two dependency licences. Where the two disagree,
 `findings.md` wins.
+
+## Credits
+
+This core is built on other people's work, and most of the hard parts of it are
+theirs. Licences and the obligations they carry are in `THIRD-PARTY.md`; this
+section is the acknowledgement.
+
+| | |
+|---|---|
+| **Jorge Cwik** (*ijor*) | [fx68k](https://github.com/ijor/fx68k) — the 68000. A cycle-accurate implementation from the die, and the reason this core is GPL-3.0-only. Vendored via [jtfpga/fx68k](https://github.com/jtfpga/fx68k), whose `hdl/verilator/` variant is what makes it simulate here. |
+| **Jose Tejada** (*jotego*) | [jt49](https://github.com/jotego/jt49) — YM2149, [jt6295](https://github.com/jotego/jt6295) — OKI M6295, [jt51](https://github.com/jotego/jt51) — YM2151. The entire sound path. |
+| **MiSTer-devel** | [Template_MiSTer](https://github.com/MiSTer-devel/Template_MiSTer) and `sys/` — the framework: scaler, HDMI, OSD, HPS interface, save handling. [T80](https://github.com/MiSTer-devel/T80) for the Z80, originally by Daniel Wallner. |
+| **MAME team** | The behavioural oracle for every part of this project. `src/mame/kaneko/` is by **Luca Elia** and **David Haywood**; the tilemap, sprite and MCU devices, the memory maps and the per-game quirks were all read from it. Where this project's documentation and MAME disagreed, MAME was right. |
+| **Kaneko** | The original hardware, 1991-1994. |
+
+The RTL under `rtl/` is original to this project. Everything under
+`third_party/` is not, is never committed here, and is fetched by
+`tools/bootstrap.sh` at the revisions pinned in `deps.lock`.
 
 ## Licence
 

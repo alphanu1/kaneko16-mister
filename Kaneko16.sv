@@ -502,13 +502,17 @@ wire signed [13:0] oki_snd;
 // Bank 7 aliases bank 6 — MAME fills the entries past max_bank with the last
 // block, because the ROM is 1 MB and only seven banked windows fit above the
 // fixed one.
-wire [2:0] oki_bank = ym0_iob_out[2:0];
-wire [2:0] oki_bank_c = (oki_bank > 3'd6) ? 3'd6 : oki_bank;
-
-wire [23:0] oki_region_addr =
-	oki_rom_addr[17] ? (24'h20000 + ({21'd0, oki_bank_c} << 17)
-	                    + {6'd0, oki_rom_addr[16:0]})
-	                 : {6'd0, oki_rom_addr[17:0]};
+// MAX_BANK follows from the oki1 region length and is a per-game fact — see
+// the note in kaneko_oki_bank.sv. Explosive Breaker carries 1 MB of samples,
+// so (0x100000 - 0x20000) / 0x20000 = 7. It moves to the game table with
+// everything else that differs across the driver.
+wire [23:0] oki_region_addr;
+kaneko_oki_bank #(.MAX_BANK(7)) u_okibank
+(
+	.chip_addr(oki_rom_addr),
+	.bank(ym0_iob_out[2:0]),
+	.region_addr(oki_region_addr)
+);
 
 // One byte port from SDRAM, the same feeder the tile layers use. The OKI reads
 // a nibble per sample at 15 kHz across four channels — a few tens of kB a
@@ -588,25 +592,35 @@ end
 // OKI TELEMETRY: where does the sound path stop?
 //
 // The YM2149s are correctly silent (the game zeroes their volumes) and the OKI
-// makes no sound either, so the question is which link is broken: the CPU not
-// writing, the sample ROM not answering, or the chip writing no samples. Three
+// makes no sound either, so the question is which link is broken. Four
 // counters, one per link, beat another round of reading the datasheet.
+//
+// sim/sound/tb_kaneko_oki.cpp drives jt6295 with the exact bytes the CPU is
+// seen to write (08, 88, 13 — stop channel 0, select phrase 8, play it) and
+// the chip starts a channel and produces samples. So every link below is
+// known good against an ideal sample ROM, and whichever row goes dark on
+// hardware is the one the model does not capture.
 reg [15:0] oki_wr_cnt, oki_wr_lat;
 reg [15:0] oki_ok_cnt, oki_ok_lat;
+reg [15:0] oki_busy_cnt, oki_busy_lat;
 reg [15:0] oki_snd_cnt, oki_snd_lat;
 reg        oki_ok_d;
 always @(posedge clk_sys) begin
 	oki_ok_d <= oki_rom_ok[0];
 	if (rst_sys) begin
-		oki_wr_cnt <= 0; oki_ok_cnt <= 0; oki_snd_cnt <= 0;
+		oki_wr_cnt <= 0; oki_ok_cnt <= 0; oki_busy_cnt <= 0; oki_snd_cnt <= 0;
 	end else if (vbl_rise) begin
-		oki_wr_lat  <= oki_wr_cnt;  oki_wr_cnt  <= 0;
-		oki_ok_lat  <= oki_ok_cnt;  oki_ok_cnt  <= 0;
-		oki_snd_lat <= oki_snd_cnt; oki_snd_cnt <= 0;
+		oki_wr_lat   <= oki_wr_cnt;   oki_wr_cnt   <= 0;
+		oki_ok_lat   <= oki_ok_cnt;   oki_ok_cnt   <= 0;
+		oki_busy_lat <= oki_busy_cnt; oki_busy_cnt <= 0;
+		oki_snd_lat  <= oki_snd_cnt;  oki_snd_cnt  <= 0;
 	end else begin
-		if (oki_we)                        oki_wr_cnt  <= oki_wr_cnt  + 1'd1;
-		if (oki_rom_ok[0] && !oki_ok_d)    oki_ok_cnt  <= oki_ok_cnt  + 1'd1;
-		if (oki_snd != 14'sd0)             oki_snd_cnt <= oki_snd_cnt + 1'd1;
+		if (oki_we)                        oki_wr_cnt   <= oki_wr_cnt   + 1'd1;
+		if (oki_rom_ok[0] && !oki_ok_d)    oki_ok_cnt   <= oki_ok_cnt   + 1'd1;
+		// dout's low nibble is the per-channel busy flag — the same byte the
+		// game polls at 400401 and keeps reading back as zero.
+		if (oki_dout[3:0] != 4'd0)         oki_busy_cnt <= oki_busy_cnt + 1'd1;
+		if (oki_snd != 14'sd0)             oki_snd_cnt  <= oki_snd_cnt  + 1'd1;
 	end
 end
 
@@ -884,14 +898,23 @@ wire in_irq_row = (screen_y >= 9'd24) && (screen_y < 9'(24 + 6))
 wire [2:0] irq_bit = 3'(IRQ_BITS - 1) - 3'(screen_x[5:3]);
 wire       irq_set = irq_cnt_lat[irq_bit];
 
-// Rows 3-5, magenta: the OKI sound path, per frame. Top to bottom, CPU writes
-// to the chip, sample-ROM fetches answered, and clocks where the chip produced
-// a non-zero sample. The first dark row is where the path breaks.
-wire in_oki_row = (screen_y >= 9'd40) && (screen_y < 9'(40 + 18))
+// Rows 4-7, yellow: the OKI sound path, per frame, one row per link in the
+// chain. Top to bottom:
+//
+//   4  CPU writes reaching the chip at 400401
+//   5  sample-ROM fetches the feeder answered
+//   6  clocks with a channel flagged busy — the chip accepted a play command
+//   7  clocks where the chip produced a non-zero sample
+//
+// The first dark row is where the path breaks, and each one rules out
+// everything above it. Yellow because magenta read too close to the cyan
+// overrun row above it to tell apart on a photograph.
+wire in_oki_row = (screen_y >= 9'd40) && (screen_y < 9'(40 + 24))
                && (screen_x < 9'(16 * ALV_BIT_W));
 wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 wire [15:0] oki_row_val = (screen_y < 9'd46) ? oki_wr_lat
                         : (screen_y < 9'd52) ? oki_ok_lat
+                        : (screen_y < 9'd58) ? oki_busy_lat
                                              : oki_snd_lat;
 wire       oki_set = oki_row_val[oki_bit];
 
@@ -914,8 +937,8 @@ wire dbg_set  = in_alive_row ? alive_set : in_irq_row ? irq_set
               : in_ovr_row ? ovr_set : oki_set;
 
 wire [7:0] dbg_r = dbg_set ? ((in_irq_row || in_oki_row) ? 8'hff : 8'h00) : 8'h40;
-wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : in_oki_row ? 8'h00 : 8'hff) : 8'h00;
-wire [7:0] dbg_b = dbg_set && (in_ovr_row || in_oki_row) ? 8'hff : 8'h00;
+wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : 8'hff) : 8'h00;
+wire [7:0] dbg_b = dbg_set && in_ovr_row ? 8'hff : 8'h00;
 
 // The game picture and the palette swatches both come out of the palette RAM,
 // so they share the same decode.

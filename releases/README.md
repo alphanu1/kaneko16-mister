@@ -34,3 +34,14 @@ configuration table does.
 The MRA declares `<nvram index="2" size="128"/>` for the 93C46 EEPROM. Open the
 OSD to flush it to disk; with `Autosave` on, MiSTer writes it whenever the OSD
 opens.
+
+## Credits
+
+The 68000 is [fx68k](https://github.com/ijor/fx68k) by **Jorge Cwik**. The sound
+chips are [jt49](https://github.com/jotego/jt49) and
+[jt6295](https://github.com/jotego/jt6295) by **Jose Tejada**. The framework is
+**MiSTer-devel**'s. The hardware behaviour was verified throughout against
+**MAME**, whose Kaneko driver is by **Luca Elia** and **David Haywood**.
+
+GPL-3.0-only — forced by fx68k, which grants no "or later". Full detail in
+`THIRD-PARTY.md` in the source repository.

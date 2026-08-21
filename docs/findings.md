@@ -2914,3 +2914,75 @@ MRAs now carry `<category>`, which `arcade-organizer` uses to sort games. It is
 the one field not taken from MAME — the `GAME()` line has year, manufacturer
 and title but no genre — so it is a hand table in build_rom_regions.py and
 should be checked by someone who knows the games.
+
+## The OKI path is correct in simulation, so the fault is downstream
+
+Three reports of "still no sound" with the OKI wired, and no instrument had
+been read. Rule 6 says diff against the oracle, and the first question is what
+the CPU actually asks for, so a 300M-tick run captured the last 40,000 bus
+accesses of a real Explosive Breaker boot.
+
+### The CPU is issuing a correct play command 99 times
+
+Every access in the 0x400000 IO region in that window is at 0x400400:
+
+    400400 W 0808 00ff     stop channel 0
+    400400 W 8888 00ff     select phrase 0x08
+    400400 W 1313 00ff     play it on channel 0, attenuation 3
+    400400 R 0000 00ff     status: reads back zero
+
+297 writes and 99 reads, the same three-byte sequence 99 times over. That is a
+valid M6295 command sequence, so the CPU side is not the problem. The read is
+the tell: the game polls the status byte, sees no channel busy, and re-issues.
+It is stuck in a retry loop, which is why nothing plays and why nothing
+*progresses* either.
+
+Everything checked against MAME rather than assumed:
+
+| | MAME | ours |
+|---|---|---|
+| chip address | `map(0x400401, 0x400401)` | `a[23:1] == 23'h200200`, LDS |
+| chip clock | `XTAL(12'000'000)/6` = 2 MHz | 48 MHz / 24 |
+| pin 7 | `PIN7_HIGH` | `ss = 1` |
+| bank register | `oki_bank0_w<7>`, YM2149 0 port B | `ym0_iob_out[2:0]` |
+| bank map | `common_oki_bank_install(0, 0x20000, 0x20000)` | `kaneko_oki_bank` |
+
+All five agree. The odd byte at 0x400401 is the 68000's LOWER byte, so LDS and
+`oEdb[7:0]` are the right lane, and the captured mask of `00ff` confirms it.
+
+### And jt6295 starts a channel when given exactly those bytes
+
+`sim/sound/tb_kaneko_oki.cpp` is the OKI as `Kaneko16.sv` wires it — jt6295 fed
+through `kaneko_tilerom` from a modelled SDRAM — driven with the three bytes
+above. It starts a channel 39 clocks later, reports status `0xf1`, and produces
+samples peaking at 704 of a 14-bit range.
+
+So every link is good against an *ideal* sample ROM, and the break is in what
+the model does not capture: the real SDRAM controller's sixth port, the ROM
+data actually being at 0x4c0000, or the audio output stage. Four yellow
+telemetry rows now separate those on hardware — writes, ROM fetches answered,
+channel busy, non-zero samples — and the first dark row is the answer.
+
+This is the fourth time on this core that a device was "wired" without a
+harness and did not work. Rule 4 already says every new RTL module ships with a
+testbench; the gap here was that jt6295 is third-party, so the *integration*
+around it looked like it belonged to nobody. It does not — the strobe, the byte
+lane, the bank arithmetic and the ROM feeder are all ours.
+
+### MAX_BANK is a per-game fact and was a constant
+
+The bank clamp was written as `bank > 6 ? 6 : bank`, which is right only for a
+1 MB sample region. MAME derives it:
+
+    int max_bank = (length - fixedsize) / bankedsize;
+    int i = max_bank;
+    while (i < length / bankedsize)
+        configure_entry(i++, &sample[length - bankedsize]);
+
+Explosive Breaker and Magical Crystals carry 1 MB, so `max_bank` is 7 and bank
+7 aliases bank 6 — the constant happened to be correct. Blaze On and Wing Force
+carry 512 KB, where `max_bank` is 3 and banks 4-7 all alias block 3. The
+hardcoded 6 would have read past those regions and played the wrong sample
+rather than failing, which is exactly the failure mode hard rule 9 exists for.
+It is now `kaneko_oki_bank`'s `MAX_BANK` parameter, checked at ten points
+against MAME's rule, and it joins the game table with everything else.
