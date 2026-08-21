@@ -8,23 +8,25 @@
 // and one SDRAM port, and SDRAM answers in eight-byte bursts after an
 // arbitrated round trip, so something has to sit in between.
 //
-// SIXTEEN-BYTE LINES, BECAUSE THE REUSE IS VERTICAL
+// ONE EIGHT-BYTE BLOCK PER LAYER, AND WHY NOT SIXTEEN
 //
-// The tiles are 16x16 at 4bpp, so one row of one tile is 16 pixels x 4 bits =
-// exactly eight bytes. Within a scanline that means one miss per tile — about
-// seventeen per layer across 256 pixels, allowing for a straddle — and it also
-// means the NEXT scanline of the same tile is a different eight bytes. A cache
-// of one block per layer therefore gets no reuse between lines at all.
+// Tiles are 16x16 at 4bpp, so one row of one tile is 16 pixels x 4 bits =
+// exactly eight bytes: one block, one miss per tile, about seventeen per layer
+// across a 256-pixel line allowing for a straddle.
 //
-// Holding sixteen bytes covers two tile rows, so every second scanline hits:
-// roughly 68 misses per line across four layers becomes 34. The second burst
-// is nearly free, being the same open row.
+// A sixteen-byte line was tried, on the reasoning that it covers two tile rows
+// so the next scanline would hit. It made things materially worse, and the
+// reason is worth keeping: the cache holds ONE entry per layer, and a scanline
+// walks seventeen different tiles, so the entry is replaced long before the
+// next line revisits that tile. Misses per line were unchanged while each one
+// now cost two bursts — about twice the traffic. On hardware the line fetch
+// ran out of time and the right-hand eighth of the screen stopped being
+// written at all.
 //
-// This was measured, not assumed. An earlier version held one block and the
-// core could not finish a line in time; the line-overrun counter in the top
-// level lit up in step with the tearing, which is what identified bandwidth
-// after two plausible guesses at scroll timing had each fixed something real
-// without fixing the symptom.
+// The vertical reuse is real but only pays with enough entries to hold a whole
+// line of tiles, which is a different change: ~17 entries per layer, or 32 for
+// a power of two, at 128 bits each. Worth doing if the bandwidth is still
+// short — not worth doing halfway.
 //
 // A miss stalls every layer, not just the one that missed. They advance in
 // lockstep on the same screen_x, so stalling one and not the others would
@@ -75,30 +77,28 @@ module kaneko_tilerom #(
     input  wire  [NREQ-1:0][63:0]      sdr_dout
 );
 
-    logic [NREQ-1:0][19:0]  tag;     // req_addr[23:4]
-    logic [NREQ-1:0]        valid;
-    logic [NREQ-1:0][127:0] line;
+    logic [NREQ-1:0][20:0] tag;     // req_addr[23:3]
+    logic [NREQ-1:0]       valid;
+    logic [NREQ-1:0][63:0] line;
 
     wire [NREQ-1:0] hit;
     genvar g;
     generate
         for (g = 0; g < NREQ; g = g + 1) begin : g_port
-            assign hit[g] = valid[g] && (tag[g] == req_addr[g][23:4]);
-            // Byte within the sixteen-byte line.
-            assign req_data[g] = line[g][{req_addr[g][3:0], 3'd0} +: 8];
+            assign hit[g] = valid[g] && (tag[g] == req_addr[g][23:3]);
+            // Byte within the eight-byte block.
+            assign req_data[g] = line[g][{req_addr[g][2:0], 3'd0} +: 8];
         end
     endgenerate
 
     assign ready = &hit;
 
-    // Per-port fill, entirely independent. Two bursts make the sixteen-byte
-    // line; the second lands in the row the first just opened.
-    typedef enum logic [1:0] { S_IDLE, S_LO, S_GAP, S_HI } state_t;
+    // Per-port fill, entirely independent: one burst, one block.
+    typedef enum logic { S_IDLE, S_WAIT } state_t;
 
     generate
         for (g = 0; g < NREQ; g = g + 1) begin : g_fill
             state_t st;
-            logic [SDR_AW:1] blk;
 
             always_ff @(posedge clk) begin
                 if (rst) begin
@@ -108,35 +108,19 @@ module kaneko_tilerom #(
                         S_IDLE: if (!hit[g]) begin
                             // The controller starts a burst at exactly the
                             // address given, so ask for the aligned one — that
-                            // is what makes the line a line.
-                            blk <= SDR_AW'(base_addr[g]
-                                   + SDR_AW'({req_addr[g][23:4], 3'b000}));
+                            // is what makes the block a block.
                             sdr_addr[g] <= SDR_AW'(base_addr[g]
-                                   + SDR_AW'({req_addr[g][23:4], 3'b000}));
+                                   + SDR_AW'({req_addr[g][23:3], 2'b00}));
                             sdr_req[g]  <= 1'b1;
-                            st          <= S_LO;
+                            st          <= S_WAIT;
                         end
 
-                        S_LO: if (sdr_ack[g]) begin
-                            line[g][63:0] <= sdr_dout[g];
-                            sdr_req[g]    <= 1'b0;
-                            sdr_addr[g]   <= blk + SDR_AW'(4);
-                            st            <= S_GAP;
-                        end
-
-                        // One cycle with req low, so the controller sees a
-                        // fresh rising edge for the second transfer.
-                        S_GAP: begin
-                            sdr_req[g] <= 1'b1;
-                            st         <= S_HI;
-                        end
-
-                        S_HI: if (sdr_ack[g]) begin
-                            line[g][127:64] <= sdr_dout[g];
-                            tag[g]          <= req_addr[g][23:4];
-                            valid[g]        <= 1'b1;
-                            sdr_req[g]      <= 1'b0;
-                            st              <= S_IDLE;
+                        S_WAIT: if (sdr_ack[g]) begin
+                            line[g]    <= sdr_dout[g];
+                            tag[g]     <= req_addr[g][23:3];
+                            valid[g]   <= 1'b1;
+                            sdr_req[g] <= 1'b0;
+                            st         <= S_IDLE;
                         end
 
                         default: st <= S_IDLE;
