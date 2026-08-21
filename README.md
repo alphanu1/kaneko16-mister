@@ -57,7 +57,7 @@ picture, each a binary count with the MSB at the left:
 | 5 | yellow | OKI sample-ROM fetches answered |
 | 6 | yellow | clocks with an OKI channel busy |
 | 7 | yellow | clocks with a non-zero OKI sample |
-| 8 | white | sprite passes that did not finish before the next frame |
+| 8 | white | sprite passes that did not finish before the next frame *(separated from the yellow sound block)* |
 | 9 | magenta | live joystick 1 word — bit 0 at the right |
 
 Each row is a binary number with the MSB at the left, one block per bit; a

@@ -1102,7 +1102,11 @@ wire [15:0] oki_row_val = (screen_y < 9'd46) ? oki_wr_lat
 wire       oki_set = oki_row_val[oki_bit];
 
 // Row 9, magenta: the RAW joystick word for pad 1, live — not a per-frame
-// count like every other row. Bit 0 is at the RIGHT, so pressing the button
+// count like every other row. Set apart from the sprite row above it, which is
+// in turn set apart from the four yellow sound rows: rows 4-7 are deliberately
+// contiguous because they are one chain and read as a block, and anything that
+// is NOT part of that chain has to be visibly separate or it looks like a
+// fifth sound row. Bit 0 is at the RIGHT, so pressing the button
 // mapped to A lights the fifth block from the right.
 //
 //   0 right  1 left  2 down  3 up  4 A  5 B  6 X  7 Y
@@ -1111,7 +1115,7 @@ wire       oki_set = oki_row_val[oki_bit];
 // This exists because "there is no fire button" is not answerable from the
 // RTL: the wiring matches MAME's INPUT_PORTS exactly, so the question is which
 // bits the pad actually produces, and that is only visible here.
-wire in_joy_row = (screen_y >= 9'd72) && (screen_y < 9'(72 + 6))
+wire in_joy_row = (screen_y >= 9'd82) && (screen_y < 9'(82 + 6))
                && (screen_x < 9'(16 * ALV_BIT_W));
 wire [3:0] joy_bit = 4'd15 - 4'(screen_x[6:3]);
 wire       joy_set = joystick_0[joy_bit];
@@ -1120,7 +1124,7 @@ wire       joy_set = joystick_0[joy_bit];
 // started. Zero is correct. Non-zero means the renderer ran out of frame —
 // 1024 sprites at one pixel per clock, each pixel able to miss a 2.25 MB
 // sample of ROM, is the one part of the video path with no fixed upper bound.
-wire in_spr_row = (screen_y >= 9'd64) && (screen_y < 9'(64 + 6))
+wire in_spr_row = (screen_y >= 9'd72) && (screen_y < 9'(72 + 6))
                && (screen_x < 9'(16 * ALV_BIT_W));
 wire [3:0] spr_bit = 4'd15 - 4'(screen_x[6:3]);
 wire       spr_set = spr_overrun_lat[spr_bit];

@@ -3595,3 +3595,45 @@ straddling every edge, one pixel inside on each side, and negative
 coordinates. So rather than guess, it is now switchable from the OSD —
 `Sprite offscreen skip` — which settles it in one build rather than two, and
 lets the same build show what the skip is worth against the overrun counter.
+
+### The 2x SDRAM clock: adapter written, NOT working yet
+
+`rtl/mem/kaneko_sdram_x2.sv` runs the controller at 96 MHz with the core's
+requesters left at 48. The core cannot follow — its critical path measures
+15.74 ns, a ceiling near 63 MHz — so two clocks are required, and because both
+come from one PLL at an exact 2:1 ratio this is not a clock-domain crossing:
+edges are aligned and no synchroniser is needed or present.
+
+**It does not pass yet and is not instantiated in the core.** What the harness
+has found so far, all of it in the testbench or in assumptions rather than in
+the controller:
+
+1. **The acknowledge is already two fast cycles wide.** The adapter extended it
+   to three "so the slow domain would not miss it", which let the slow side
+   acknowledge one transaction twice and read the second time into the next
+   one's data. Measured — the controller carries its own `ack_d` edge detector,
+   which is the tell — and the extension removed.
+
+2. **The first transaction counter counted levels, not edges**, so it reported
+   1400 requests becoming 2800 transactions: a clean 2x that read very
+   convincingly as "every request goes through twice". It was the instrument.
+
+3. **A packed `[NP-1:0][63:0]` is exposed to C++ as an array of 32-bit words**,
+   so `p_dout[1]` is port 0's upper half and not port 1. The testbench reported
+   the RTL delivering one port's data to another. `kaneko_sdram_harness` had
+   already solved this by flattening its ports, with a comment saying exactly
+   why, and this harness did not follow it.
+
+4. **A comment line must not begin with the simulator's name** — parsed as a
+   pragma. Recorded against `kaneko_mixer.sv`; walked into again.
+
+Three of those four were faults in the measurement, each of which produced a
+plausible story about the RTL. With them fixed, capture depth 3 gives 2,573
+failures of 5,602 against 5,601 before, so the remaining fault is real and
+still unfound. The capture depth mattering at all is expected: the device is
+clocked from the controller clock, so the read round trip moves with frequency,
+which is why the core exposes four settings.
+
+Committed unfinished and unused deliberately: it cannot affect the core, and
+`make lint && make test` are green because the harness is not registered. It is
+not going near hardware until it passes.
