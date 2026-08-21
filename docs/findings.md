@@ -3204,3 +3204,25 @@ path alone; both moving is contention. And note what still does not exist: a
 whole-core frame gate. Neither the boot harness nor any module harness renders
 a frame through the real controller, so no simulation here can currently
 reproduce a pacing fault.
+
+### OPEN: the interrupt row occasionally reads 7 instead of 3
+
+Reported 2026-08-21. Row 2 normally shows two adjacent lit blocks — a count of
+3, one each for IRQ5, IRQ4 and IRQ3. Occasionally a third block lights for a
+fraction of a second, making it 7. The game is unaffected.
+
+Simulation says a steady 3: the 600M-tick boot takes 1,486 interrupts over
+about 500 frames of interrupt activity, split 496/495/495 across the three
+levels. So this does not reproduce in the harness.
+
+**Do not assume the CPU is at fault.** The counter latches on `vbl_rise` and
+resets in the same cycle, and IRQ5 is generated at scanline 224 — close to
+where the frame boundary is drawn. A race between the latch and the last
+interrupt of a frame would show exactly this: one frame counting an extra
+interrupt that the next frame then does not count, with no interrupt actually
+being taken twice. That is the instrument being wrong, not the thing.
+
+Two measurements would separate them, neither done: count interrupts over 64
+frames rather than one and check the total is 192 rather than looking at one
+frame's value, and compare per-level counts, since a latch race would show up
+in whichever level fires nearest the boundary.
