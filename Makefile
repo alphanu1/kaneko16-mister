@@ -33,6 +33,7 @@ SIM_SV    := $(wildcard sim/*/*.sv)
 FX68K_SIM := $(wildcard third_party/fx68k/hdl/verilator/*.sv)
 # jt6295 and its dependencies, needed only by the OKI harness. Listed rather
 # than wildcarded: the directory also holds jt6295_up4*.hex and a .m script.
+JT51_SIM := $(wildcard third_party/jt51/hdl/*.v)
 JT6295_SIM := third_party/jt6295/hdl/jt6295.v third_party/jt6295/hdl/jt6295_acc.v \
               third_party/jt6295/hdl/jt6295_adpcm.v third_party/jt6295/hdl/jt6295_ctrl.v \
               third_party/jt6295/hdl/jt6295_rom.v third_party/jt6295/hdl/jt6295_serial.v \
@@ -66,6 +67,7 @@ HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_tilerom:kaneko_tilerom_harness:sim/video/tb_kaneko_tilerom.cpp \
              kaneko_tmap_line:kaneko_tmap_line:sim/video/tb_kaneko_tmap_line.cpp \
              kaneko_spr_sys:kaneko_spr_sys_harness:sim/video/tb_kaneko_spr_sys.cpp \
+             kaneko_z80snd:kaneko_z80snd:sim/sound/tb_kaneko_z80snd.cpp \
              kaneko_oki:kaneko_oki_harness:sim/sound/tb_kaneko_oki.cpp:JT6295 \
              kaneko_cpu:kaneko_cpu_harness:sim/cpu/tb_kaneko_cpu.cpp:FX68K
 
@@ -196,6 +198,7 @@ test:
 	  case "$$rest2" in \
 	    *:FX68K)  extra="$(FX68K_SIM)";; \
 	    *:JT6295) extra="$(JT6295_SIM)";; \
+	    *:JT51)   extra="$(JT51_SIM)";; \
 	  esac; \
 	  $(VERILATOR) $(VBUILD) $(VFLAGS) --top-module $$top \
 	    --Mdir build/obj_$$name -o $$name $(RTL) $(SIM_SV) $$extra $$src >/dev/null 2>&1 || { \
