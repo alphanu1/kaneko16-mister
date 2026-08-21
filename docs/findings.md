@@ -2710,3 +2710,51 @@ Two process notes from the same episode, both of which cost a build:
 - **`pkill -f` matches the shell that issued it.** `pkill -f "make quartus"`
   killed the command running it, twice, because the pattern appears in its own
   command line. Use `pkill -x` against exact process names.
+
+### The VIEW2 layer control bits, corrected
+
+Transcribing the register bank turned up a decode this project had had wrong in
+two places. `kaneko_tmap.cpp` `prepare_common()`:
+
+```cpp
+m_tmap[0]->enable(BIT(~layers_flip_0, 12));
+m_tmap[1]->enable(BIT(~layers_flip_0,  4));
+```
+
+| bit | meaning |
+| --- | --- |
+| 12 | layer 0 disable |
+| 4 | layer 1 disable |
+| 11 | layer 0 line scroll — selects the 0x3000 scroll window |
+| 3 | layer 1 line scroll — selects the 0x2000 scroll window |
+| 9 / 8 | flip X / flip Y, **both layers** |
+
+Two errors were carried: the layer 0 disable was recorded as bit **15** (which
+is unused), and flip was recorded as a per-layer pair at bits 1/0 as well as
+8/9. `tools/mame_view2_census.lua` printed both, so any census taken with it
+reported layer 0's enable state from a bit that never changes.
+
+Neither had bitten, because nothing consumed the registers until now — the same
+reason the register banks could store nothing and the bus traces still matched.
+Both are fixed.
+
+**The numbering runs opposite to the byte order throughout**, and this is the
+part worth remembering:
+
+| | registers | VRAM | scroll | control bits |
+| --- | --- | --- | --- | --- |
+| layer 0 | 2 / 3 (bytes 0x04/0x06) | byte 0x1000 | byte 0x3000 | 12, 11 |
+| layer 1 | 0 / 1 (bytes 0x00/0x02) | byte 0x0000 | byte 0x2000 | 4, 3 |
+
+So the FIRST register pair, the FIRST VRAM block and the FIRST scroll block all
+belong to layer **1**, while the higher control bits belong to layer 0. Every
+one of those is an opportunity to wire a layer to the wrong memory and get a
+picture that looks plausible.
+
+Scroll Y is `>> 6`; scroll X is not, because line scroll is added before the
+shift: `set_scrollx(i, (layer0_scrollx + scroll) >> 6)`.
+
+dx differs by two between the layers — `set_scrolldx(-m_dx)` for layer 0 and
+`-(m_dx+2)` for layer 1 — and explbrkr's offsets are `set_offset(0x5b, -0x8,
+256, 240)`. The frame gate, which is pixel-exact, passes dx positive: 0x5b for
+layer 0 and 0x5d for layer 1, dy -8 for both.

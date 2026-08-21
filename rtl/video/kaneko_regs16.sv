@@ -23,10 +23,21 @@
 // registers belongs to layer 1. The scroll Y values are shifted down by six;
 // the X values are not, because line scroll is added before the shift.
 //
-// Layer control bits, from the same file:
+// Layer control bits (reg 4), from kaneko_tmap.cpp prepare_common():
 //
-//     15 layer1 disable   11 layer1 line scroll    9 flipx   8 flipy
-//      4 layer0 disable    3 layer0 line scroll    1 flipx   0 flipy
+//     12  layer 0 DISABLE       enable(BIT(~layers_flip_0, 12))
+//      4  layer 1 DISABLE       enable(BIT(~layers_flip_0,  4))
+//     11  layer 0 line scroll   selects m_vscroll[0] (the 0x3000 window)
+//      3  layer 1 line scroll   selects m_vscroll[1] (the 0x2000 window)
+//      9  flip X                BOTH layers
+//      8  flip Y                BOTH layers
+//
+// Two traps here, and an earlier version of this comment fell into both. The
+// disable bits are 12 and 4, not 15 and 4 — bit 15 does nothing. And flip is
+// shared by the two layers at bits 8/9; there is no second pair at bits 0/1.
+//
+// Note also that the numbering keeps running opposite to the byte order: bit 12
+// belongs to layer 0 while the register pair at byte 0x00 belongs to layer 1.
 module kaneko_regs16 (
     input  wire        clk,
 

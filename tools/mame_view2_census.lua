@@ -23,12 +23,22 @@ local frame = 0
 
 local function w(addr) return space:read_u16(addr) end
 
--- Layer control register, kaneko_tmap.cpp offset 0x008.
+-- Layer control register (reg 4, byte offset 0x008), decoded as
+-- kaneko_tmap.cpp prepare_common() does.
+--
+-- The disable bits are 12 and 4. An earlier version of this decode read bit 15
+-- for layer 0 and reported a layer that is always enabled as always disabled;
+-- bit 15 is not used. Flip is bits 8 and 9 and applies to BOTH layers — there
+-- is no second pair at bits 0/1.
+--
+-- Layer 0 takes regs 2/3 and the 0x3000 scroll window; layer 1 takes regs 0/1
+-- and the 0x2000 one. The numbering runs opposite to the byte order throughout.
 local function decode_layerctl(v)
   return string.format(
-    "BGdis=%d BGlinescr=%d BGflipX=%d BGflipY=%d | FGdis=%d FGlinescr=%d FGflipX=%d FGflipY=%d",
-    (v >> 15) & 1, (v >> 11) & 1, (v >> 9) & 1, (v >> 8) & 1,
-    (v >>  4) & 1, (v >>  3) & 1, (v >> 1) & 1, (v >> 0) & 1)
+    "L0: dis=%d linescr=%d | L1: dis=%d linescr=%d | flipX=%d flipY=%d",
+    (v >> 12) & 1, (v >> 11) & 1,
+    (v >>  4) & 1, (v >>  3) & 1,
+    (v >>  9) & 1, (v >>  8) & 1)
 end
 
 _G.census_sub = emu.add_machine_frame_notifier(function()
