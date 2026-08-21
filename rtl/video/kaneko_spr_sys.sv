@@ -198,7 +198,10 @@ module kaneko_spr_sys #(
     wire [0:0]  feed_ok;
     logic [7:0] dr_rom_data;
 
-    kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_sprrom (
+    // LINES(2): a sprite row alternates between two blocks and revisits the
+    // first on the next row, so one entry misses sixteen times per sprite
+    // where two miss eight. See the header of kaneko_tilerom.
+    kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW), .LINES(2)) u_sprrom (
         .clk(clk), .rst(rst),
         .req_addr(dr_rom_addr),
         .base_addr(rom_base),

@@ -3637,3 +3637,39 @@ which is why the core exposes four settings.
 Committed unfinished and unused deliberately: it cannot affect the core, and
 `make lint && make test` are green because the harness is not registered. It is
 not going near hardware until it passes.
+
+### The sprite overrun fixed by a second cache entry, not a faster clock
+
+A pass at 1024 sprites cost about 1,015 clocks per sprite, of which roughly 750
+were sample-ROM round trips — sixteen per sprite, strictly serial. The obvious
+answer was to halve the round trip by doubling the SDRAM clock, and that was
+proposed and started before anyone looked at *why* there were sixteen.
+
+The sprite ROM address is `{py[3], px[3], py[2:0], px[2:1]}`, so the eight-byte
+block index is `{py3, px3, py2, py1}` and the byte within it is
+`{py[0], px[2:1]}`. **One block therefore holds two rows.** The renderer walks x
+inside y, so row 0 reads block A then block B, and row 1 wants A again — after B
+has evicted it from a one-entry cache. Sixteen misses where eight would do.
+
+A second entry per port, filled alternately:
+
+```
+ 1024 records, 0% off screen   1,039,364 -> 673,204   (frame budget 811,008)
+               50%               536,394 -> 359,444
+               90%               154,896 -> 122,010
+```
+
+The worst case the hardware can present — a thousand fully visible sprites —
+now fits in a frame with room, where before it overran by 28%. That is the same
+factor the 2x SDRAM clock was going to buy, for a parameter instead of a PLL
+change, a second clock domain, an adapter and a retimed design.
+
+Tiles stay at one entry deliberately, and the same measurement says why: a
+scanline there walks seventeen *different* tiles and never revisits one, so
+extra entries buy nothing. The counts confirm it — `kaneko_tilerom` reports
+39,221 bursts and 315,881 stall cycles, identical to before.
+
+**The lesson is the order of operations.** The round-trip *latency* was measured
+and the fix aimed at it. The round-trip *count* was never questioned, and it was
+the term with a factor of two sitting in it for free. Measuring which term
+dominates is not the same as measuring whether that term is necessary.

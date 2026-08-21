@@ -43,9 +43,27 @@
 `timescale 1ns/1ps
 `default_nettype none
 
+// TWO ENTRIES FOR SPRITES, ONE FOR TILES, AND THE REASON IS THE WALK ORDER
+//
+// A sprite's ROM address is {py[3], px[3], py[2:0], px[2:1]}, so the eight-byte
+// block index is {py3, px3, py2, py1} and the byte within it is {py[0],
+// px[2:1]}. One block therefore covers TWO ROWS of eight pixels — but the
+// renderer walks x inside y, so row 0 uses blocks A then B, and row 1 wants A
+// again after B has already evicted it. Sixteen misses per sprite where eight
+// would do, and the misses are the cost: about 750 of the ~1,015 clocks a
+// sprite takes.
+//
+// A second entry per port halves that, which is the same win as doubling the
+// SDRAM clock and costs a parameter instead of a PLL, a second clock domain
+// and a retimed design.
+//
+// Tiles stay at one deliberately. A scanline there walks seventeen DIFFERENT
+// tiles and never revisits one, so extra entries buy nothing — measured, and
+// recorded in the note above about the sixteen-byte line making things worse.
 module kaneko_tilerom #(
     parameter int unsigned NREQ   = 4,
-    parameter int unsigned SDR_AW = 25
+    parameter int unsigned SDR_AW = 25,
+    parameter int unsigned LINES  = 1    // cache entries per port: 1 or 2
 ) (
     input  wire clk,
     input  wire rst,
@@ -78,17 +96,26 @@ module kaneko_tilerom #(
     input  wire  [NREQ-1:0][63:0]      sdr_dout
 );
 
-    logic [NREQ-1:0][20:0] tag;     // req_addr[23:3]
-    logic [NREQ-1:0]       valid;
-    logic [NREQ-1:0][63:0] line;
+    // Entry 0 is the one a single-entry port uses; entry 1 exists only when
+    // LINES is 2 and is written on alternate fills, so the pair holds the two
+    // blocks a sprite row alternates between.
+    logic [NREQ-1:0][20:0] tag0, tag1;
+    logic [NREQ-1:0]       valid0, valid1;
+    logic [NREQ-1:0][63:0] line0, line1;
+    logic [NREQ-1:0]       fill_sel;    // which entry the next fill replaces
 
-    wire [NREQ-1:0] hit;
+    wire [NREQ-1:0] hit0, hit1, hit;
     genvar g;
     generate
         for (g = 0; g < NREQ; g = g + 1) begin : g_port
-            assign hit[g] = valid[g] && (tag[g] == req_addr[g][23:3]);
+            assign hit0[g] = valid0[g] && (tag0[g] == req_addr[g][23:3]);
+            assign hit1[g] = (LINES > 1) && valid1[g]
+                          && (tag1[g] == req_addr[g][23:3]);
+            assign hit[g]  = hit0[g] | hit1[g];
             // Byte within the eight-byte block.
-            assign req_data[g] = line[g][{req_addr[g][2:0], 3'd0} +: 8];
+            assign req_data[g] = hit0[g]
+                ? line0[g][{req_addr[g][2:0], 3'd0} +: 8]
+                : line1[g][{req_addr[g][2:0], 3'd0} +: 8];
         end
     endgenerate
 
@@ -103,7 +130,8 @@ module kaneko_tilerom #(
 
             always_ff @(posedge clk) begin
                 if (rst) begin
-                    st <= S_IDLE; sdr_req[g] <= 1'b0; valid[g] <= 1'b0;
+                    st <= S_IDLE; sdr_req[g] <= 1'b0;
+                    valid0[g] <= 1'b0; valid1[g] <= 1'b0; fill_sel[g] <= 1'b0;
                 end else begin
                     case (st)
                         S_IDLE: if (!hit[g]) begin
@@ -117,11 +145,21 @@ module kaneko_tilerom #(
                         end
 
                         S_WAIT: if (sdr_ack[g]) begin
-                            line[g]    <= sdr_dout[g];
-                            tag[g]     <= req_addr[g][23:3];
-                            valid[g]   <= 1'b1;
-                            sdr_req[g] <= 1'b0;
-                            st         <= S_IDLE;
+                            // Alternate entries so the block just evicted is
+                            // the older of the two, which is what makes the
+                            // A,B,A,B walk hit.
+                            if (LINES > 1 && fill_sel[g]) begin
+                                line1[g]  <= sdr_dout[g];
+                                tag1[g]   <= req_addr[g][23:3];
+                                valid1[g] <= 1'b1;
+                            end else begin
+                                line0[g]  <= sdr_dout[g];
+                                tag0[g]   <= req_addr[g][23:3];
+                                valid0[g] <= 1'b1;
+                            end
+                            fill_sel[g] <= ~fill_sel[g];
+                            sdr_req[g]  <= 1'b0;
+                            st          <= S_IDLE;
                         end
 
                         default: st <= S_IDLE;
