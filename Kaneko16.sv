@@ -230,6 +230,9 @@ fx68k u_cpu
 );
 
 wire        vram0_we, vram1_we, spr_we, pal_we;
+wire        ym0_we, ym1_we, eeprom_we;
+wire [3:0]  ym_addr;
+wire [7:0]  ym_din, eeprom_din;
 wire        v2r0_we, v2r1_we, sprreg_we;
 wire [12:0] vmem_addr;
 wire [15:0] vmem_din;
@@ -249,6 +252,10 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.vram0_we(vram0_we), .vram1_we(vram1_we), .spr_we(spr_we), .pal_we(pal_we),
 	.vmem_addr(vmem_addr), .vmem_din(vmem_din),
 	.vram0_q(q_vram0), .vram1_q(q_vram1), .spr_q(q_spr), .pal_q(q_pal),
+
+	.ym0_we(ym0_we), .ym1_we(ym1_we), .ym_addr(ym_addr), .ym_din(ym_din),
+	.ym0_q(ym0_q), .ym1_q(ym1_q),
+	.eeprom_we(eeprom_we), .eeprom_din(eeprom_din),
 
 	.v2r0_we(v2r0_we), .v2r1_we(v2r1_we), .sprreg_we(sprreg_we),
 	.reg_addr(reg_addr), .reg_din(reg_din),
@@ -279,6 +286,67 @@ kaneko_vmem u_vmem
 	.v1_addr(13'd0), .v1_q(),
 	.spr_addr(12'd0), .spr_q(),
 	.pal_addr(pal_rd_addr), .pal_q(pal_rd_q)
+);
+
+// ------------------------------------------------------------- sound / EEPROM
+//
+// Two YM2149s at 12 MHz / 6, "verified on pcb". Only their register files
+// matter today — the sound outputs are not connected yet — but they cannot be
+// stubbed, because the EEPROM hangs off chip 1's ports:
+//
+//     CS   YM2149 #1 port B, written at 40021e
+//     DO   YM2149 #1 port A, read at 40021c
+//
+// and the CLK/DI half arrives separately at d00001. The game reads real data
+// back out during boot and will not finish its self-test without it.
+//
+// jt49 rather than a hand-rolled register file: it already models the port
+// direction bits and the per-register read masks, and it is the sound chip this
+// core will use anyway.
+reg [4:0] ym_div;
+always @(posedge clk_sys) ym_div <= (ym_div == 5'd23) ? 5'd0 : ym_div + 5'd1;
+wire ym_cen = (ym_div == 5'd0);        // 48 MHz / 24 = 2 MHz
+
+wire [7:0] ym0_q, ym1_q;
+wire [7:0] ym1_ioa_in = {7'h7f, eeprom_do};
+wire [7:0] ym1_iob_out;
+
+jt49 u_ym0
+(
+	.rst_n(~cpu_rst), .clk(clk_sys), .clk_en(ym_cen),
+	.addr(ym_addr), .cs_n(~ym0_we), .wr_n(~ym0_we), .din(ym_din),
+	.sel(1'b1), .dout(ym0_q),
+	.sound(), .A(), .B(), .C(), .sample(),
+	.IOA_in(8'hff), .IOA_out(), .IOA_oe(),
+	.IOB_in(8'hff), .IOB_out(), .IOB_oe()
+);
+
+jt49 u_ym1
+(
+	.rst_n(~cpu_rst), .clk(clk_sys), .clk_en(ym_cen),
+	.addr(ym_addr), .cs_n(~ym1_we), .wr_n(~ym1_we), .din(ym_din),
+	.sel(1'b1), .dout(ym1_q),
+	.sound(), .A(), .B(), .C(), .sample(),
+	.IOA_in(ym1_ioa_in), .IOA_out(), .IOA_oe(),
+	.IOB_in(8'hff), .IOB_out(ym1_iob_out), .IOB_oe()
+);
+
+// eeprom_w at d00001 carries clk and di; they are held between writes, so they
+// are latched rather than pulsed.
+reg [7:0] eeprom_ctl;
+always @(posedge clk_sys) begin
+	if (cpu_rst)        eeprom_ctl <= 8'd0;
+	else if (eeprom_we) eeprom_ctl <= eeprom_din;
+end
+
+wire eeprom_do;
+kaneko_eeprom93c46 u_eeprom
+(
+	.clk(clk_sys), .rst(cpu_rst),
+	// MAME passes the whole port B byte to cs_write(), so any bit asserts it.
+	.cs(|ym1_iob_out),
+	.sk(eeprom_ctl[0]), .di(eeprom_ctl[1]),
+	.do_out(eeprom_do), .dbg_state(), .dbg_busy(), .dbg_wen(), .dbg_cmd(), .dbg_cmd_valid()
 );
 
 // Scanline interrupts. vcnt comes from the video timing below; the reference

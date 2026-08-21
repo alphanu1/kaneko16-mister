@@ -31,6 +31,9 @@ SIM_SV    := $(wildcard sim/*/*.sv)
 # Building it into every harness cost ~2 MB of objects each and, at -j 32,
 # exhausted a 16 GB tmpfs through GCC's temporaries.
 FX68K_SIM := $(wildcard third_party/fx68k/hdl/verilator/*.sv)
+JT49_SIM  := third_party/jt49/hdl/jt49.v third_party/jt49/hdl/jt49_cen.v \
+             third_party/jt49/hdl/jt49_div.v third_party/jt49/hdl/jt49_eg.v \
+             third_party/jt49/hdl/jt49_exp.v third_party/jt49/hdl/jt49_noise.v
 
 # -Wno-DECLFILENAME: a file holds a group of related modules, not one module
 #   named after the file.
@@ -51,6 +54,7 @@ HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_romload:kaneko_romload_harness:sim/io/tb_kaneko_romload.cpp \
              kaneko_romstream:kaneko_romstream_harness:sim/io/tb_kaneko_romstream.cpp \
              kaneko_irq:kaneko_irq:sim/cpu/tb_kaneko_irq.cpp \
+             kaneko_eeprom:kaneko_eeprom93c46:sim/io/tb_kaneko_eeprom.cpp \
              kaneko_cpu:kaneko_cpu_harness:sim/cpu/tb_kaneko_cpu.cpp:FX68K
 
 # The frame gate is separate from `make test`: it needs a MAME dump and
@@ -194,6 +198,29 @@ bustrace: regions
 	@echo "== diff"
 	@tools/diff_bus_trace.py $(TRACE_DIR)/ours.txt $(TRACE_DIR)/mame.txt
 
+# ------------------------------------------------------- eeprom fidelity
+# Replay MAME's own CLK/DI/CS sequence against kaneko_eeprom93c46 and check
+# every value the game reads back. Separate from `make test` because the
+# stimulus is extracted from a MAME trace of a real ROM, so it lives under
+# build/ and is never committed (hard rule 2).
+EE_N ?= 200000
+.PHONY: eetest
+eetest:
+	@mkdir -p $(TRACE_DIR) build/tmp
+	@rm -rf $(TRACE_DIR)/nvram $(TRACE_DIR)/cfg
+	@cd $(TRACE_DIR) && EE_CAP_COUNT=$(EE_N) EE_CAP_OUT=ee_stim.txt \
+	  mame -rompath $(ROMPATH) $(SET) \
+	    -autoboot_script $(CURDIR)/tools/mame_eeprom_capture.lua \
+	    -skip_gameinfo -autoboot_delay 0 -seconds_to_run 60 \
+	    -video none -sound none -nothrottle 2>&1 | grep "eeprom capture"
+	@$(VERILATOR) $(VBUILD) $(VFLAGS) --top-module kaneko_eeprom93c46 \
+	  --Mdir build/obj_kaneko_eereplay -o kaneko_eereplay \
+	  $(RTL) sim/io/tb_kaneko_eeprom_replay.cpp >/dev/null 2>&1 || { \
+	    $(VERILATOR) $(VBUILD) $(VFLAGS) --top-module kaneko_eeprom93c46 \
+	      --Mdir build/obj_kaneko_eereplay -o kaneko_eereplay \
+	      $(RTL) sim/io/tb_kaneko_eeprom_replay.cpp; exit 1; }
+	@./build/obj_kaneko_eereplay/kaneko_eereplay $(TRACE_DIR)/ee_stim.txt
+
 # ---------------------------------------------------------------- deploy
 # Copy the core and its MRAs to a MiSTer and verify the checksum. Override the
 # address with MISTER=<ip>. See tools/deploy.sh for why this is a script and
@@ -214,10 +241,10 @@ boot: regions
 	@mkdir -p build/tmp
 	@$(VERILATOR) $(VBUILD) $(VFLAGS) --top-module kaneko_cpumem_harness \
 	  --Mdir build/obj_kaneko_cpumem -o kaneko_cpumem \
-	  $(RTL) $(SIM_SV) $(FX68K_SIM) sim/top/tb_kaneko_cpumem.cpp >/dev/null 2>&1 || { \
+	  $(RTL) $(SIM_SV) $(FX68K_SIM) $(JT49_SIM) sim/top/tb_kaneko_cpumem.cpp >/dev/null 2>&1 || { \
 	    $(VERILATOR) $(VBUILD) $(VFLAGS) --top-module kaneko_cpumem_harness \
 	      --Mdir build/obj_kaneko_cpumem -o kaneko_cpumem \
-	      $(RTL) $(SIM_SV) $(FX68K_SIM) sim/top/tb_kaneko_cpumem.cpp; \
+	      $(RTL) $(SIM_SV) $(FX68K_SIM) $(JT49_SIM) sim/top/tb_kaneko_cpumem.cpp; \
 	    echo "BUILD FAILED: kaneko_cpumem"; exit 1; }
 	@[ -f $(ROM_DIR)/$(SET)_maincpu.bin ] || { \
 	  echo "boot: $(SET) has no maincpu region."; \

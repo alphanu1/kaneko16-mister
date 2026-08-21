@@ -238,6 +238,50 @@ module kaneko_cpumem_harness #(
     wire [2:0] irq_ipl_n;
     assign cpu_ipl_n = (ipl_force != 3'd0) ? ~ipl_force : irq_ipl_n;
 
+    // Two YM2149s and the EEPROM, wired as the core wires them. The EEPROM is
+    // not optional here: explbrkr will not finish its self-test without one,
+    // and the chip select comes from YM2149 #1 port B rather than from any
+    // address the memory map decodes.
+    reg [4:0] ym_div;
+    always @(posedge clk) ym_div <= (ym_div == 5'd23) ? 5'd0 : ym_div + 5'd1;
+    wire ym_cen = (ym_div == 5'd0);        // 48 MHz / 24 = 2 MHz
+
+    wire        ym0_we, ym1_we, eeprom_we;
+    wire [3:0]  ym_addr;
+    wire [7:0]  ym_din, eeprom_din;
+    wire [7:0]  ym0_q, ym1_q, ym1_iob_out;
+    wire        eeprom_do;
+
+    jt49 u_ym0 (
+        .rst_n(~cpu_rst), .clk(clk), .clk_en(ym_cen),
+        .addr(ym_addr), .cs_n(~ym0_we), .wr_n(~ym0_we), .din(ym_din),
+        .sel(1'b1), .dout(ym0_q),
+        .sound(), .A(), .B(), .C(), .sample(),
+        .IOA_in(8'hff), .IOA_out(), .IOA_oe(),
+        .IOB_in(8'hff), .IOB_out(), .IOB_oe()
+    );
+
+    jt49 u_ym1 (
+        .rst_n(~cpu_rst), .clk(clk), .clk_en(ym_cen),
+        .addr(ym_addr), .cs_n(~ym1_we), .wr_n(~ym1_we), .din(ym_din),
+        .sel(1'b1), .dout(ym1_q),
+        .sound(), .A(), .B(), .C(), .sample(),
+        .IOA_in({7'h7f, eeprom_do}), .IOA_out(), .IOA_oe(),
+        .IOB_in(8'hff), .IOB_out(ym1_iob_out), .IOB_oe()
+    );
+
+    reg [7:0] eeprom_ctl;
+    always @(posedge clk) begin
+        if (cpu_rst)        eeprom_ctl <= 8'd0;
+        else if (eeprom_we) eeprom_ctl <= eeprom_din;
+    end
+
+    kaneko_eeprom93c46 u_eeprom (
+        .clk(clk), .rst(cpu_rst),
+        .cs(|ym1_iob_out), .sk(eeprom_ctl[0]), .di(eeprom_ctl[1]),
+        .do_out(eeprom_do), .dbg_state(), .dbg_busy(), .dbg_wen(), .dbg_cmd(), .dbg_cmd_valid()
+    );
+
     wire [15:0] q_vram0, q_vram1, q_spr, q_pal;
     wire        vram0_we, vram1_we, spr_we, pal_we;
     wire [12:0] vmem_addr;
@@ -256,6 +300,10 @@ module kaneko_cpumem_harness #(
         .spr_we(spr_we), .pal_we(pal_we),
         .vmem_addr(vmem_addr), .vmem_din(vmem_din),
         .vram0_q(q_vram0), .vram1_q(q_vram1), .spr_q(q_spr), .pal_q(q_pal),
+
+        .ym0_we(ym0_we), .ym1_we(ym1_we), .ym_addr(ym_addr), .ym_din(ym_din),
+        .ym0_q(ym0_q), .ym1_q(ym1_q),
+        .eeprom_we(eeprom_we), .eeprom_din(eeprom_din),
 
         .v2r0_we(), .v2r1_we(), .sprreg_we(),
         .reg_addr(), .reg_din(),

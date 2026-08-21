@@ -87,6 +87,20 @@ module kaneko_bus #(
     input  wire  [15:0] vram0_q, vram1_q, spr_q, pal_q,
 
     // ---- register banks
+    // YM2149s. Each register sits at its own address (kaneko16.cpp ym2149_r:
+    // address_w(offset) then data_r()), so ym_addr is just a[4:1]. A register
+    // reads back as a byte.
+    output logic        ym0_we, ym1_we,
+    output wire  [3:0]  ym_addr,
+    output wire  [7:0]  ym_din,
+    input  wire  [7:0]  ym0_q,
+    input  wire  [7:0]  ym1_q,
+
+    // d00001, the byte eeprom_w writes: bit 0 clk, bit 1 di. The chip select is
+    // not here — it is YM2149 #1 port B. See kaneko_eeprom93c46.sv.
+    output logic        eeprom_we,
+    output wire  [7:0]  eeprom_din,
+
     output logic        v2r0_we, v2r1_we, sprreg_we,
     output logic [3:0]  reg_addr,
     output logic [15:0] reg_din,
@@ -162,6 +176,12 @@ module kaneko_bus #(
     assign vmem_din  = oEdb;
     assign reg_addr  = a[4:1];
     assign reg_din   = oEdb;
+    assign ym_addr   = a[4:1];
+    // A byte write to an odd address carries the low half, to an even address
+    // the high half — "the registers are mapped to odd addresses, except one!"
+    // (kaneko16.cpp ym2149_w).
+    assign ym_din    = ~LDSn ? oEdb[7:0] : oEdb[15:8];
+    assign eeprom_din = oEdb[7:0];
 
     // ---------------------------------------------------------- sequencing
     typedef enum logic [1:0] { S_IDLE, S_ROM, S_DONE } state_t;
@@ -225,6 +245,7 @@ module kaneko_bus #(
     always_ff @(posedge clk) begin
         vram0_we <= 1'b0; vram1_we <= 1'b0; spr_we <= 1'b0; pal_we <= 1'b0;
         v2r0_we  <= 1'b0; v2r1_we  <= 1'b0; sprreg_we <= 1'b0;
+        ym0_we   <= 1'b0; ym1_we   <= 1'b0; eeprom_we <= 1'b0;
         unmapped_hit <= 1'b0;
 
         if (rst) begin
@@ -266,6 +287,11 @@ module kaneko_bus #(
                                 v2r0_we   <= sel_v2r0;
                                 v2r1_we   <= sel_v2r1;
                                 sprreg_we <= sel_sprr;
+                                ym0_we    <= sel_ym0;
+                                ym1_we    <= sel_ym1;
+                                // Only the low byte of d00000/d00001 is the
+                                // EEPROM; the high byte is coin lockout.
+                                eeprom_we <= sel_ctrl && ~LDSn;
                             end
                             // Everything else answers in one cycle, INCLUDING
                             // addresses nothing decodes — a 68000 waiting on a
@@ -278,8 +304,14 @@ module kaneko_bus #(
                             // RAM, video memory and the registers all answer
                             // immediately, so there is no reason to spend an
                             // edge getting to S_DONE before saying so.
-                            DTACKn <= 1'b0;
-                            state  <= S_DONE;
+                            //
+                            // The YM2149s are the exception. jt49 registers its
+                            // dout off the address, so the value is one clock
+                            // behind; answering on this edge would hand the CPU
+                            // whatever register the previous access happened to
+                            // land on. They spend the extra edge.
+                            if (!(sel_ym0 || sel_ym1)) DTACKn <= 1'b0;
+                            state <= S_DONE;
                         end
                     end
                 end
@@ -342,6 +374,11 @@ module kaneko_bus #(
         else if (sel_v2r0) iEdb = v2r0_q;
         else if (sel_v2r1) iEdb = v2r1_q;
         else if (sel_sprr) iEdb = sprreg_q;
+        // A YM2149 register reads back as a byte. MAME promotes data_r() to
+        // u16, so the high half is zero; the game only reads the low half, but
+        // matching it keeps the bus traces comparable.
+        else if (sel_ym0)  iEdb = {8'h00, ym0_q};
+        else if (sel_ym1)  iEdb = {8'h00, ym1_q};
         // The watchdog reads back as zero. MAME's watchdog_timer_device
         // reset16_r returns 0, and this was the first place the core's bus
         // trace differed from MAME's during boot — 55,400 data accesses in,

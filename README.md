@@ -32,14 +32,18 @@ Miles Rally 1/2.
 | SDRAM controller, ROM loader | running on hardware |
 | 68000 (fx68k) + bus decode | running on hardware; matches MAME exactly over 100k bus accesses |
 | ROM line cache | 16 lines x 4 words, 0.1% miss; CPU back to MAME's bus rate |
-| Scanline interrupts | IRQ5/4/3 with autovectoring; unit-tested, not yet exercised past boot |
+| Scanline interrupts | IRQ5/4/3 autovectored; the game takes all three, once per frame |
 | VIEW2 / sprite register files | **stubbed** — the CPU's writes go nowhere and read back as 0 |
-| Sound (YM2149 x2, OKI M6295) | **not started** |
-| Inputs, EEPROM, coin lockout | **not started** — inputs read as 0xffff |
+| YM2149 x2 (jt49) | register files and ports wired; sound outputs not connected |
+| OKI M6295 | **not started** |
+| EEPROM (93C46) | working; 20,910 reads replayed against MAME, zero mismatches |
+| Inputs, coin lockout | **not started** — inputs read as 0xffff |
 
-The core currently boots the 68000 and shows debug views (tile contact sheet,
-palette, CPU liveness). It does not yet render the game: the pixel path exists
-and is verified, but nothing in the core drives it.
+The 68000 completes explbrkr's self-test, formats a blank EEPROM, enables
+interrupts and runs its main loop. The core still shows debug views (tile
+contact sheet, palette, CPU liveness, interrupts per frame) rather than the
+game: the pixel path exists and is verified, but nothing in the core drives it
+yet.
 
 M0 frame gate, RTL rendered against a frame MAME actually produced:
 

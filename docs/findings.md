@@ -2507,3 +2507,78 @@ So the game genuinely reads data back out of the EEPROM during boot, and the
 bits matter. jt49 is already vendored and exposes `addr`/`cs_n`/`wr_n`/`din`/
 `dout` with `IOA_in`/`IOB_out`, so it supplies the register read-back and the
 port wiring, and the sound path later. The 93C46 has to be written.
+
+## The game boots: EEPROM and YM2149s, and the interrupts start
+
+*Instrument: `make eetest` — MAME's own CLK/DI/CS sequence replayed against
+`kaneko_eeprom93c46`, checking every value the game reads back.*
+
+```
+DTACKs      14905512
+ticks/cycle 20.1
+interrupts  376 taken (IRQ5 126, IRQ4 125, IRQ3 125), first at tick 199045456
+```
+
+One of each interrupt per frame, first at frame 245 — MAME's SR poll puts its
+own unmask at around frame 240. explbrkr now completes its self-test, formats a
+blank EEPROM, enables interrupts and runs its main loop.
+
+### The EEPROM is not where the memory map suggests
+
+`bakubrkr_map` decodes `d00001` and nothing else, but that is only half the
+chip:
+
+| line | reached via |
+| --- | --- |
+| CLK, DI | `eeprom_w` at `d00001` — bit 0 clk, bit 1 di |
+| CS | YM2149 **#1 port B**, written at `40021e` |
+| DO | YM2149 **#1 port A**, read at `40021c` |
+
+So the sound chips had to go in before the EEPROM could work at all. jt49
+rather than a hand-rolled register file: it already models the port direction
+bits and the per-register read masks, and it is the chip this core will use for
+sound anyway.
+
+### Four things the datasheet does not tell you
+
+Each of these was found by replaying MAME's own sequence, and each produced a
+model that looked right:
+
+- **DO idles high.** The pin is open drain with a pull-up, so outside a read it
+  reads 1 (`eepromser.cpp:288`). A model that idles low agrees with **99.7%** of
+  the trace, because most reads happen while data is shifting out and formatted
+  contents are mostly zero. That is the shape of a near-miss that reads as
+  success.
+- **While waiting for a start bit, DO is the ready/busy status** — a 93Cxx
+  override (`eepromser.cpp:658`), not the idle level. This is what the game
+  polls after a write, and without it the core spun forever in a loop at
+  `00c30a..00c31c`.
+- **Every command except READ ends in a completion wait**, left only by CS
+  falling, and DO reads high throughout it — *not* the ready status. Sending the
+  status there reported busy where MAME reported 1, on every programming cycle.
+- **Reads stream.** 93Cxx enables auto-increment, so clocking past sixteen bits
+  walks into the next word (`eepromser.cpp:415`).
+
+Timings are MAME's (`eeprom.cpp:42-45`): write 1750 us, erase 1000 us,
+erase-all and write-all 8000 us. An earlier attempt measured "111.8 us" from
+MAME directly and that was wrong — it timed from a later CS fall rather than
+from the write.
+
+### Two of the bugs were in the instrument, not the model
+
+Worth recording because both produced confident, wrong numbers:
+
+- **The replay advanced time by per-event gaps.** Each event also costs
+  `settle()` ticks, so the DUT crept ahead of the machine it was copying — about
+  600 us of drift over nine thousand events, expiring every 1750 us timer early
+  and reporting ready while MAME was still busy. 414 mismatches that looked like
+  a modelling error.
+- **Then the fix double-counted.** `tick()` counted, and the advance loop added
+  the same count again, so the DUT clock ran at exactly half machine time and
+  every programming timer took twice as long to expire. The residual was a clean
+  2x, which is what gave it away.
+
+Reading `eepromser.cpp` settled in minutes what several rounds of hypothesis
+had not. The oracle's source is as available as its behaviour, and cheaper.
+
+Final: **20,910 checked reads, zero mismatches.**
