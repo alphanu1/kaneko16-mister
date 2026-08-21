@@ -121,6 +121,17 @@ CATEGORY = {
 # variants go under releases/_alternatives/_<Game>/ and are opt-in. Convention
 # is World or USA if one exists, otherwise Japan.
 PRIMARY = {"explbrkr", "mgcrystl", "wingforc"}
+
+# Which games the CORE actually supports today. Everything game-specific is
+# still compiled in for explbrkr — the memory map is bakubrkr_map, and the
+# offsets, colour base, sprite priorities and layer count are constants — so
+# loading any other set would produce a broken picture rather than a game.
+#
+# Shipping an MRA for a game the core cannot run is worse than shipping none:
+# it looks like a supported title and fails in a way the player cannot
+# diagnose. This set grows when the per-game configuration table lands, and
+# not before.
+SUPPORTED = {"explbrkr"}
 ALT_PARENT = {"blazeonj": "Blaze On"}
 
 # SDRAM layout: region -> (base, size). This IS the MRA's emission order, and

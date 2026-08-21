@@ -12,7 +12,7 @@ so there is one description of it rather than a rule encoded twice.
 import os, shutil, sys, xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build_rom_regions import PRIMARY, ALT_PARENT          # noqa: E402
+from build_rom_regions import PRIMARY, ALT_PARENT, SUPPORTED   # noqa: E402
 
 
 def main():
@@ -34,6 +34,12 @@ def main():
         except ET.ParseError:
             print(f"stage_release: {f} is not valid XML", file=sys.stderr)
             return 1
+
+        if setname not in SUPPORTED:
+            # See build_rom_regions.SUPPORTED: an MRA for a game the core
+            # cannot run looks like a supported title and fails opaquely.
+            print(f"  skipping {f} — core does not support {setname} yet")
+            continue
 
         if setname in PRIMARY:
             out = os.path.join(dst, f)

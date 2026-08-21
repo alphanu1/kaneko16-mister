@@ -21,7 +21,12 @@
 # meant, so that /build/ is not silently satisfied by a nested /quartus/build/.
 /build/
 /quartus/build/
-/releases/
+# releases/ IS committed — it is the distributable, not a build artefact.
+# One dated .rbf plus the primary MRAs, in the layout MiSTer expects. Build
+# intermediates still live under build/ (rule 10); this is what a tester
+# downloads. Old .rbf files are removed rather than accumulated, so the repo
+# does not grow a few megabytes per build.
+!/releases/
 # No trailing slash. `make quartus` makes these SYMLINKS into build/ (rule 10),
 # and a directory-only pattern does not match a symlink — `db/` left both of
 # them untracked-but-not-ignored, one `git add -A` away from being committed.
