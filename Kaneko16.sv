@@ -239,6 +239,8 @@ wire [15:0] vmem_din;
 wire [3:0]  reg_addr;
 wire [15:0] reg_din;
 wire [15:0] q_vram0, q_vram1, q_spr, q_pal;
+wire [15:0] q_v2r0, q_v2r1, q_sprreg;
+wire [255:0] v2r0_flat, v2r1_flat, sprreg_flat;
 wire        unmapped_hit;
 
 kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
@@ -259,7 +261,7 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 
 	.v2r0_we(v2r0_we), .v2r1_we(v2r1_we), .sprreg_we(sprreg_we),
 	.reg_addr(reg_addr), .reg_din(reg_din),
-	.v2r0_q(16'h0000), .v2r1_q(16'h0000), .sprreg_q(16'h0000),
+	.v2r0_q(q_v2r0), .v2r1_q(q_v2r1), .sprreg_q(q_sprreg),
 
 	// Nothing pressed. The EEPROM is not implemented yet, so anything the game
 	// reads from it comes back as an unwritten device.
@@ -347,6 +349,32 @@ kaneko_eeprom93c46 u_eeprom
 	.cs(|ym1_iob_out),
 	.sk(eeprom_ctl[0]), .di(eeprom_ctl[1]),
 	.do_out(eeprom_do), .dbg_state(), .dbg_busy(), .dbg_wen(), .dbg_cmd(), .dbg_cmd_valid()
+);
+
+// VIEW2 and VU-002 register banks. These decoded but stored nothing until now:
+// kaneko_bus raised a write strobe that went nowhere and read back a hardwired
+// zero. Harmless while nothing consumed them — every register access explbrkr
+// makes in its first 300,000 bus cycles is a write — and necessary the moment
+// the pixel path needs the scroll values.
+kaneko_regs16 u_v2r0
+(
+	.clk(clk_sys), .we(v2r0_we), .addr(reg_addr), .din(reg_din),
+	.uds(~UDSn), .lds(~LDSn),
+	.rd_addr(reg_addr), .rd_q(q_v2r0), .regs_flat(v2r0_flat)
+);
+
+kaneko_regs16 u_v2r1
+(
+	.clk(clk_sys), .we(v2r1_we), .addr(reg_addr), .din(reg_din),
+	.uds(~UDSn), .lds(~LDSn),
+	.rd_addr(reg_addr), .rd_q(q_v2r1), .regs_flat(v2r1_flat)
+);
+
+kaneko_regs16 u_sprreg
+(
+	.clk(clk_sys), .we(sprreg_we), .addr(reg_addr), .din(reg_din),
+	.uds(~UDSn), .lds(~LDSn),
+	.rd_addr(reg_addr), .rd_q(q_sprreg), .regs_flat(sprreg_flat)
 );
 
 // Scanline interrupts. vcnt comes from the video timing below; the reference
