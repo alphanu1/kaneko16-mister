@@ -83,7 +83,7 @@ DUMP_AT    ?= vblank
 # here. Parallel Verilator builds of fx68k filled it and every harness failed
 # with "Disk quota exceeded", which reads like a permissions or code fault.
 export TMPDIR := $(CURDIR)/build/tmp
-all: lint test
+all: lint nports-check test
 
 # --------------------------------------------------------------- quartus 17
 # Refuses to proceed on any version but 17.0, and refuses to fall back to
@@ -116,6 +116,30 @@ quartus-check:
 # already spent several minutes on lint and the simulation gate. Checked here
 # instead, before any of that.
 .PHONY: qsf-check
+# ------------------------------------------------------- port-count check
+# Kaneko16.sv's NPORTS and the harnesses' NP were independent constants that
+# happened to match until a sixth port was added for the OKI. The SDRAM
+# harness kept testing five, so the OKI's port was never arbitrated in a test —
+# and it was also the port kaneko_sdram's per-port burst list forgot, which
+# made the sound path silent while every link in it reported success.
+#
+# Nothing else catches two numbers drifting apart, so this does. Same shape as
+# qsf-check, and for the same reason: the failure is invisible otherwise.
+.PHONY: nports-check
+nports-check:
+	@core=$$(sed -n 's/^localparam int unsigned NPORTS *= *\([0-9]*\);.*/\1/p' Kaneko16.sv); \
+	[ -n "$$core" ] || { echo "nports: could not read NPORTS from Kaneko16.sv"; exit 1; }; \
+	bad=""; \
+	for f in $$(grep -rl 'NP *= *[0-9]' sim/ 2>/dev/null); do \
+	  n=$$(sed -n 's/.*\bNP *= *\([0-9]*\).*/\1/p' "$$f" | head -1); \
+	  [ "$$n" = "$$core" ] || bad="$$bad $$f:$$n"; done; \
+	if [ -n "$$bad" ]; then \
+	  echo "nports: Kaneko16.sv has NPORTS=$$core, but:"; \
+	  for b in $$bad; do echo "        $${b%%:*} has NP=$${b##*:}"; done; \
+	  echo "        a port the harness does not drive is a port nothing tests."; \
+	  exit 1; fi
+	@echo "nports: NPORTS=$$(sed -n 's/^localparam int unsigned NPORTS *= *\([0-9]*\);.*/\1/p' Kaneko16.sv) everywhere"
+
 qsf-check:
 	@miss=""; for f in $(RTL); do \
 	  grep -qF "$$f" Kaneko16.qsf || miss="$$miss $$f"; done; \
@@ -125,7 +149,7 @@ qsf-check:
 	  echo "         add a SYSTEMVERILOG_FILE line for each."; exit 1; fi
 	@echo "qsf: all $(words $(RTL)) RTL file(s) in the project"
 
-quartus: qsf-check lint test quartus-check
+quartus: qsf-check nports-check lint test quartus-check
 	@mkdir -p build/tmp build/quartus build/db build/incremental_db
 	@# Quartus creates db/ and incremental_db/ in the project root and has no
 	@# assignment that moves them, so they are symlinked into build/. Rule 10.

@@ -3063,3 +3063,10 @@ be forced to agree with — not one it restates.** `NPORTS` in `Kaneko16.sv` and
 until they did not. Where two files must agree on a width, the test has to fail
 loudly when they diverge, and `default:` is exactly the construct that stops it
 failing.
+
+`make nports-check` now enforces it, in the same shape as `qsf-check` and for
+the same reason — nothing else catches two numbers drifting apart. It found two
+more harnesses still on five ports the moment it was written
+(`kaneko_romload_harness`, `kaneko_romstream_harness`), neither of which
+exercises the read ports but both of which would have drifted the same way. It
+runs as part of `make all` and gates `make quartus`.
