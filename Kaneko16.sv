@@ -59,7 +59,7 @@ localparam CONF_STR = {
 	"-;",
 	"O[8],Aspect ratio,4:3,16:9;",
 	"O[5:4],SDRAM capture,CL+1,CL+0,CL+2,CL+3;",
-	"O[10:9],Show,Tiles chip0,Tiles chip1,Sprites,Palette+CPU;",
+	"O[10:9],Show,Game,Tiles chip0,Tiles chip1,Palette+CPU;",
 	"O[11],Debug overlay,Off,On;",
 	"-;",
 	"R[12],Reset;",
@@ -218,12 +218,16 @@ wire              p0_req;          // video tile fetch
 wire [SDR_AW:1]   p0_addr;
 wire              p1_req;          // 68000 ROM fetch
 wire [SDR_AW:1]   p1_addr;
+wire              p2_req;          // tile ROM feeder, four layers
+wire [SDR_AW:1]   p2_addr;
 wire [NPORTS-1:0]       p_ack_bus;
 wire [NPORTS-1:0][63:0] p_dout_bus;
 wire              p0_ack  = p_ack_bus[0];
 wire [63:0]       p0_dout = p_dout_bus[0];
 wire              p1_ack  = p_ack_bus[1];
 wire [63:0]       p1_dout = p_dout_bus[1];
+wire              p2_ack  = p_ack_bus[2];
+wire [63:0]       p2_dout = p_dout_bus[2];
 
 wire sd_dq_oe;
 wire [15:0] sd_dq_o;
@@ -246,8 +250,8 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300)) u_sdram
 	.wr_req(ldr_wr_req), .wr_addr(ldr_wr_addr), .wr_din(ldr_wr_din),
 	.wr_be(ldr_wr_be), .wr_ack(ldr_wr_ack),
 
-	.p_req  ({3'b0, p1_req, p0_req}),
-	.p_addr ({{3{{SDR_AW{1'b0}}}}, p1_addr, p0_addr}),
+	.p_req  ({2'b0, p2_req, p1_req, p0_req}),
+	.p_addr ({{2{{SDR_AW{1'b0}}}}, p2_addr, p1_addr, p0_addr}),
 	.p_din  ({5{16'd0}}),
 	.p_be   ({5{2'b11}}),
 	.p_we   (5'b0),
@@ -314,6 +318,13 @@ wire [3:0]  reg_addr;
 wire [15:0] reg_din;
 wire [15:0] q_vram0, q_vram1, q_spr, q_pal;
 wire [15:0] q_v2r0, q_v2r1, q_sprreg;
+
+// VIEW2 video-side ports: a tile entry {code, attr} and a scroll word per
+// layer, per chip.
+wire [9:0]  c0_t0_addr, c0_t1_addr, c1_t0_addr, c1_t1_addr;
+wire [31:0] c0_t0_q,    c0_t1_q,    c1_t0_q,    c1_t1_q;
+wire [10:0] c0_s0_addr, c0_s1_addr, c1_s0_addr, c1_s1_addr;
+wire [15:0] c0_s0_q,    c0_s1_q,    c1_s0_q,    c1_s1_q;
 wire [255:0] v2r0_flat, v2r1_flat, sprreg_flat;
 wire        unmapped_hit;
 
@@ -358,14 +369,14 @@ kaneko_vmem u_vmem
 	.we_spr(spr_we), .we_pal(pal_we),
 	.uds(~UDSn), .lds(~LDSn),
 	.q_vram0(q_vram0), .q_vram1(q_vram1), .q_spr(q_spr), .q_pal(q_pal),
-	.c0_t0_addr(10'd0), .c0_t0_q(),
-	.c0_t1_addr(10'd0), .c0_t1_q(),
-	.c0_s0_addr(11'd0), .c0_s0_q(),
-	.c0_s1_addr(11'd0), .c0_s1_q(),
-	.c1_t0_addr(10'd0), .c1_t0_q(),
-	.c1_t1_addr(10'd0), .c1_t1_q(),
-	.c1_s0_addr(11'd0), .c1_s0_q(),
-	.c1_s1_addr(11'd0), .c1_s1_q(),
+	.c0_t0_addr(c0_t0_addr), .c0_t0_q(c0_t0_q),
+	.c0_t1_addr(c0_t1_addr), .c0_t1_q(c0_t1_q),
+	.c0_s0_addr(c0_s0_addr), .c0_s0_q(c0_s0_q),
+	.c0_s1_addr(c0_s1_addr), .c0_s1_q(c0_s1_q),
+	.c1_t0_addr(c1_t0_addr), .c1_t0_q(c1_t0_q),
+	.c1_t1_addr(c1_t1_addr), .c1_t1_q(c1_t1_q),
+	.c1_s0_addr(c1_s0_addr), .c1_s0_q(c1_s0_q),
+	.c1_s1_addr(c1_s1_addr), .c1_s1_q(c1_s1_q),
 	.spr_addr(12'd0), .spr_q(),
 	.pal_addr(pal_rd_addr), .pal_q(pal_rd_q)
 );
@@ -516,10 +527,149 @@ kaneko_tilewall #(.SDR_AW(SDR_AW)) u_wall
 (
 	.clk(clk_sys), .rst(rst_sys), .ce_pix(ce_pix),
 	.rom_loaded(rom_loaded),
-	.mode(status[10:9]),
+	.mode({1'b0, status[9]}),
 	.screen_x(screen_x), .screen_y(screen_y), .de(de),
 	.sdr_req(p0_req), .sdr_addr(p0_addr), .sdr_ack(p0_ack), .sdr_dout(p0_dout),
 	.r(r), .g(g), .b(b)
+);
+
+// ------------------------------------------------------------- game video
+//
+// Four tile layers, fetched a line ahead and mixed. In MAME's draw order:
+// chip0 layer 0, chip0 layer 1, chip1 layer 0, chip1 layer 1.
+//
+// THE NUMBERING RUNS OPPOSITE TO THE BYTE ORDER, EVERYWHERE
+//
+// Layer 0 takes registers 2/3, VRAM at 0x1000, scroll at 0x3000 and control
+// bits 12/11. Layer 1 takes registers 0/1, VRAM at 0x0000, scroll at 0x2000
+// and bits 4/3. So the FIRST register pair, the FIRST VRAM block and the FIRST
+// scroll block all belong to layer 1, while the HIGHER control bits belong to
+// layer 0. Four independent chances to wire a layer to the wrong memory and
+// get a picture that looks plausible — see docs/findings.md.
+//
+// Scroll Y is shifted down by six inside the address engine; scroll X is not,
+// because line scroll is added before the shift.
+
+// PER-GAME, and this belongs in a configuration table before a second game
+// runs (rule 9). explbrkr: set_offset(0x5b, -0x8, 256, 240), m_view2_2_pri set,
+// sprite priorities {8,8,8,8}, tile colour base 0x400.
+localparam signed [10:0] V2_DX = 11'sd91;      // 0x5b
+localparam signed [10:0] V2_DY = -11'sd8;
+localparam [10:0] TILE_COLBASE = 11'h400;
+localparam        VIEW2_2_PRI  = 1'b1;
+
+// Tile ROM regions, as word addresses in SDRAM (D6, SDRAM_MAP):
+//   view2_0 at byte 0x080000, view2_1 at byte 0x180000.
+localparam [SDR_AW:1] TROM0_BASE = SDR_AW'(25'h040000);
+localparam [SDR_AW:1] TROM1_BASE = SDR_AW'(25'h0c0000);
+
+wire [15:0] c0r0 = v2r0_flat[ 0*16 +: 16];
+wire [15:0] c0r1 = v2r0_flat[ 1*16 +: 16];
+wire [15:0] c0r2 = v2r0_flat[ 2*16 +: 16];
+wire [15:0] c0r3 = v2r0_flat[ 3*16 +: 16];
+wire [15:0] c0r4 = v2r0_flat[ 4*16 +: 16];
+wire [15:0] c1r0 = v2r1_flat[ 0*16 +: 16];
+wire [15:0] c1r1 = v2r1_flat[ 1*16 +: 16];
+wire [15:0] c1r2 = v2r1_flat[ 2*16 +: 16];
+wire [15:0] c1r3 = v2r1_flat[ 3*16 +: 16];
+wire [15:0] c1r4 = v2r1_flat[ 4*16 +: 16];
+
+// Enables are ACTIVE LOW in the register.
+wire [3:0] lay_en = { ~c1r4[4], ~c1r4[12], ~c0r4[4], ~c0r4[12] };
+wire [3:0] lay_ls = {  c1r4[3],  c1r4[11],  c0r4[3],  c0r4[11] };
+
+wire [63:0] lay_sx = { c1r0, c1r2, c0r0, c0r2 };   // L1 uses reg0, L0 uses reg2
+wire [63:0] lay_sy = { c1r1, c1r3, c0r1, c0r3 };
+
+// Layer 1's dx is two further along than layer 0's: MAME sets scrolldx to
+// -(m_dx + 2) for tmap[1].
+wire [43:0] lay_dx = { 11'(V2_DX + 11'sd2), 11'(V2_DX),
+                       11'(V2_DX + 11'sd2), 11'(V2_DX) };
+wire [43:0] lay_dy = { 11'(V2_DY), 11'(V2_DY), 11'(V2_DY), 11'(V2_DY) };
+
+// ------------------------------------------------------- tile ROM feeder
+wire [95:0] trom_addr_f;
+wire [31:0] trom_data_f;
+wire        trom_ready;
+wire [SDR_AW*4-1:0] trom_base_f = { TROM1_BASE, TROM1_BASE,
+                                    TROM0_BASE, TROM0_BASE };
+
+kaneko_tilerom #(.NREQ(4), .SDR_AW(SDR_AW)) u_trom
+(
+	.clk(clk_sys), .rst(rst_sys),
+	.req_addr(trom_addr_f),
+	.base_addr(trom_base_f),
+	.req_data(trom_data_f),
+	.ready(trom_ready),
+	.sdr_req(p2_req), .sdr_addr(p2_addr),
+	.sdr_ack(p2_ack), .sdr_dout(p2_dout)
+);
+
+// ---------------------------------------------------------- line fetch
+// Started at the top of every line for the NEXT one, so the display always
+// reads a finished bank.
+wire line_start = ce_pix && (hcnt == 10'd0);
+
+wire [35:0]  ln_scr_addr;
+wire [63:0]  ln_scr_data;
+wire [39:0]  ln_vram_addr;
+wire [127:0] ln_vram_data;
+
+wire [3:0]  mix_solid;
+wire [11:0] mix_cat;
+wire [23:0] mix_colour;
+wire [15:0] mix_pix;
+
+kaneko_tmap_line #(.H_VIS(256)) u_line
+(
+	.clk(clk_sys), .rst(rst_sys),
+	.start(line_start), .line_y(screen_y + 9'd1), .busy(),
+
+	.layer_en(lay_en), .dx_f(lay_dx), .dy_f(lay_dy),
+	.scroll_x_f(lay_sx), .scroll_y_f(lay_sy), .linescroll_en(lay_ls),
+
+	.scr_addr_f(ln_scr_addr),   .scr_data_f(ln_scr_data),
+	.vram_addr_f(ln_vram_addr), .vram_data_f(ln_vram_data),
+	.rom_addr_f(trom_addr_f),   .rom_data_f(trom_data_f),
+	.rom_ready(trom_ready),
+
+	.rd_x(screen_x),
+	.out_solid(mix_solid), .out_cat_f(mix_cat),
+	.out_colour_f(mix_colour), .out_pix_f(mix_pix)
+);
+
+// Video-side memory ports. Layer order is c0L0, c0L1, c1L0, c1L1.
+assign c0_t0_addr = ln_vram_addr[ 0 +: 10];
+assign c0_t1_addr = ln_vram_addr[10 +: 10];
+assign c1_t0_addr = ln_vram_addr[20 +: 10];
+assign c1_t1_addr = ln_vram_addr[30 +: 10];
+assign ln_vram_data = { c1_t1_q, c1_t0_q, c0_t1_q, c0_t0_q };
+
+assign c0_s0_addr = {2'b00, ln_scr_addr[ 0 +: 9]};
+assign c0_s1_addr = {2'b00, ln_scr_addr[ 9 +: 9]};
+assign c1_s0_addr = {2'b00, ln_scr_addr[18 +: 9]};
+assign c1_s1_addr = {2'b00, ln_scr_addr[27 +: 9]};
+assign ln_scr_data = { c1_s1_q, c1_s0_q, c0_s1_q, c0_s0_q };
+
+// --------------------------------------------------------------- mixer
+wire [10:0] mix_pen;
+
+kaneko_mixer u_mix
+(
+	.layer_solid(mix_solid),
+	.layer_cat_f(mix_cat),
+	.layer_colour_f(mix_colour),
+	.layer_pix_f(mix_pix),
+
+	// No sprites yet. Zero reads as "nothing here" to the mixer.
+	.spr_pix(14'd0), .spr_prio(2'd0),
+
+	.view2_2_pri(VIEW2_2_PRI),
+	.spr_pri_f(16'h8888),          // explbrkr: {8,8,8,8}
+	.tile_colbase(TILE_COLBASE),
+	.spr_colbase(11'd0),
+
+	.pen(mix_pen), .prio_out(), .sprite_won()
 );
 
 // ----------------------------------------------------- palette / CPU view
@@ -533,7 +683,12 @@ kaneko_tilewall #(.SDR_AW(SDR_AW)) u_wall
 // whether the CPU runs or not.
 wire [5:0] sw_col = screen_x[7:2];
 wire [4:0] sw_row = 5'((screen_y - 9'(16)) / 9'd7);
-assign pal_rd_addr = {sw_row, sw_col};
+
+// One palette read port, two customers: the game path asks for the pen the
+// mixer chose, the swatch view walks the whole table.
+wire [1:0] show = status[10:9];
+wire       show_game = (show == 2'd0);
+assign pal_rd_addr = show_game ? mix_pen : {sw_row, sw_col};
 
 wire [7:0] pal_r = {pal_rd_q[9:5],   pal_rd_q[9:7]};
 wire [7:0] pal_g = {pal_rd_q[14:10], pal_rd_q[14:12]};
@@ -574,19 +729,48 @@ wire dbg_on   = status[11];
 wire in_dbg   = dbg_on && (in_alive_row || in_irq_row) && (screen_x[2:0] != 3'd7);
 wire dbg_set  = in_alive_row ? alive_set : irq_set;
 
-wire show_pal = (status[10:9] == 2'd3);
-
-assign CLK_VIDEO = clk_sys;
-assign CE_PIXEL  = ce_pix;
-assign VGA_DE    = de;
-assign VGA_HS    = hs;
-assign VGA_VS    = vs;
 wire [7:0] dbg_r = dbg_set ? (in_irq_row ? 8'hff : 8'h00) : 8'h40;
 wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : 8'hff) : 8'h00;
 
-assign VGA_R = in_dbg ? dbg_r : (show_pal ? pal_r : r);
-assign VGA_G = in_dbg ? dbg_g : (show_pal ? pal_g : g);
-assign VGA_B = in_dbg ? 8'h00 : (show_pal ? pal_b : b);
+// The game picture and the palette swatches both come out of the palette RAM,
+// so they share the same decode.
+wire [7:0] src_r = show_game ? pal_r : (show == 2'd3 ? pal_r : r);
+wire [7:0] src_g = show_game ? pal_g : (show == 2'd3 ? pal_g : g);
+wire [7:0] src_b = show_game ? pal_b : (show == 2'd3 ? pal_b : b);
+
+wire [7:0] out_r = in_dbg ? dbg_r : src_r;
+wire [7:0] out_g = in_dbg ? dbg_g : src_g;
+wire [7:0] out_b = in_dbg ? 8'h00 : src_b;
+
+// TWO CLOCKS OF READ LATENCY, AND THE SYNCS MOVE WITH IT
+//
+// The line buffer is a registered read and so is the palette, so a pixel's
+// colour arrives two clocks after its x is presented. Delaying only the colour
+// would shift the picture against the syncs by a quarter of a pixel and, worse,
+// hand the framework the previous pixel on the CE_PIXEL it samples.
+//
+// Everything the framework looks at is delayed by the same two clocks instead,
+// so the relationship between colour, blanking, syncs and the pixel strobe is
+// exactly what the timing generator produced.
+reg [1:0] hs_d, vs_d, de_d, cep_d;
+reg [7:0] r_d0, g_d0, b_d0, r_d1, g_d1, b_d1;
+always @(posedge clk_sys) begin
+	hs_d  <= {hs_d[0],  hs};
+	vs_d  <= {vs_d[0],  vs};
+	de_d  <= {de_d[0],  de};
+	cep_d <= {cep_d[0], ce_pix};
+	r_d0 <= out_r; g_d0 <= out_g; b_d0 <= out_b;
+	r_d1 <= r_d0;  g_d1 <= g_d0;  b_d1 <= b_d0;
+end
+
+assign CLK_VIDEO = clk_sys;
+assign CE_PIXEL  = cep_d[1];
+assign VGA_DE    = de_d[1];
+assign VGA_HS    = hs_d[1];
+assign VGA_VS    = vs_d[1];
+assign VGA_R     = r_d1;
+assign VGA_G     = g_d1;
+assign VGA_B     = b_d1;
 
 endmodule
 
