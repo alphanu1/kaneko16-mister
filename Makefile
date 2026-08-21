@@ -57,6 +57,7 @@ HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_eeprom:kaneko_eeprom93c46:sim/io/tb_kaneko_eeprom.cpp \
              kaneko_regs16:kaneko_regs16:sim/video/tb_kaneko_regs16.cpp \
              kaneko_tilerom:kaneko_tilerom_harness:sim/video/tb_kaneko_tilerom.cpp \
+             kaneko_tmap_line:kaneko_tmap_line:sim/video/tb_kaneko_tmap_line.cpp \
              kaneko_cpu:kaneko_cpu_harness:sim/cpu/tb_kaneko_cpu.cpp:FX68K
 
 # The frame gate is separate from `make test`: it needs a MAME dump and
