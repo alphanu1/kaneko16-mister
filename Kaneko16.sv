@@ -1076,6 +1076,21 @@ wire [15:0] oki_row_val = (screen_y < 9'd46) ? oki_wr_lat
                                              : oki_snd_lat;
 wire       oki_set = oki_row_val[oki_bit];
 
+// Row 9, magenta: the RAW joystick word for pad 1, live — not a per-frame
+// count like every other row. Bit 0 is at the RIGHT, so pressing the button
+// mapped to A lights the fifth block from the right.
+//
+//   0 right  1 left  2 down  3 up  4 A  5 B  6 X  7 Y
+//   8 L      9 R    10 select  11 start
+//
+// This exists because "there is no fire button" is not answerable from the
+// RTL: the wiring matches MAME's INPUT_PORTS exactly, so the question is which
+// bits the pad actually produces, and that is only visible here.
+wire in_joy_row = (screen_y >= 9'd72) && (screen_y < 9'(72 + 6))
+               && (screen_x < 9'(16 * ALV_BIT_W));
+wire [3:0] joy_bit = 4'd15 - 4'(screen_x[6:3]);
+wire       joy_set = joystick_0[joy_bit];
+
 // Row 8, white: sprite passes that did not finish before the next frame
 // started. Zero is correct. Non-zero means the renderer ran out of frame —
 // 1024 sprites at one pixel per clock, each pixel able to miss a 2.25 MB
@@ -1099,15 +1114,18 @@ wire       ovr_set = overrun_lat[ovr_bit];
 // they sit on top of the picture, so the picture wins unless asked otherwise.
 wire dbg_on   = status[11];
 wire in_dbg   = dbg_on && (in_alive_row || in_irq_row || in_ovr_row || in_oki_row
-                           || in_spr_row)
+                           || in_spr_row || in_joy_row)
               && (screen_x[2:0] != 3'd7);
 wire dbg_set  = in_alive_row ? alive_set : in_irq_row ? irq_set
-              : in_ovr_row ? ovr_set : in_spr_row ? spr_set : oki_set;
+              : in_ovr_row ? ovr_set : in_spr_row ? spr_set
+              : in_joy_row ? joy_set : oki_set;
 
-wire [7:0] dbg_r = dbg_set ? ((in_irq_row || in_oki_row || in_spr_row)
-                                ? 8'hff : 8'h00) : 8'h40;
-wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : 8'hff) : 8'h00;
-wire [7:0] dbg_b = dbg_set && (in_ovr_row || in_spr_row) ? 8'hff : 8'h00;
+wire [7:0] dbg_r = dbg_set ? ((in_irq_row || in_oki_row || in_spr_row
+                                || in_joy_row) ? 8'hff : 8'h00) : 8'h40;
+wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : in_joy_row ? 8'h00 : 8'hff)
+                           : 8'h00;
+wire [7:0] dbg_b = dbg_set && (in_ovr_row || in_spr_row || in_joy_row)
+                     ? 8'hff : 8'h00;
 
 // The game picture and the palette swatches both come out of the palette RAM,
 // so they share the same decode.

@@ -72,6 +72,7 @@ missing.
 | 6 | yellow | Clocks with an OKI channel flagged busy — the chip accepted a play command. |
 | 7 | yellow | Clocks where the OKI produced a non-zero sample. |
 | 8 | white | Sprite passes that did not finish before the next frame started. Zero is correct. A pass clears the coverage mask, parses 1024 records and draws them at a pixel per clock, and every pixel can miss a 2.25 MB ROM — about 92,000 clocks of a frame's 811,000, so there is room, but this is the one part of the video path with no fixed upper bound. 16 bits. |
+| 9 | magenta | **Live** pad-1 button word, not a per-frame count. Bit 0 is at the RIGHT: `0` right, `1` left, `2` down, `3` up, `4` A, `5` B, `6` X, `7` Y, `8` L, `9` R, `10` select, `11` start. Press a button and see which block lights — this is what the core actually receives, as opposed to what the pad is labelled. |
 
 Rows 4-7 are a **chain**, in order. Each one rules out everything above it, so
 the first dark row is where the sound path breaks. All four lit and no audio

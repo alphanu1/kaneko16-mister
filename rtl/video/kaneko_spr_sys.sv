@@ -280,8 +280,15 @@ module kaneko_spr_sys #(
     assign spr_prio = mix_word[15:14];
 
     // ------------------------------------------------------------- sequence
-    typedef enum logic [1:0] { S_IDLE, S_CLEAR, S_PARSE, S_DRAW } state_t;
+    // THE CLEAR AND THE PARSE RUN TOGETHER.
+    //
+    // They touch different memories — the clear walks the back surface's mask,
+    // the parser reads sprite RAM and writes the resolved table — so
+    // serialising them just adds the shorter one to every pass. S_CLEAR holds
+    // until both are finished.
+    typedef enum logic [1:0] { S_IDLE, S_CLEAR, S_DRAW } state_t;
     state_t st;
+    logic   par_seen;
 
     assign busy = (st != S_IDLE);
 
@@ -305,26 +312,24 @@ module kaneko_spr_sys #(
 
             case (st)
                 S_IDLE: if (frame_start) begin
-                    back     <= ~back;
-                    clearing <= 1'b1;
-                    clr_addr <= '0;
-                    st       <= S_CLEAR;
+                    back      <= ~back;
+                    clearing  <= 1'b1;
+                    clr_addr  <= '0;
+                    par_start <= 1'b1;
+                    par_seen  <= 1'b0;
+                    st        <= S_CLEAR;
                 end
 
-                // One write per clock over the whole surface. It is 65,536
-                // clocks of a frame that has about 811,000, and it happens
-                // before the parser so nothing else wants the port.
+                // One mask write per clock over the whole surface, alongside
+                // the parse. 65,536 clocks of a frame that has about 811,000.
                 S_CLEAR: begin
-                    clr_addr <= clr_addr + 1'b1;
-                    if (clr_addr == {AW{1'b1}}) begin
-                        clearing  <= 1'b0;
-                        par_start <= 1'b1;
-                        st        <= S_PARSE;
+                    if (par_done) par_seen <= 1'b1;
+                    if (clearing) begin
+                        clr_addr <= clr_addr + 1'b1;
+                        if (clr_addr == {AW{1'b1}}) clearing <= 1'b0;
                     end
-                end
-
-                S_PARSE: begin
-                    if (par_done) begin
+                    // Only when the surface is blank AND the table is filled.
+                    if (!clearing && (par_done || par_seen)) begin
                         dr_start <= 1'b1;
                         st       <= S_DRAW;
                     end
