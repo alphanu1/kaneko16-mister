@@ -69,6 +69,7 @@ localparam CONF_STR = {
 	"-;",
 	"O[13],Flip screen,Off,On;",
 	"O[14],Service switch,Off,On;",
+	"O[15],Sprite offscreen skip,On,Off;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
@@ -923,6 +924,7 @@ kaneko_spr_sys #(
 	.clk(clk_sys), .rst(rst_sys),
 	.frame_start(vbl_rise),
 	.keep_sprites(keep_sprites),
+	.skip_en(~status[15]),
 
 	.sprite_count(SPR_COUNT),
 	.sprite_xoffs(SPR_XOFFS), .sprite_yoffs(SPR_YOFFS),

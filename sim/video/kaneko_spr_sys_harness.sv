@@ -27,6 +27,7 @@ module kaneko_spr_sys_harness #(
 
     input  wire         frame_start,
     input  wire         keep_sprites,
+    input  wire         skip_en,
     input  wire [10:0]  sprite_count,
     input  wire [9:0]   clip_x0, clip_x1, clip_y0, clip_y1,
     input  wire [8:0]   visarea_min_y,
@@ -117,6 +118,7 @@ module kaneko_spr_sys_harness #(
         .clk(clk), .rst(rst),
         .frame_start(frame_start),
         .keep_sprites(keep_sprites),
+        .skip_en(skip_en),
         .sprite_count(sprite_count),
         .sprite_xoffs(16'd0), .sprite_yoffs(16'd0),
         .visarea_min_y(visarea_min_y),

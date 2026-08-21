@@ -102,6 +102,19 @@ which is why there is no DIP menu. **`Service switch` is the way into the test
 menu**; the L button is a different input, the service coin, which adds a
 credit without dropping one in.
 
+## Sprite offscreen skip (OSD)
+
+A diagnostic toggle, on by default. It stops the sprite renderer walking
+records whose 16x16 box is entirely outside the visible area, which takes a
+full 1024-record pass from about 1,039,000 clocks to about 155,000 against a
+frame budget of 811,000 — the difference between overrunning every frame and
+not.
+
+It is switchable because it went to hardware in the same build as another
+sprite change and one of the two stopped Explosive Breaker's laser from
+drawing. Turn it **Off** if sprites are missing; leave it **On** otherwise and
+watch debug row 8.
+
 ## Save Backup RAM
 
 The MRA declares `<nvram index="2" size="128"/>` for the 93C46 EEPROM. Open the

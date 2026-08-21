@@ -87,6 +87,7 @@ module kaneko_spr_sys #(
     // The coverage mask is cleared either way, so first-writer-wins still
     // restarts every frame.
     input  wire         keep_sprites,
+    input  wire         skip_en,        // off-screen sprite skip, OSD-switchable
 
     // Per-game configuration, all of it from the machine config.
     input  wire [10:0]  sprite_count,
@@ -225,7 +226,7 @@ module kaneko_spr_sys #(
 
     kaneko_vuspr_draw #(.BMP_W_LOG2(BMP_W_LOG2), .BMP_H_LOG2(BMP_H_LOG2))
     u_draw (
-        .clk(clk), .rst(rst), .ce(dr_ce),
+        .clk(clk), .rst(rst), .ce(dr_ce), .skip_en(skip_en),
         .start(dr_start), .sprite_count(sprite_count),
         .busy(dr_busy), .done(dr_done),
         .tbl_addr(tbl_ra), .tbl_data({17'd0, tbl_q}),

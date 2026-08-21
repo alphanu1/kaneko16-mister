@@ -3564,3 +3564,34 @@ verified pixel-exact against the frame gate's compositor, and the compositor is
 right — but the gate only ever renders **one** frame, so no test anywhere could
 see a behaviour that is about what survives **between** frames. The whole class
 of cross-frame device behaviour was outside every harness this core had.
+
+### keep-sprites is never used by Explosive Breaker, measured
+
+The laser was assumed to need `m_keep_sprites`. It does not. A write tap on
+sprite register 0 across 2,400 frames, driven through a coin, a start and held
+fire by script:
+
+```
+writes to 0x900000: 2 over 2400 frames
+  4fcc  x2   bit2=1  keep_sprites=0
+```
+
+Two writes in the whole run, both with bit 2 set, so MAME's `keep_sprites` is
+false for the entire game. Whatever holds the laser on screen in MAME, it is
+not this. The implementation stays because it is correct against the device
+and Magical Crystals does use it — MAME's comment names that game — but it is
+inert here and cannot be the regression.
+
+**The regression is therefore the off-screen skip, and the reason it is not
+already known is that both went into the same build.** That is the mistake
+recorded twice already on this core: two changes in one bitstream, and the
+symptom cannot be attributed to either. It was recorded after the tearing
+diagnoses, stated again as the reason rotation was held back from the sprite
+build, and then made anyway an hour later.
+
+The skip is not obviously wrong. It tests exact against the reference in bulk
+at every off-screen ratio, and exact at nine clip boundary cases including
+straddling every edge, one pixel inside on each side, and negative
+coordinates. So rather than guess, it is now switchable from the OSD —
+`Sprite offscreen skip` — which settles it in one build rather than two, and
+lets the same build show what the skip is worth against the overrun counter.

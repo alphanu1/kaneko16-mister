@@ -191,7 +191,7 @@ int main(int argc, char** argv) {
 
     const int x0 = 0, x1 = 255, y0 = 16, y1 = 239;
 
-    dut->rst = 1; dut->frame_start = 0; dut->ram_we = 0; dut->keep_sprites = 0;
+    dut->rst = 1; dut->frame_start = 0; dut->ram_we = 0; dut->keep_sprites = 0; dut->skip_en = 1;
     dut->clip_x0 = x0; dut->clip_x1 = x1;
     dut->clip_y0 = y0; dut->clip_y1 = y1;
     dut->visarea_min_y = 16;
@@ -415,6 +415,53 @@ int main(int argc, char** argv) {
         printf("  keep off: %ld pixels left\n", left);
         check(left == 0, "clearing stopped working when keep was added");
         dut->sprite_count = N;
+    }
+
+    // ------------------------------------------------------------------ 5.8
+    // THE SKIP AT THE BOUNDARIES.
+    //
+    // The off-screen skip decides from a 16x16 box against the clip rectangle,
+    // and every position where that decision is delicate is a position the
+    // random on-screen list never generates: straddling an edge, one pixel
+    // outside, one pixel inside, and negative coordinates. A sprite wrongly
+    // skipped simply never appears, which is what "the laser does not show"
+    // looks like.
+    printf("== the skip at the clip boundaries\n");
+    {
+        struct { int x, y; const char* what; } cases[] = {
+            {   0,  16, "top-left corner, fully inside" },
+            { 240, 224, "bottom-right corner, fully inside" },
+            { 250, 230, "straddling the bottom-right edge" },
+            {  -8,  20, "straddling the left edge" },
+            {  20,   8, "straddling the top edge (clip_y0 = 16)" },
+            { -15,  16, "one pixel of the box inside on the left" },
+            { 255,  16, "one pixel inside on the right" },
+            {  20,   1, "one pixel inside at the top" },
+            {  20, 239, "one pixel inside at the bottom" },
+        };
+        long shown = 0, missing = 0;
+        for (auto& c : cases) {
+            dut->sprite_count = 1;
+            wr_ram(0, 0x0004);                       // colour 1, no flips
+            wr_ram(1, 0x0100);                       // a code with solid pixels
+            wr_ram(2, (uint16_t)((c.x & 0x3ff) << 6));
+            wr_ram(3, (uint16_t)((c.y & 0x3ff) << 6));
+            run_frame(); run_frame();
+            if (seen.size() > 1) seen.resize(1);
+            reference(seen, want, x0, x1, y0, y1);
+            readback(got);
+            long want_n = 0, got_n = 0, diff = 0;
+            for (size_t o = 0; o < want.size(); o++) {
+                if (want[o]) want_n++;
+                if (got[o])  got_n++;
+                if (got[o] != want[o]) diff++;
+            }
+            printf("  %-40s ref %4ld px, dut %4ld px, %ld differ\n",
+                   c.what, want_n, got_n, diff);
+            checks++;
+            if (diff) { fails++; missing++; } else shown++;
+        }
+        printf("  %ld of %ld boundary cases exact\n", shown, shown + missing);
     }
 
     // ------------------------------------------------------------------ 6

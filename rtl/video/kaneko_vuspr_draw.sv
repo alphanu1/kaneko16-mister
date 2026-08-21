@@ -60,6 +60,14 @@ module kaneko_vuspr_draw #(
     // all and assumed a ROM that always answers.
     input  wire         ce,
 
+    // Off-screen skip, switchable at run time. It is a large win — a pass at
+    // 1024 records drops from 1,039,364 clocks to 154,896 with a realistic
+    // list — and it tests exact against the reference at every clip boundary,
+    // but it went to hardware in the same build as the keep-sprites work and
+    // one of the two removed Explosive Breaker's laser. Being able to flip it
+    // from the OSD settles which in one build instead of two.
+    input  wire         skip_en,
+
     input  wire         start,
     input  wire [10:0]  sprite_count,        // 1024, or 512 on the Blaze On board
     output logic        busy,
@@ -169,9 +177,9 @@ module kaneko_vuspr_draw #(
     wire signed [10:0] t_y0 = {tbl_data[46], tbl_data[46:37]};
     wire signed [10:0] t_x1 = t_x0 + 11'sd15;
     wire signed [10:0] t_y1 = t_y0 + 11'sd15;
-    wire skip_sprite =
-           (t_x1 < $signed({1'b0, clip_x0})) || (t_x0 > $signed({1'b0, clip_x1}))
-        || (t_y1 < $signed({1'b0, clip_y0})) || (t_y0 > $signed({1'b0, clip_y1}));
+    wire skip_sprite = skip_en &&
+        (  (t_x1 < $signed({1'b0, clip_x0})) || (t_x0 > $signed({1'b0, clip_x1}))
+        || (t_y1 < $signed({1'b0, clip_y0})) || (t_y0 > $signed({1'b0, clip_y1})));
 
     always_ff @(posedge clk) begin
         bmp_we  <= 1'b0;
