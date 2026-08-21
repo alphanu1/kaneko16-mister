@@ -33,9 +33,6 @@ of the newest build in this directory.
 - Music is absent: the YM2149s are wired and mixed, but this board's music is
   OKI samples and the game keeps the PSG volumes at zero. Verify against MAME
   before treating that as a fault.
-- Frame pacing is uneven when a large detailed object is on screen. Under
-  investigation — the tile fetch cache holds one entry per layer, so a busy
-  scanline costs more SDRAM round trips and leaves the 68000 less bandwidth.
 - Screen timing is not PCB-verified (384x264 at 6 MHz, 59.1856 Hz).
 
 ## The debug overlay

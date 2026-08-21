@@ -3182,3 +3182,25 @@ path**. Its port 0 is a synthetic hammer, not four tile layers. So it can say
 the OKI's traffic did not change and the CPU's rate did not change, and it
 cannot say anything about tile-fetch contention. Answering the frame-pacing
 question needs the whole-core frame gate that still does not exist.
+
+### The frame pacing resolved, and no measurement explains why
+
+Reported gone on the build that fixed the sound, and still gone on further
+play. The entry is out of the release notes.
+
+It is recorded here rather than forgotten because **nothing measured explains
+it**. The A/B above shows the OKI's SDRAM traffic was identical before and
+after the burst fix (886,728 against 886,729 fetches) and the CPU's bus rate
+unchanged (18.5 against 18.4 ticks per cycle), so the bandwidth story was
+wrong. Two candidates remain, neither tested:
+
+- perceived smoothness genuinely changed when audio appeared, which is a real
+  perceptual effect and not a fact about the video path;
+- it was content-dependent and the content has not recurred.
+
+If it comes back, start from the cyan overrun row (row 3) and the green bus
+cycle row (row 1) together — overruns without a bus-cycle dip is the video
+path alone; both moving is contention. And note what still does not exist: a
+whole-core frame gate. Neither the boot harness nor any module harness renders
+a frame through the real controller, so no simulation here can currently
+reproduce a pacing fault.
