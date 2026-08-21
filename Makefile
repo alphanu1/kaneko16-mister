@@ -145,6 +145,32 @@ test:
 	done; \
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; fi
 
+# ------------------------------------------------------------------ boot
+# 68000 against the REAL memory system. Kept out of `make test` because it
+# needs assembled ROM regions, which are not in the repo — same reason `frame`
+# is separate. This is the gate sim/cpu could not be: that harness acks every
+# ROM fetch in the same cycle and feeds big-endian words straight from the
+# file, so it tested neither the arbiter nor the byte order the HPS actually
+# delivers.
+.PHONY: boot
+boot: regions
+	@mkdir -p build/tmp
+	@$(VERILATOR) $(VBUILD) $(VFLAGS) --top-module kaneko_cpumem_harness \
+	  --Mdir build/obj_kaneko_cpumem -o kaneko_cpumem \
+	  $(RTL) $(SIM_SV) $(FX68K_SIM) sim/top/tb_kaneko_cpumem.cpp >/dev/null 2>&1 || { \
+	    $(VERILATOR) $(VBUILD) $(VFLAGS) --top-module kaneko_cpumem_harness \
+	      --Mdir build/obj_kaneko_cpumem -o kaneko_cpumem \
+	      $(RTL) $(SIM_SV) $(FX68K_SIM) sim/top/tb_kaneko_cpumem.cpp; \
+	    echo "BUILD FAILED: kaneko_cpumem"; exit 1; }
+	@[ -f $(ROM_DIR)/$(SET)_maincpu.bin ] || { \
+	  echo "boot: $(SET) has no maincpu region."; \
+	  echo "      Only explbrkr's 68000 program is described in"; \
+	  echo "      tools/build_rom_regions.py — the other sets carry graphics and"; \
+	  echo "      sound only, because the frame gate never needed their code."; \
+	  echo "      kaneko_bus also decodes bakubrkr_map alone, so booting another"; \
+	  echo "      title needs its memory map too, not just its ROM."; exit 1; }
+	@./build/obj_kaneko_cpumem/kaneko_cpumem $(ROM_DIR)/$(SET)_maincpu.bin
+
 # ------------------------------------------------------------------- area
 MOD ?= kaneko_tmap_fetch
 area:

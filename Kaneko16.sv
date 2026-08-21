@@ -331,11 +331,24 @@ wire [7:0] pal_r = {pal_rd_q[9:5],   pal_rd_q[9:7]};
 wire [7:0] pal_g = {pal_rd_q[14:10], pal_rd_q[14:12]};
 wire [7:0] pal_b = {pal_rd_q[4:0],   pal_rd_q[4:2]};
 
-// A bar across the top whose length follows bus cycles per frame, so "the CPU
-// is alive" is visible even if every palette entry is still black.
-wire [8:0] alive_len = (bus_cycles_lat > 20'd65535) ? 9'd255
-                                                    : 9'(bus_cycles_lat >> 8);
-wire in_alive_bar = (screen_y < 9'(16 + 4)) && (screen_x < alive_len);
+// Bus cycles per frame, across the top, as twenty binary blocks — MSB left,
+// green for a set bit, dark red for a clear one so the field itself is visible
+// and "no readout at all" cannot be confused with "the count is zero".
+//
+// It was a bar of length `bus_cycles_lat >> 8`, which needs 256 cycles in a
+// frame to light one pixel. The 68000 was managing four, so the bar rendered
+// empty and looked exactly like a CPU held in reset. Two failures that want
+// opposite fixes cannot share one indicator — rule 6: check the instrument
+// could have seen it.
+localparam int unsigned ALV_BIT_W = 8;   // pixels per bit
+localparam int unsigned ALV_BITS  = 20;
+
+wire in_alive_row = (screen_y >= 9'd16) && (screen_y < 9'(16 + 6))
+                 && (screen_x < 9'(ALV_BITS * ALV_BIT_W));
+wire [4:0] alive_bit = 5'(ALV_BITS - 1) - 5'(screen_x[8:3]);
+wire       alive_set = bus_cycles_lat[alive_bit];
+// One column of every block left dark, so adjacent set bits stay countable.
+wire       in_alive_bar = in_alive_row && (screen_x[2:0] != 3'd7);
 
 wire show_pal = (status[10:9] == 2'd3);
 
@@ -344,9 +357,12 @@ assign CE_PIXEL  = ce_pix;
 assign VGA_DE    = de;
 assign VGA_HS    = hs;
 assign VGA_VS    = vs;
-assign VGA_R = in_alive_bar ? 8'h00 : (show_pal ? pal_r : r);
-assign VGA_G = in_alive_bar ? 8'hff : (show_pal ? pal_g : g);
-assign VGA_B = in_alive_bar ? 8'h00 : (show_pal ? pal_b : b);
+wire [7:0] alv_r = alive_set ? 8'h00 : 8'h40;
+wire [7:0] alv_g = alive_set ? 8'hff : 8'h00;
+
+assign VGA_R = in_alive_bar ? alv_r  : (show_pal ? pal_r : r);
+assign VGA_G = in_alive_bar ? alv_g  : (show_pal ? pal_g : g);
+assign VGA_B = in_alive_bar ? 8'h00  : (show_pal ? pal_b : b);
 
 endmodule
 

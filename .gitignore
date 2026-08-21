@@ -22,8 +22,11 @@
 /build/
 /quartus/build/
 /releases/
-db/
-incremental_db/
+# No trailing slash. `make quartus` makes these SYMLINKS into build/ (rule 10),
+# and a directory-only pattern does not match a symlink — `db/` left both of
+# them untracked-but-not-ignored, one `git add -A` away from being committed.
+db
+incremental_db
 output_files/
 greybox_tmp/
 simulation/

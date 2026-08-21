@@ -212,7 +212,29 @@ module kaneko_bus #(
                     // The other three words are discarded here. Caching them
                     // would serve most sequential fetches from one burst and is
                     // the obvious optimisation once the CPU runs.
-                    rom_word <= rom_dout[15:0];
+                    //
+                    // BYTE ORDER: the swap is not cosmetic.
+                    //
+                    // hps_io runs WIDE=1, and in WIDE mode file byte n lands in
+                    // ioctl_dout[7:0] and byte n+1 in [15:8]. The loader stores
+                    // that word verbatim, so SDRAM word n is little-endian with
+                    // respect to the file. The graphics path is built around
+                    // exactly that order and is pixel-exact against MAME, so the
+                    // stream is right and must not be changed.
+                    //
+                    // The 68000 is big-endian: byte n is the HIGH half of its
+                    // word. So the conversion belongs here, at the endian
+                    // boundary, and nowhere else.
+                    //
+                    // Without it the reset vectors read 1000 FCF7 / 0000 1409
+                    // instead of 0010 F7FC / 0000 0914, and the CPU executed
+                    // four bus cycles and stopped — on hardware that was a black
+                    // screen with no liveness bar, indistinguishable from a CPU
+                    // that never left reset. sim/cpu/tb_kaneko_cpu.cpp could not
+                    // see it: it fed the CPU big-endian words straight from the
+                    // file and never went through the loader at all. sim/top
+                    // does, and fails without this line.
+                    rom_word <= {rom_dout[7:0], rom_dout[15:8]};
                     state    <= S_DONE;
                 end
 

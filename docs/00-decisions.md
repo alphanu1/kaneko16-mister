@@ -178,3 +178,35 @@ editing that table and the MRA together, and never RTL.
 Reverses if: a game needs a region that cannot be padded into a fixed slot, in
 which case the loader gains a per-index base — one number per download index,
 not per region, and still not arithmetic over the stream.
+
+## D7 — The 68000's byte swap lives in kaneko_bus, not in the MRA or the loader
+
+The stream the HPS delivers is little-endian with respect to the ROM files:
+`hps_io` is built with `WIDE=1`, and in WIDE mode file byte *n* arrives in
+`ioctl_dout[7:0]` with byte *n+1* in `[15:8]`. The loader stores that word
+verbatim, so SDRAM word *n* is `{file[2n+1], file[2n]}`.
+
+The graphics path is built around exactly that order and is pixel-exact against
+MAME for three of the four Tier 1 titles. The stream is therefore correct and
+is not the thing to change.
+
+The 68000 is big-endian — byte *n* is the **high** half of its word — so
+something has to convert. Three places could:
+
+- **The MRA**, with a byte-swapping `<interleave>` over the `maincpu` part.
+  Rejected: it would split the description of the stream between the MRA and
+  `tools/build_rom_regions.py --stream`, which `tools/verify_mra.py` exists to
+  keep identical, and it would make the stream no longer a plain concatenation
+  of the region files the frame gate reads.
+- **The loader**, swapping while writing. Rejected: the loader would then need
+  to know which region each word belongs to, which is precisely the knowledge
+  D6 moved out to the host.
+- **`kaneko_bus`, on the ROM read.** Chosen. It is the endian boundary — the
+  only point in the design where a byte order becomes a *CPU's* byte order —
+  and it is one line at the place a reader would look for it.
+
+Nothing else needs the swap: the CPU's writes to work RAM, video RAM, sprite RAM
+and palette carry `oEdb` unaltered, which is already the word MAME would write,
+and the video side reads those same words back.
+
+See findings, "The 68000 read the ROM with its bytes the wrong way round".

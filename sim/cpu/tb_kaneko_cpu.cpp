@@ -41,7 +41,13 @@ void tick()
     // ROM is answered combinationally: the harness acks in one cycle so the
     // trace shows the instruction stream rather than memory-system timing.
     const uint32_t byte_addr = ((uint32_t)dut->rom_a << 1) & (rom.size() - 1);
-    dut->rom_q = (uint16_t)((rom[byte_addr] << 8) | rom[byte_addr + 1]);  // big-endian
+    // Packed the way SDRAM holds it, NOT the way the 68000 reads it: hps_io
+    // in WIDE mode puts file byte n in the low half, kaneko_bus swaps at the
+    // endian boundary, and a harness that hands over big-endian words here
+    // would be feeding the DUT something the board never produces. Doing
+    // exactly that is how the byte order went untested until it reached
+    // hardware — see sim/top/tb_kaneko_cpumem.cpp.
+    dut->rom_q = (uint16_t)(rom[byte_addr] | (rom[byte_addr + 1] << 8));
     dut->eval();
     dut->clk = 1; dut->eval();
 }

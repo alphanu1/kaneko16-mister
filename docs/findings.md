@@ -2027,3 +2027,111 @@ that moves them, so they are symlinked into `build/`.
 The MiSTer stopped responding before this build could be deployed — no route to
 host, so powered off or off the network. The bitstream is built, timed and
 staged in `releases/`.
+
+## The 68000 read the ROM with its bytes the wrong way round
+
+*Instrument: `sim/top/tb_kaneko_cpumem.cpp` (`make boot`), against
+`sim/mem/sdram_model.sv`. Corrected: the CPU bring-up build, which ran on
+hardware and did nothing.*
+
+The first build with a CPU in it went to the board and behaved like a core with
+no CPU at all: the tile-map debug views were correct, and the palette view was
+black with no liveness bar. The bar is `bus_cycles_lat >> 8`, so it needs more
+than 256 bus cycles in a frame to light a single pixel — and the 68000 was
+managing four in total, ever.
+
+`sim/cpu` had passed. It executes real boot code, reaches
+`move.b #$00, $900009`, and reads the reset vectors as `0010 f7fc / 0000 0914`.
+It passed because it was not testing this. That harness acks every ROM fetch
+combinationally —
+
+```systemverilog
+wire rom_ack_now = 1'b1;
+```
+
+— and its testbench fed words straight out of the file, big-endian:
+
+```cpp
+dut->rom_q = (uint16_t)((rom[byte_addr] << 8) | rom[byte_addr + 1]);  // big-endian
+```
+
+Neither the loader, the arbiter, nor the SDRAM was in the path. Everything that
+only fails in the presence of a real memory system was untested, and the byte
+order the board actually delivers had never once been presented to the CPU.
+
+`sim/top/kaneko_cpumem_harness.sv` instantiates what the core instantiates —
+same clock divider, same reset, same `ROM_BASE`, the real `kaneko_rom_loader`,
+the real `kaneko_sdram`, the device model, and the video port driven as hard as
+it will go so a starved CPU port cannot hide behind a dead one. Fed both byte
+orders, it separates them completely:
+
+| stream packing | reset SSP / PC | bus cycles in 42 ms |
+| --- | --- | --- |
+| byte *n* → `dout[7:0]` (what hps_io does) | `1000FCF7` / `00001409` | **4, then dead at tick 172** |
+| byte *n* → `dout[15:8]` | `0010F7FC` / `00000914` | 62,189, still running |
+
+`hps_io` is built `WIDE=1`; `ioctl_dout <= io_din[DW:0]` and the HPS packs file
+byte *n* into the low half. So SDRAM word *n* is `{file[2n+1], file[2n]}` — the
+order the graphics path is built around and is pixel-exact against MAME with.
+The 68000 wants the other one.
+
+Swapped, the reset SSP becomes `1000FCF7` and the PC `00001409`, which is even,
+so there is no address error to notice — the CPU simply starts executing
+byte-swapped code. `0x724E` is `moveq #$4E,d1`, one of the most common opcodes
+in any 68000 program; swapped it is `0x4E72`, `STOP`. With `IPL[2:0]` tied
+inactive, the first one reached ends the program permanently. Four bus cycles,
+no interrupt to wake it, black screen.
+
+The fix is one line in `kaneko_bus.sv`, at the endian boundary (D7):
+
+```systemverilog
+rom_word <= {rom_dout[7:0], rom_dout[15:8]};
+```
+
+`sim/cpu`'s testbench now packs its words the way SDRAM holds them, so the two
+harnesses agree about what the board produces rather than one of them quietly
+assuming the answer.
+
+### What this cost, and the general shape of it
+
+The bug was reachable by reading: `hps_io.sv` says `WIDE`, the region file says
+`0010 f7fc`, and those two facts are three lines apart. It survived because the
+harness that would have caught it had been written to make the CPU run, and it
+succeeded at that — an immediate-ack ROM and a hand-fed word are exactly what
+you reach for when the question is "does the decoder work". They are also
+exactly what removes the memory system from the test.
+
+Two things follow, and both are now in the tree rather than in this paragraph:
+
+- **A harness that stubs the thing under suspicion proves nothing about it.**
+  `make boot` exists so the CPU is tested against the memory system it will
+  actually have.
+- **The liveness bar could not report what happened.** `>> 8` cannot show four
+  bus cycles; it renders zero and looks identical to a CPU held in reset. An
+  instrument that cannot distinguish "stopped" from "never started" is not
+  evidence either way — rule 6.
+
+### Two open items this run also surfaced
+
+- The device model reports two refresh gaps, at tick 3376 and 6752 and never
+  again, in every run. Both fall before any ROM data is written, so nothing is
+  at risk of being lost, but the controller is not refreshing regularly from
+  the moment it leaves initialisation and that should be settled rather than
+  assumed harmless.
+- The read capture depth disagrees between the two machines. `rd_lat_sel = 0`
+  (CL+1) is what the board needs, on the evidence of a write-then-read
+  self-test; the device model needs `3` (CL+3), the controller's reset default.
+  `make boot` sweeps the selector and reports which one the model wants rather
+  than hard-wiring either, but the two ought to agree and do not.
+
+### `make boot` covers explbrkr only
+
+`tools/build_rom_regions.py` describes a `maincpu` region for explbrkr alone —
+the other Tier 1 sets carry graphics and sound only, because the frame gate
+never needed their code — and `kaneko_bus` decodes `bakubrkr_map` alone. Booting
+another title needs its memory map as well as its ROM. The target now says so
+instead of failing on a missing file.
+
+Rule 9 still holds for this change: the byte order is a property of the
+`hps_io` interface and the 68000, not of any one game, and `make gate` is
+unchanged at 3 of 4 pixel-exact with mgcrystl at its known 298-pixel anomaly.
