@@ -147,18 +147,24 @@ module kaneko_eeprom93c46 #(
         else                       do_out = sr[31];
     end
 
-    // Backup port, OUTSIDE the reset gate on purpose. The HPS sends the save
-    // file the moment it parses <nvram> in the MRA, which is before the ROM
-    // stream and can be before the core leaves reset; a load dropped there
-    // would look exactly like a save that never persisted.
-    always_ff @(posedge clk) begin
-        if (bk_we) mem[bk_addr] <= bk_din;
-        bk_q <= mem[bk_addr];
-    end
-
     integer i;
     always_ff @(posedge clk) begin
         dbg_cmd_valid <= 1'b0;
+
+        // Backup port, handled BEFORE the reset branch and so ungated by it.
+        // The HPS sends the save file the moment it parses <nvram> in the MRA,
+        // which is before the ROM stream and can be before the core leaves
+        // reset; a load dropped there would look exactly like a save that
+        // never persisted.
+        //
+        // In this always_ff and not its own: `mem` may have exactly one driver.
+        // Splitting it out reads more clearly and does not synthesise —
+        // Error (10028), "can't resolve multiple constant drivers", which the
+        // lint step did not object to. (Note the wording: a comment line must
+        // not BEGIN with the word verilator, or it is parsed as a pragma —
+        // the same trap kaneko_mixer.sv records.)
+        if (bk_we) mem[bk_addr] <= bk_din;
+        bk_q <= mem[bk_addr];
         if (rst) begin
             dirty <= 1'b0;
             state <= S_RESET; cmd <= 8'd0; sr <= 32'hffff_ffff;

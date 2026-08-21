@@ -2683,3 +2683,30 @@ bit-slice writes, conditional reads, and a reset that clears every location.
 Checking with `quartus_map` alone is the cheap move: it reports
 `Info (276029): Inferred altsyncram megafunction ...` per array, so the question
 is answered in two minutes rather than after an eighteen-minute fit fails.
+
+### A marginal timing path is placement, not capacity
+
+One build missed setup on the framework's HDMI output clock by 84 ps:
+
+```
+; pll_hdmi|...|divclk ; -0.084 ; -0.084 ;
+```
+
+`pll_hdmi` runs the HDMI output at 148.54 MHz through `ascal`; no core logic is
+on that path. The build immediately before it had **more** logic — 12,401 ALMs
+against 12,018 — and closed at zero, which is what identifies placement rather
+than capacity as the cause. Changing RTL that is not on the failing path would
+have been the wrong lever.
+
+`SEED 1` to `SEED 3` closed it: -0.084 to +0.344, with the same logic and the
+same memory. The seed is pinned in the .qsf so the result is reproducible
+rather than re-rolled on every compile.
+
+Two process notes from the same episode, both of which cost a build:
+
+- **Read the whole Setup Summary.** The check that reported "zero negative
+  slack" grepped for two clock names and did not cover the row that failed. A
+  timing check that can only see part of the table is not a timing check.
+- **`pkill -f` matches the shell that issued it.** `pkill -f "make quartus"`
+  killed the command running it, twice, because the pattern appears in its own
+  command line. Use `pkill -x` against exact process names.
