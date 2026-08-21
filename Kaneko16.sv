@@ -67,8 +67,12 @@ localparam CONF_STR = {
 	"O[9],Show,Game,Palette+CPU;",
 	"O[11],Debug overlay,Off,On;",
 	"-;",
+	"O[13],Flip screen,Off,On;",
+	"O[14],Service mode,Off,On;",
+	"-;",
 	"R[12],Reset;",
 	"-;",
+	"J1,Shot,Bomb,Start,Coin,Pause,Service;",
 	"V,v",`BUILD_DATE
 };
 
@@ -211,7 +215,7 @@ localparam int unsigned SDR_AW  = 2 + 13 + SDR_COL;   // 25
 // elaborate. Five is also the configuration its testbench covers, so this build
 // runs the arrangement that is actually verified. Port 0 is the tile fetch;
 // 1..4 are tied idle and cost nothing but arbiter slots.
-localparam int unsigned NPORTS  = 6;
+localparam int unsigned NPORTS  = 7;
 
 wire              mem_ready;
 wire              ldr_wr_req, ldr_wr_ack;
@@ -227,6 +231,8 @@ wire              p2_req, p3_req, p4_req;   // tile feeder, one per layer
 wire [SDR_AW:1]   p2_addr, p3_addr, p4_addr;
 wire              p5_req;                   // OKI M6295 sample fetch
 wire [SDR_AW:1]   p5_addr;
+wire              p6_req;                   // VU-002 sprite ROM fetch
+wire [SDR_AW:1]   p6_addr;
 wire [NPORTS-1:0]       p_ack_bus;
 wire [NPORTS-1:0][63:0] p_dout_bus;
 wire              p0_ack  = p_ack_bus[0];
@@ -241,6 +247,8 @@ wire              p4_ack  = p_ack_bus[4];
 wire [63:0]       p4_dout = p_dout_bus[4];
 wire              p5_ack  = p_ack_bus[5];
 wire [63:0]       p5_dout = p_dout_bus[5];
+wire              p6_ack  = p_ack_bus[6];
+wire [63:0]       p6_dout = p_dout_bus[6];
 
 wire sd_dq_oe;
 wire [15:0] sd_dq_o;
@@ -263,11 +271,11 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300)) u_sdram
 	.wr_req(ldr_wr_req), .wr_addr(ldr_wr_addr), .wr_din(ldr_wr_din),
 	.wr_be(ldr_wr_be), .wr_ack(ldr_wr_ack),
 
-	.p_req  ({p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}),
-	.p_addr ({p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
-	.p_din  ({6{16'd0}}),
-	.p_be   ({6{2'b11}}),
-	.p_we   (6'b0),
+	.p_req  ({p6_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}),
+	.p_addr ({p6_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
+	.p_din  ({7{16'd0}}),
+	.p_be   ({7{2'b11}}),
+	.p_we   (7'b0),
 	.p_ack  (p_ack_bus),
 	.p_dout (p_dout_bus)
 );
@@ -365,8 +373,8 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 
 	// Nothing pressed. The EEPROM is not implemented yet, so anything the game
 	// reads from it comes back as an unwritten device.
-	.in_p1(16'hffff), .in_p2(16'hffff),
-	.in_system(16'hffff), .in_unk(16'hffff),
+	.in_p1(in_p1), .in_p2(in_p2),
+	.in_system(in_system), .in_unk(16'hffff),
 
 	.unmapped_hit(unmapped_hit), .unmapped_addr()
 );
@@ -392,7 +400,7 @@ kaneko_vmem u_vmem
 	.c1_t1_addr(c1_t1_addr), .c1_t1_q(c1_t1_q),
 	.c1_s0_addr(c1_s0_addr), .c1_s0_q(c1_s0_q),
 	.c1_s1_addr(c1_s1_addr), .c1_s1_q(c1_s1_q),
-	.spr_addr(12'd0), .spr_q(),
+	.spr_addr(spr_ram_addr), .spr_q(spr_ram_q),
 	.pal_addr(pal_rd_addr), .pal_q(pal_rd_q)
 );
 
@@ -624,6 +632,18 @@ always @(posedge clk_sys) begin
 	end
 end
 
+// The subsystem counts overruns continuously; the overlay wants a per-frame
+// value like every other row, so latch and clear it at the frame boundary.
+reg [15:0] spr_overrun_lat, spr_overrun_prev;
+always @(posedge clk_sys) begin
+	if (rst_sys) begin
+		spr_overrun_lat <= 16'd0; spr_overrun_prev <= 16'd0;
+	end else if (vbl_rise) begin
+		spr_overrun_lat  <= spr_overrun - spr_overrun_prev;
+		spr_overrun_prev <= spr_overrun;
+	end
+end
+
 // CPU liveness, counted per frame. A number the display can show beats
 // inferring "it is running" from a picture that might be static for other
 // reasons.
@@ -682,6 +702,28 @@ localparam signed [10:0] V2_DX = 11'sd91;      // 0x5b
 localparam signed [10:0] V2_DY = -11'sd8;
 localparam [10:0] TILE_COLBASE = 11'h400;
 localparam        VIEW2_2_PRI  = 1'b1;
+
+// Sprites, per game (hard rule 9). These are explbrkr's, read from
+// bakubrkr(machine_config) and the frame gate's table, which is pixel-exact on
+// three games:
+//
+//   KANEKO_VU002_SPRITE, set_priorities(8,8,8,8), set_color_base(0)
+//   no set_offsets() call, so both offsets are 0
+//   fliptype 0 (the VU-002 default; bakubrkr does not override it)
+//   set_size(256,256), set_visarea(0, 255, 16, 239)
+//
+// Blaze On's board parses 512 records and carries a large X offset; Wing Force
+// is 320 wide. Both move here when the game table lands.
+localparam [10:0] SPR_COUNT     = 11'd1024;
+localparam [15:0] SPR_XOFFS     = 16'd0;
+localparam [15:0] SPR_YOFFS     = 16'd0;
+localparam [8:0]  SPR_VIS_MIN_Y = 9'd16;
+localparam        SPR_WIDE      = 1'b0;      // screen width is 0x100, not > 0x100
+localparam        SPR_FLIPTYPE  = 1'b0;
+localparam [10:0] SPR_COLBASE   = 11'd0;
+localparam [15:0] SPR_PRI_F     = 16'h8888;  // {8,8,8,8}: above all
+// kan_spr sits at byte 0x280000 in the stream (SDRAM_MAP), so word 0x140000.
+localparam [SDR_AW:1] SPR_BASE  = SDR_AW'(25'h140000);
 
 // Tile ROM regions, as word addresses in SDRAM (D6, SDRAM_MAP):
 //   view2_0 at byte 0x080000, view2_1 at byte 0x180000.
@@ -831,6 +873,51 @@ assign c1_s0_addr = {2'b00, ln_scr_addr[18 +: 9]};
 assign c1_s1_addr = {2'b00, ln_scr_addr[27 +: 9]};
 assign ln_scr_data = { c1_s1_q, c1_s0_q, c0_s1_q, c0_s0_q };
 
+// ------------------------------------------------------------- sprites
+// The sprite surface is indexed in MAME's screen coordinates, where the
+// visible area starts at visarea().min_y — the parser folds that offset into
+// every record, and the frame gate composites with `sy = VIS_MIN_Y + row`. Our
+// screen_y counts visible lines from 0, so the surface is read 16 lines down.
+//
+// Presented with the same screen_x that kaneko_tmap_line's line buffer is
+// read at: both are registered reads, so both pixels arrive together and the
+// mixer sees a consistent set.
+wire [13:0] spr_pix;
+wire [1:0]  spr_prio;
+wire        spr_busy;
+wire [15:0] spr_overrun;
+wire [11:0] spr_ram_addr;
+wire [15:0] spr_ram_q;
+wire [8:0]  spr_rd_y = screen_y + 9'(SPR_VIS_MIN_Y);
+
+kaneko_spr_sys #(
+	.BMP_W_LOG2(8), .BMP_H_LOG2(8), .SPRITES(1024), .SDR_AW(SDR_AW)
+) u_spr
+(
+	.clk(clk_sys), .rst(rst_sys),
+	.frame_start(vbl_rise),
+
+	.sprite_count(SPR_COUNT),
+	.sprite_xoffs(SPR_XOFFS), .sprite_yoffs(SPR_YOFFS),
+	.visarea_min_y(SPR_VIS_MIN_Y),
+	.wide_screen(SPR_WIDE), .fliptype(SPR_FLIPTYPE),
+	// MAME clips sprite drawing to the visible area.
+	.clip_x0(10'd0), .clip_x1(10'd255),
+	.clip_y0(10'd16), .clip_y1(10'd239),
+
+	.ram_addr(spr_ram_addr), .ram_data(spr_ram_q),
+	.regs_flat(sprreg_flat),
+
+	.rom_base(SPR_BASE),
+	.sdr_req(p6_req), .sdr_addr(p6_addr),
+	.sdr_ack(p6_ack), .sdr_dout(p6_dout),
+
+	.rd_x(screen_x[7:0]), .rd_y(spr_rd_y[7:0]),
+	.spr_pix(spr_pix), .spr_prio(spr_prio),
+
+	.busy(spr_busy), .overrun(spr_overrun)
+);
+
 // --------------------------------------------------------------- mixer
 wire [10:0] mix_pen;
 
@@ -841,16 +928,73 @@ kaneko_mixer u_mix
 	.layer_colour_f(mix_colour),
 	.layer_pix_f(mix_pix),
 
-	// No sprites yet. Zero reads as "nothing here" to the mixer.
-	.spr_pix(14'd0), .spr_prio(2'd0),
+	.spr_pix(spr_pix), .spr_prio(spr_prio),
 
 	.view2_2_pri(VIEW2_2_PRI),
-	.spr_pri_f(16'h8888),          // explbrkr: {8,8,8,8}
+	.spr_pri_f(SPR_PRI_F),
 	.tile_colbase(TILE_COLBASE),
-	.spr_colbase(11'd0),
+	.spr_colbase(SPR_COLBASE),
 
 	.pen(mix_pen), .prio_out(), .sprite_won()
 );
+
+// --------------------------------------------------------------- inputs
+// Everything on this board is ACTIVE LOW, and the ports are read as words at
+// e00000-e00007. Read from INPUT_PORTS_START(bakubrkr), not guessed:
+//
+//   e00000 P1      bit 0    flip screen DIP        bit 8   P1 up
+//                  bit 1    service DIP            bit 9   P1 down
+//                  bits 2-7 unused DIPs            bit 10  P1 left
+//                                                  bit 11  P1 right
+//                                                  bit 12  P1 button 1
+//                                                  bit 13  P1 button 2
+//   e00002 P2      bits 8-13, the same for player 2; low byte unused
+//   e00004 SYSTEM  bit 8  start 1     bit 12  service (no toggle)
+//                  bit 9  start 2     bit 13  tilt (the game's pause)
+//                  bit 10 coin 1      bit 14  service 1
+//                  bit 11 coin 2      bit 15  unknown
+//   e00006 UNK     unused on this board; MAME reads all ones
+//
+// The DIPs in P1's low byte are the only two this game has — everything else
+// is configured in its test mode, which is why there is no DIP menu here.
+//
+// MiSTer joystick bit order is from the main firmware's own table
+// (menu.cpp: joy_button_map): RIGHT, LEFT, DOWN, UP, A, B, X, Y, L, R,
+// SELECT, START. The CONF_STR J1 names attach to bit 4 upwards, so Shot is A
+// and Bomb is B; Start and Coin are named too AND accept the dedicated
+// START/SELECT buttons, because players expect both to work.
+//
+// No "jn" line: this framework's firmware matches an UPPERCASE 'J' with 'D',
+// 'A' or 'N' in the second position (user_io.cpp), so a lowercase "jn,..."
+// is silently ignored rather than doing nothing visible but useful.
+wire [15:0] joy = joystick_0 | joystick_1;   // either pad may work the menus
+
+wire p1_right = joystick_0[0], p1_left = joystick_0[1];
+wire p1_down  = joystick_0[2], p1_up   = joystick_0[3];
+wire p1_b1    = joystick_0[4], p1_b2   = joystick_0[5];
+
+wire p2_right = joystick_1[0], p2_left = joystick_1[1];
+wire p2_down  = joystick_1[2], p2_up   = joystick_1[3];
+wire p2_b1    = joystick_1[4], p2_b2   = joystick_1[5];
+
+wire start1 = joystick_0[6] | joystick_0[11];
+wire start2 = joystick_1[6] | joystick_1[11];
+wire coin1  = joystick_0[7] | joystick_0[10];
+wire coin2  = joystick_1[7] | joystick_1[10];
+wire pause  = joy[8];
+wire service = joy[9];
+
+// Flip screen and service are DIPs, not buttons: held, and off by default.
+// Active low, so 1 is "not set".
+wire dip_flip    = ~status[13];
+wire dip_service = ~status[14];
+
+wire [15:0] in_p1 = { 2'b11, ~p1_b2, ~p1_b1, ~p1_right, ~p1_left, ~p1_down, ~p1_up,
+                      6'b111111, dip_service, dip_flip };
+wire [15:0] in_p2 = { 2'b11, ~p2_b2, ~p2_b1, ~p2_right, ~p2_left, ~p2_down, ~p2_up,
+                      8'hff };
+wire [15:0] in_system = { 1'b1, ~service, ~pause, 1'b1,
+                          ~coin2, ~coin1, ~start2, ~start1, 8'hff };
 
 // ----------------------------------------------------- palette / CPU view
 // Mode 3 shows PALETTE RAM as a grid of swatches: 64 across by 32 down, each
@@ -918,6 +1062,15 @@ wire [15:0] oki_row_val = (screen_y < 9'd46) ? oki_wr_lat
                                              : oki_snd_lat;
 wire       oki_set = oki_row_val[oki_bit];
 
+// Row 8, white: sprite passes that did not finish before the next frame
+// started. Zero is correct. Non-zero means the renderer ran out of frame —
+// 1024 sprites at one pixel per clock, each pixel able to miss a 2.25 MB
+// sample of ROM, is the one part of the video path with no fixed upper bound.
+wire in_spr_row = (screen_y >= 9'd64) && (screen_y < 9'(64 + 6))
+               && (screen_x < 9'(16 * ALV_BIT_W));
+wire [3:0] spr_bit = 4'd15 - 4'(screen_x[6:3]);
+wire       spr_set = spr_overrun_lat[spr_bit];
+
 // Row 2, cyan: line fetches that overran, per frame, 16 bits. All dark means
 // the feeder is keeping up and the tearing is somewhere else entirely.
 wire in_ovr_row = (screen_y >= 9'd32) && (screen_y < 9'(32 + 6))
@@ -931,14 +1084,16 @@ wire       ovr_set = overrun_lat[ovr_bit];
 // diagnosed and they stay in the build for the next time something stops, but
 // they sit on top of the picture, so the picture wins unless asked otherwise.
 wire dbg_on   = status[11];
-wire in_dbg   = dbg_on && (in_alive_row || in_irq_row || in_ovr_row || in_oki_row)
+wire in_dbg   = dbg_on && (in_alive_row || in_irq_row || in_ovr_row || in_oki_row
+                           || in_spr_row)
               && (screen_x[2:0] != 3'd7);
 wire dbg_set  = in_alive_row ? alive_set : in_irq_row ? irq_set
-              : in_ovr_row ? ovr_set : oki_set;
+              : in_ovr_row ? ovr_set : in_spr_row ? spr_set : oki_set;
 
-wire [7:0] dbg_r = dbg_set ? ((in_irq_row || in_oki_row) ? 8'hff : 8'h00) : 8'h40;
+wire [7:0] dbg_r = dbg_set ? ((in_irq_row || in_oki_row || in_spr_row)
+                                ? 8'hff : 8'h00) : 8'h40;
 wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : 8'hff) : 8'h00;
-wire [7:0] dbg_b = dbg_set && in_ovr_row ? 8'hff : 8'h00;
+wire [7:0] dbg_b = dbg_set && (in_ovr_row || in_spr_row) ? 8'hff : 8'h00;
 
 // The game picture and the palette swatches both come out of the palette RAM,
 // so they share the same decode.

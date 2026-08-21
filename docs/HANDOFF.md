@@ -47,9 +47,8 @@ Ordered as the owner asked for it: **sound, then finish video, then I/O.**
 
 ### 2. Video
 
-- **Sprites.** `kaneko_vuspr_draw.sv` is written and fuzzed clean but not
-  instantiated. Needs `BMP_W_LOG2` split into separate width and height first;
-  320x256 chosen, about 170 M10K.
+- ~~Sprites~~ — **done**, `kaneko_spr_sys` is instantiated. 256x256 surfaces,
+  double-buffered, parity mask, its own SDRAM port (port 6).
 - **Rotation output stage** (decision D3). `screen_rotate` in
   `sys/arcade_video.v` does the work, but it needs `MISTER_FB=1`, the DDRAM
   ports wired up (they are currently tied off) and OSD entries. It is a
@@ -59,8 +58,12 @@ Ordered as the owner asked for it: **sound, then finish video, then I/O.**
 
 ### 3. I/O
 
-- Controls and DIPs; inputs currently read as `0xffff`.
-- Coin lockout.
+- ~~Controls and DIPs~~ — **done**. Two players, two buttons each, start, coin,
+  service and pause, plus the board's two DIPs.
+- Coin lockout: **there is nothing to do for this game.** `bakubrkr_map` has no
+  write handler at `0xe40000`, so the four writes the CPU makes there are
+  unmapped in MAME too. Other titles in the driver do have
+  `coin_lockout_w`; that arrives with their memory maps.
 
 ### 4. Per-game support
 

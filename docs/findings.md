@@ -3327,3 +3327,69 @@ buffer, and a pixel counts as marked when its stored bit **equals** that
 parity — so two frames of staleness read as clear for nothing. The bitmap needs
 no clearing either, because the mixer gates on the mask. Verified: 0 pixels
 left over across a swap.
+
+## 2026-08-21 — sprites and controls in the core
+
+`kaneko_spr_sys` instantiated, a seventh SDRAM port added for the sprite ROM,
+and the mixer fed real sprite pixels instead of a hardwired zero. Controls
+wired at the same time, so Explosive Breaker is playable rather than an attract
+loop.
+
+### Two guards earned their keep in one evening
+
+`make nports-check` — written this afternoon after the OKI's port turned out to
+be the one port nothing tested — fired the moment `NPORTS` went from 6 to 7 and
+named all four harnesses still on 6. `make qsf-check` caught `kaneko_spr_sys`
+missing from the Quartus project. Neither failure would have been visible in
+simulation, and both are the class of bug that costs a build or a hardware
+round trip.
+
+### Quartus 17.0 rejects `localparam` in a parameter port list
+
+```systemverilog
+module kaneko_vuspr_draw #(
+    parameter  int unsigned BMP_W_LOG2 = 8,
+    localparam int unsigned AW = BMP_W_LOG2 + BMP_H_LOG2   // 17.0: syntax error
+)(
+```
+
+Verilator accepts it; 17.0's parser predates SystemVerilog-2012 and does not.
+Hard rule 7 says a construct 17.0 rejects is a construct to rewrite, so the
+address width is written out in the ports and the localparam moved into the
+body. Worth recording because the module linted clean for hours before anything
+told us: **`make lint` does not check the toolchain that builds the core.**
+`quartus_map` alone answers in two minutes and is the cheap check to run after
+adding a module.
+
+### The sprite surfaces infer block RAM
+
+All five memories inferred on the first attempt — `bmp0`, `bmp1`, `msk0`,
+`msk1` and the resolved table — which is not something to assume given this
+core has now lost two builds to inference failures. The declaration shape is
+the one the earlier failures taught: separate 1-D arrays rather than an array
+indexed by buffer, plain addresses, unconditional reads into their own
+registers, no reset that clears every location.
+
+### Inputs, read from MAME and not guessed
+
+Everything is active low, ports at `0xe00000`-`0xe00007`, and the two DIPs this
+board has live in P1's **low byte** — flip screen and service. Every other
+setting is in the game's own test mode, which is why the OSD has no DIP menu.
+
+MiSTer's joystick bit order came from the firmware's own table rather than from
+memory: `menu.cpp`'s `joy_button_map[]` is RIGHT, LEFT, DOWN, UP, A, B, X, Y,
+L, R, SELECT, START. Start and coin accept both the named `J1` buttons and the
+dedicated START/SELECT ones, because players expect both.
+
+A `"jn,..."` line was written and then removed: this framework's firmware
+matches an **uppercase** `'J'` (`user_io.cpp`), so a lowercase one is silently
+ignored. Silently-ignored configuration is worse than none — it looks like it
+works.
+
+### Coin lockout: nothing to do for this game
+
+`bakubrkr_map` has no write handler at `0xe40000`, so the four writes the CPU
+makes there are unmapped in MAME as well as here. The earlier boot trace's
+`unmapped 4, first at E40000` was therefore correct behaviour, not a missing
+decode. Other titles in the driver do use `coin_lockout_w`, and it arrives with
+their memory maps.

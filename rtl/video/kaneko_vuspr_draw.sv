@@ -38,10 +38,11 @@
 // mgcrystl); the Blaze On board is 320x240. Neither is square and neither needs
 // 512 of anything.
 module kaneko_vuspr_draw #(
-    parameter  int unsigned BMP_W_LOG2 = 8,   // bitmap stride, 256
-    parameter  int unsigned BMP_H_LOG2 = 8,   // bitmap height, 256
-    // Declared here rather than in the body because the port list uses it.
-    localparam int unsigned AW         = BMP_W_LOG2 + BMP_H_LOG2
+    parameter int unsigned BMP_W_LOG2 = 8,   // bitmap stride, 256
+    parameter int unsigned BMP_H_LOG2 = 8    // bitmap height, 256
+    // No `localparam` in the parameter list: Quartus 17.0's parser rejects it
+    // (SystemVerilog-2012), and 17.0 is the only toolchain this core is built
+    // with. The address width is written out in the ports instead.
 )(
     input  wire         clk,
     input  wire         rst,
@@ -83,17 +84,19 @@ module kaneko_vuspr_draw #(
     // Sprite bitmap and its coverage mask. Both are read-then-write with one
     // clock of read latency.
     output logic                    bmp_we,
-    output logic [AW-1:0]           bmp_addr,
+    output logic [BMP_W_LOG2+BMP_H_LOG2-1:0] bmp_addr,
     output logic [15:0]             bmp_data,
     // The mask needs a read and a write in the same cycle at DIFFERENT
     // addresses — stage A reads the pixel it is about to test while stage B
     // marks the previous one. A single shared address cannot express that, so
     // the port is split; an M10K simple-dual-port does this natively.
-    output logic [AW-1:0]           mask_raddr,
+    output logic [BMP_W_LOG2+BMP_H_LOG2-1:0] mask_raddr,
     input  wire                     mask_q,
-    output logic [AW-1:0]           mask_waddr,
+    output logic [BMP_W_LOG2+BMP_H_LOG2-1:0] mask_waddr,
     output logic                    mask_we
 );
+
+    localparam int unsigned AW = BMP_W_LOG2 + BMP_H_LOG2;
 
     typedef enum logic [2:0] { S_IDLE, S_FETCH, S_LATCH, S_DRAW, S_FLUSH } state_t;
     state_t state;

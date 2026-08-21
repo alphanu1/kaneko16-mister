@@ -28,7 +28,7 @@ Miles Rally 1/2.
 | VIEW2 tilemap address engine | fuzzed clean (3.0M checks), oracle-verified |
 | VU-002 sprite list parser | fuzzed clean (41k checks), oracle-verified |
 | Tilemap pixel fetch and line buffers | fuzzed clean; rendering on hardware, no visible artefacts |
-| Sprite bitmap renderer, mixer | fuzzed clean; **not yet instantiated in the core** |
+| VU-002 sprite subsystem | `kaneko_spr_sys`: parser, resolved table, double-buffered bitmap and mask, mixer read. 65k checks clean, instantiated in the core |
 | Video timing | 384x264 at 6 MHz, 59.1856 Hz; running on hardware |
 | SDRAM controller, ROM loader | running on hardware |
 | 68000 (fx68k) + bus decode | running on hardware; matches MAME exactly over 100k bus accesses |
@@ -38,7 +38,7 @@ Miles Rally 1/2.
 | YM2149 x2 (jt49) | wired and mixed to the audio output; the game keeps their volumes at zero |
 | OKI M6295 (jt6295) | **working on hardware** — sound effects play. Bank map is a per-game parameter |
 | EEPROM (93C46) | working; 20,910 reads replayed against MAME, zero mismatches |
-| Inputs, coin lockout | **not started** — inputs read as 0xffff |
+| Inputs | two players, 2 buttons each, start/coin/service, and the board's two DIPs (flip screen, service) |
 
 The 68000 completes explbrkr's self-test, formats a blank EEPROM, enables
 interrupts and runs its main loop, and the tilemap layers render on hardware.
@@ -57,6 +57,7 @@ picture, each a binary count with the MSB at the left:
 | 5 | yellow | OKI sample-ROM fetches answered |
 | 6 | yellow | clocks with an OKI channel busy |
 | 7 | yellow | clocks with a non-zero OKI sample |
+| 8 | white | sprite passes that did not finish before the next frame |
 
 Each row is a binary number with the MSB at the left, one block per bit; a
 clear bit is dark red rather than black, so "the count is zero" is

@@ -41,12 +41,11 @@
 `default_nettype none
 
 module kaneko_spr_sys #(
-    parameter  int unsigned BMP_W_LOG2 = 8,
-    parameter  int unsigned BMP_H_LOG2 = 8,
-    parameter  int unsigned SPRITES    = 1024,
-    parameter  int unsigned SDR_AW     = 25,
-    localparam int unsigned AW         = BMP_W_LOG2 + BMP_H_LOG2,
-    localparam int unsigned NPIX       = 1 << AW
+    parameter int unsigned BMP_W_LOG2 = 8,
+    parameter int unsigned BMP_H_LOG2 = 8,
+    parameter int unsigned SPRITES    = 1024,
+    parameter int unsigned SDR_AW     = 25
+    // No `localparam` in the parameter list — Quartus 17.0 rejects it.
 ) (
     input  wire clk,
     input  wire rst,
@@ -89,6 +88,9 @@ module kaneko_spr_sys #(
     output wire         busy,
     output logic [15:0] overrun
 );
+
+    localparam int unsigned AW   = BMP_W_LOG2 + BMP_H_LOG2;
+    localparam int unsigned NPIX = 1 << AW;
 
     // ------------------------------------------------------ resolved table
     // 47 bits of payload; kaneko_vuspr_draw reads it as a 64-bit record with

@@ -13,7 +13,7 @@ names them. Nothing here contains ROM data.
 ## What works
 
 **Explosive Breaker only.** The 68000, memory system, interrupts, EEPROM, the
-VIEW2 tilemap path and OKI M6295 sound all run. Sprites are in progress.
+VIEW2 tilemap path, VU-002 sprites, OKI M6295 sound and the controls all run.
 
 Everything game-specific is still compiled in for this one title — the memory
 map is `bakubrkr_map`, and the screen offsets, colour base, sprite priorities
@@ -28,8 +28,8 @@ This list describes the RBF named above. Every entry is removed in the same
 change as the RBF that fixes it, so if an item is still here it is still true
 of the newest build in this directory.
 
-- Sprites are not drawn.
-- No inputs; the game runs its attract loop only.
+- Screen rotation is not implemented. Explosive Breaker is a ROT90 game, so it
+  plays sideways on a horizontal monitor until the rotation output stage lands.
 - Music is absent: the YM2149s are wired and mixed, but this board's music is
   OKI samples and the game keeps the PSG volumes at zero. Verify against MAME
   before treating that as a fault.
@@ -71,6 +71,7 @@ missing.
 | 5 | yellow | OKI sample-ROM fetches answered. |
 | 6 | yellow | Clocks with an OKI channel flagged busy — the chip accepted a play command. |
 | 7 | yellow | Clocks where the OKI produced a non-zero sample. |
+| 8 | white | Sprite passes that did not finish before the next frame started. Zero is correct. 1024 sprites at one pixel per clock, each able to miss a 2.25 MB ROM, is the one part of the video path with no fixed upper bound. |
 
 Rows 4-7 are a **chain**, in order. Each one rules out everything above it, so
 the first dark row is where the sound path breaks. All four lit and no audio
@@ -81,6 +82,22 @@ actually found by reading the RTL, not by reading them — so treat the chain as
 the instrument for next time rather than a war story. What it would have shown:
 row 4 lit, row 5 lit, row 6 dark, putting the fault between the sample ROM
 arriving and the chip accepting a command.
+
+## Controls
+
+| | |
+|---|---|
+| D-pad | 8-way joystick |
+| A | Shot |
+| B | Bomb |
+| Start / Start button | Start |
+| Select / Coin button | Insert coin |
+| R | Pause (the board's TILT input) |
+| L | Service |
+
+`Flip screen` and `Service mode` in the OSD are the board's two physical DIP
+switches — everything else this game configures through its own test mode,
+which is why there is no DIP menu.
 
 ## Save Backup RAM
 
