@@ -212,8 +212,17 @@ int main(int argc, char** argv) {
         //   0: attr/colour   1: code   2: x   3: y
         const uint16_t colour = (uint16_t)(rng() & 0x3f);
         const uint16_t code   = (uint16_t)(rng() & 0x7ff);
-        const int      sx     = 20 + (int)(rng() % 180);
-        const int      sy     = 30 + (int)(rng() % 160);
+        // OFFSCR=<percent> puts that share of the list outside the clip
+        // rectangle. The hardware parses a full 1024 records every frame
+        // whether a game uses them or not, so a list that is mostly off screen
+        // is the normal case, not a corner one — and it is the case that
+        // decides whether a pass fits in a frame.
+        static const int offpct = getenv("OFFSCR") ? atoi(getenv("OFFSCR")) : 0;
+        const bool     off    = ((int)(rng() % 100) < offpct);
+        const int      sx     = off ? 400 + (int)(rng() % 80)
+                                    : 20 + (int)(rng() % 180);
+        const int      sy     = off ? 400 + (int)(rng() % 80)
+                                    : 30 + (int)(rng() % 160);
         wr_ram(i * 4 + 0, colour);
         wr_ram(i * 4 + 1, code);
         wr_ram(i * 4 + 2, (uint16_t)(sx << 6));

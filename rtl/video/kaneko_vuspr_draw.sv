@@ -152,6 +152,27 @@ module kaneko_vuspr_draw #(
 
     wire [3:0] b_pix = b_nibble_hi ? rom_data[7:4] : rom_data[3:0];
 
+    // ---------------------------------------------- off-screen sprite skip
+    // A sprite whose 16x16 box misses the clip rectangle entirely contributes
+    // nothing: `in_clip` is false for all 256 of its pixels, so not one of them
+    // writes the bitmap or marks the mask. Walking it anyway costs 256 clocks
+    // and up to 16 sample-ROM round trips for a result that is known in
+    // advance.
+    //
+    // This is not a micro-optimisation. The core parses a full 1024 records
+    // every frame because the hardware does, and most of them are off screen —
+    // at 1024 sprites a pass measured 1,039,364 clocks against a frame of
+    // 811,008, so it overran EVERY frame before this. Tested from tbl_data
+    // rather than the latched registers because the decision is wanted in
+    // S_LATCH, the cycle those registers are being written.
+    wire signed [10:0] t_x0 = {tbl_data[36], tbl_data[36:27]};
+    wire signed [10:0] t_y0 = {tbl_data[46], tbl_data[46:37]};
+    wire signed [10:0] t_x1 = t_x0 + 11'sd15;
+    wire signed [10:0] t_y1 = t_y0 + 11'sd15;
+    wire skip_sprite =
+           (t_x1 < $signed({1'b0, clip_x0})) || (t_x0 > $signed({1'b0, clip_x1}))
+        || (t_y1 < $signed({1'b0, clip_y0})) || (t_y0 > $signed({1'b0, clip_y1}));
+
     always_ff @(posedge clk) begin
         bmp_we  <= 1'b0;
         mask_we <= 1'b0;
@@ -200,7 +221,16 @@ module kaneko_vuspr_draw #(
 
                 S_FETCH: state <= S_LATCH;   // table read latency
 
-                S_LATCH: begin
+                S_LATCH: if (skip_sprite) begin
+                    // Nothing to draw: straight on to the next record.
+                    if (index == 11'd0) begin
+                        state <= S_FLUSH;
+                    end else begin
+                        index    <= index - 11'd1;
+                        tbl_addr <= 10'(index - 11'd1);
+                        state    <= S_FETCH;
+                    end
+                end else begin
                     s_code   <= tbl_data[16:0];
                     s_colour <= tbl_data[22:17];
                     s_prio   <= tbl_data[24:23];

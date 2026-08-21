@@ -3476,3 +3476,49 @@ clear is now most of a pass, that hid every overrun: the periodic-frame test
 reported 0 where the truth was 6. Counting moved to "any frame arriving while
 not idle", which is what the readout is supposed to mean and does not need
 revisiting each time a phase is added.
+
+### The sprite pass did not fit in a frame, and the measurement nearly lied
+
+The hardware overlay showed one sprite overrun per frame. Measured in
+simulation with an idealised SDRAM, a pass at the core's real sprite count:
+
+```
+   24 sprites      88,364 clocks
+  256 sprites     308,996
+ 1024 sprites   1,039,364      <- a frame is 811,008
+```
+
+So it overran every frame, not occasionally. Roughly 1,015 clocks per sprite,
+of which about 750 are sample-ROM round trips: a 16x16 4bpp sprite is sixteen
+eight-byte rows, and each row is one miss on a one-entry cache. Sixteen round
+trips per sprite is already minimal for that cache; the cost is 1024 sprites,
+not the cache.
+
+`in_clip` gated the bitmap *write* and not the *fetch*, so a sprite entirely
+outside the visible area still cost 256 clocks and sixteen SDRAM round trips
+for a result known in advance. `kaneko_vuspr_draw` now tests the 16x16 box
+against the clip rectangle in `S_LATCH` and skips the record in two cycles.
+
+```
+ 1024 records,  0% off screen   1,039,364
+               50%                536,394
+               90%                154,896
+               95%                113,140
+```
+
+Games use a fraction of the 1024 records the hardware parses, so the normal
+case is the bottom of that table. The worst case — a thousand visible sprites
+— still does not fit, and that needs either a shorter round trip or several in
+flight at once.
+
+**And a near miss worth recording.** The first attempt at this measurement
+reported *identical* pass times at 0%, 50%, 90% and 95% off screen, and that
+was reported as "the skip does not help". It was not a result at all: the
+edit that was supposed to place sprites off screen had not applied, because
+the string it searched for had already been changed, so the same all-on-screen
+list was measured four times.
+
+Four identical numbers to the digit should have been the tell. **A measurement
+that does not move when the input moves is not evidence that the input does not
+matter — it is evidence the input did not move.** Check the knob turns before
+believing the reading.
