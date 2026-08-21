@@ -46,6 +46,19 @@ module kaneko_vuspr_draw #(
     input  wire         clk,
     input  wire         rst,
 
+    // FREEZE, FOR SDRAM.
+    //
+    // The sprite ROM is 2.25 MB and lives in SDRAM, not in a block RAM that
+    // answers every cycle. `ce` low freezes the whole pipeline — no state
+    // change, no write strobes — so a fetch that misses costs cycles rather
+    // than pixels. Drive it from the ROM feeder's hit signal: when it is high
+    // the byte on `rom_data` is the byte for the address issued last cycle.
+    //
+    // Same shape as kaneko_tmap_fetch's `ce`, which is verified to freeze
+    // without losing or duplicating a pixel. This module had no stall input at
+    // all and assumed a ROM that always answers.
+    input  wire         ce,
+
     input  wire         start,
     input  wire [10:0]  sprite_count,        // 1024, or 512 on the Blaze On board
     output logic        busy,
@@ -145,7 +158,7 @@ module kaneko_vuspr_draw #(
             state   <= S_IDLE;
             busy    <= 1'b0;
             b_valid <= 1'b0;
-        end else begin
+        end else if (ce) begin
             // ---- stage B: resolve the pixel issued last cycle
             if (b_valid && (b_pix != 4'd0)) begin
                 // First writer wins. The mask is marked whether or not this

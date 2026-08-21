@@ -90,19 +90,39 @@ void reference(const std::vector<Spr>& spr, std::vector<uint16_t>& out,
 // instead of the previous one's — the same mistake that made the tmap fetch
 // harness report near-total failure against already-verified logic.
 uint32_t held_tbl = 0, held_rom = 0, held_mask = 0;
-long n_bmp_we = 0, n_mask_we = 0, n_ticks = 0;
+long n_bmp_we = 0, n_mask_we = 0, n_ticks = 0, n_stall = 0;
+
+// Stall injector. The sprite ROM is in SDRAM, so `ce` is low whenever the
+// feeder has not got the byte yet, and the module must freeze rather than lose
+// or duplicate a pixel. stall_pct 0 reproduces the always-ready ROM the module
+// was originally written against; anything else is the real case.
+int stall_pct = 0;
+std::mt19937* stall_rng = nullptr;
 
 void tick()
 {
+    // `ce` is decided before the edge and held across it, as a feeder's hit
+    // signal would be.
+    bool ce = true;
+    if (stall_pct && stall_rng)
+        ce = ((int)((*stall_rng)() % 100) >= stall_pct);
+    dut->ce = ce;
+    if (!ce) n_stall++;
+
     dut->clk = 0; dut->eval();
     dut->tbl_data = table_mem[held_tbl % table_mem.size()];
     dut->rom_data = rom[held_rom % rom.size()];
     dut->mask_q   = mask[held_mask % mask.size()];
     dut->eval();
 
-    held_tbl  = dut->tbl_addr;
-    held_rom  = dut->rom_addr;
-    held_mask = dut->mask_raddr;
+    // The held addresses only advance on a cycle the module is allowed to
+    // advance. Latching them while frozen would hand stage B the byte for an
+    // address the pipeline has not reached.
+    if (ce) {
+        held_tbl  = dut->tbl_addr;
+        held_rom  = dut->rom_addr;
+        held_mask = dut->mask_raddr;
+    }
 
     dut->clk = 1; dut->eval();
     // Writes take effect at the edge.
@@ -141,6 +161,10 @@ int main(int argc, char** argv)
     // Several sprite counts, including the Blaze On board's 512.
     const int counts[] = { 8, 64, 512, 1024 };
 
+    std::mt19937 srng(0x5354414cu);   // 'STAL'
+    stall_rng = &srng;
+    long stall_cmp = 0, stall_diff = 0;
+
     for (int pass = 0; pass < 8; pass++) {
         const int n = counts[pass % 4];
         const int x0 = 0, x1 = 255, y0 = 16, y1 = 239;   // explbrkr visible area
@@ -161,20 +185,58 @@ int main(int argc, char** argv)
         table_mem.assign(1024, 0);
         for (int i = 0; i < n; i++) table_mem[i] = pack(spr[i]);
 
-        bmp.assign((size_t)BMP_W * BMP_H, 0);
-        mask.assign((size_t)BMP_W * BMP_H, 0);
+        // Run the same sprites twice: a ROM that always answers, and one that
+        // stalls a third of the time. The two bitmaps must be identical — a
+        // stall that lost or duplicated a pixel would show here even if both
+        // runs happened to satisfy the reference in aggregate.
+        std::vector<uint16_t> ready_bmp;
+        const int stalls[2] = { 0, 33 };
+        for (int run = 0; run < 2; run++) {
+            stall_pct = stalls[run];
 
-        dut->rst = 1; dut->start = 0;
-        dut->clip_x0 = x0; dut->clip_x1 = x1;
-        dut->clip_y0 = y0; dut->clip_y1 = y1;
-        dut->sprite_count = n;
-        for (int i = 0; i < 4; i++) tick();
-        dut->rst = 0;
-        dut->start = 1; tick(); dut->start = 0;
+            bmp.assign((size_t)BMP_W * BMP_H, 0);
+            mask.assign((size_t)BMP_W * BMP_H, 0);
+            held_tbl = held_rom = held_mask = 0;
 
-        long guard = 0;
-        while (!dut->done && guard++ < (long)n * 300 + 10000) tick();
-        for (int i = 0; i < 8; i++) tick();     // drain
+            dut->rst = 1; dut->start = 0; dut->ce = 1;
+            dut->clip_x0 = x0; dut->clip_x1 = x1;
+            dut->clip_y0 = y0; dut->clip_y1 = y1;
+            dut->sprite_count = n;
+            {   int save = stall_pct; stall_pct = 0;   // never stall in reset
+                for (int i = 0; i < 4; i++) tick();
+                dut->rst = 0;
+                dut->start = 1; tick(); dut->start = 0;
+                stall_pct = save;
+            }
+
+            long guard = 0;
+            while (!dut->done && guard++ < (long)n * 3000 + 100000) tick();
+            {   int save = stall_pct; stall_pct = 0;
+                for (int i = 0; i < 8; i++) tick();     // drain
+                stall_pct = save;
+            }
+            if (!dut->done && guard >= (long)n * 3000 + 100000) {
+                printf("  TIMEOUT pass=%d n=%d stall=%d%%\n", pass, n, stall_pct);
+                fails++;
+            }
+
+            if (run == 0) {
+                ready_bmp = bmp;
+            } else {
+                for (size_t o = 0; o < bmp.size(); o++) {
+                    stall_cmp++;
+                    if (bmp[o] != ready_bmp[o]) {
+                        stall_diff++; fails++;
+                        if (stall_diff <= 10)
+                            printf("  STALL DIFF pass=%d at (%zu,%zu) "
+                                   "ready=%04x stalled=%04x\n",
+                                   pass, o % BMP_W, o / BMP_W,
+                                   ready_bmp[o], bmp[o]);
+                    }
+                }
+            }
+        }
+        stall_pct = 0;
 
         if (getenv("TRACE"))
             printf("  pass=%d n=%d ticks=%ld bmp_we=%ld mask_we=%ld\n",
@@ -202,6 +264,8 @@ int main(int argc, char** argv)
         if (!bad) passes++;
     }
 
+    printf("  stall-equivalence: %ld pixels compared, %ld differ, "
+           "%ld stalled cycles\n", stall_cmp, stall_diff, n_stall);
     printf("kaneko_vuspr_draw: checks=%ld fails=%ld passes=%ld/8 "
            "bmp_writes=%ld mask_writes=%ld (rejected=%ld)\n",
            checks, fails, passes, total_bmp, total_mask, total_mask - total_bmp);

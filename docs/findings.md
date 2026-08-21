@@ -1472,7 +1472,8 @@ per-line renderer.
 
 ```
 kaneko_vuspr_draw: checks=524288 fails=0 passes=8/8
-                   bmp_writes=184340 mask_writes=771885 (rejected=587545)
+                   bmp_writes=368680 mask_writes=1543770 (rejected=1175090)
+  stall-equivalence: 524288 pixels compared, 0 differ, 408268 stalled cycles
 ```
 
 499 cells. The reference is the C++ compositor inside the frame gate, which
@@ -1481,8 +1482,28 @@ reproduces it, ordering included.
 
 (`checks` was 2,097,152 until 2026-08-21, when the bitmap stopped being square:
 one `BMP_W_LOG2` for both axes meant 512x512, and the check count is one per
-pixel per pass. The write counts are unchanged, because they depend on the
-sprites drawn and not on the size of the surface they are drawn onto.)
+pixel per pass. The write counts then doubled, because every pass now runs
+twice — see below.)
+
+### The sprite ROM is in SDRAM, so the renderer had to learn to freeze
+
+The module was written against a ROM that answers every cycle. The sprite ROM
+is 2.25 MB and lives in SDRAM behind an arbiter, so it does not. `ce` freezes
+the whole pipeline — state, counters and both write strobes — and is driven
+from the feeder's hit signal, the same shape as `kaneko_tmap_fetch`.
+
+The test for it is stronger than "still matches the reference": every pass runs
+twice on the same sprites, once with a ROM that always answers and once with
+one that stalls 33% of the time, and **the two bitmaps must be identical**.
+524,288 pixels compared across 408,268 stalled cycles, zero differ. A stall that
+lost or duplicated a pixel shows up here even if both runs happened to satisfy
+the reference in aggregate.
+
+The harness change that matters as much as the RTL one: the held ROM, table and
+mask addresses only advance on a cycle the module is allowed to advance.
+Latching them while frozen hands stage B the byte for an address the pipeline
+has not reached yet, which is a harness bug that reads exactly like an RTL
+bug — the same trap recorded for the tmap fetch harness.
 
 **The ordering is the substance of this module.** MAME parses first-to-last
 (the multisprite latches carry forward) but *draws* last-to-first with
