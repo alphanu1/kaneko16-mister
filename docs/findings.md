@@ -2758,3 +2758,34 @@ dx differs by two between the layers — `set_scrolldx(-m_dx)` for layer 0 and
 `-(m_dx+2)` for layer 1 — and explbrkr's offsets are `set_offset(0x5b, -0x8,
 256, 240)`. The frame gate, which is pixel-exact, passes dx positive: 0x5b for
 layer 0 and 0x5d for layer 1, dy -8 for both.
+
+### OPEN: an OSD reset still looks like it loses the EEPROM
+
+*Reported from hardware, 2026-08-21. Not yet diagnosed.*
+
+After an OSD reset the amber interrupt bars take four to five seconds to
+appear, which is the signature of the game reformatting a blank EEPROM. A core
+reset should not be able to do that: the array is initialised only by the
+`initial` block at power-up, `rst_por` is the EEPROM's only reset, and the
+contents are not cleared anywhere.
+
+Candidates, most likely first:
+
+1. **The save file is never written, so every start is a first start.** The
+   framework only writes when the core answers UIO_CHK_UPLOAD, and only when the
+   OSD is opened. If no save has been taken yet, a cold boot and a reset look
+   identical — both find a blank part. Check whether
+   `/media/fat/config/nvram/` has a file at all before concluding anything
+   about reset.
+2. **`bk_q` is a registered read.** `ioctl_din` follows `bk_addr` by one clock,
+   and if the HPS samples as it advances the address, every word is off by one
+   and the file is shifted. The game would then reject the contents on load and
+   reformat — which looks exactly like a reset wiping them.
+3. **A core reset does not reload.** `arcade_nvm_load()` runs when the MRA is
+   parsed, not on reset, so after a reset the EEPROM keeps whatever is in RAM.
+   That is correct behaviour and means a reset can only *appear* to lose data
+   if the data was never right.
+
+The distinguishing test is cheap: cold boot twice with an OSD open in between,
+and see whether the SECOND cold boot is fast. If it is, reset is the problem;
+if it is not, the save was never written and reset is innocent.
