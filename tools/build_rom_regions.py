@@ -141,7 +141,13 @@ PRIMARY = {"explbrkr", "mgcrystl", "wingforc"}
 # it looks like a supported title and fails in a way the player cannot
 # diagnose. This set grows when the per-game configuration table lands, and
 # not before.
-SUPPORTED = {"explbrkr", "mgcrystl"}
+# Magical Crystals is deliberately NOT here yet. Its game-table entry and its
+# memory map are done, but it is the one title the frame gate does not close:
+# 298 pixels of line-scroll difference that nobody has explained. Shipping a
+# title with a known unexplained video discrepancy makes every later bug report
+# ambiguous, so it waits until that is understood. The Blaze On board is at
+# 100% and goes first.
+SUPPORTED = {"explbrkr"}
 ALT_PARENT = {"blazeonj": "Blaze On"}
 
 # SDRAM layout: region -> (base, size). This IS the MRA's emission order, and
@@ -153,19 +159,31 @@ ALT_PARENT = {"blazeonj": "Blaze On"}
 # ONE LAYOUT FOR EVERY GAME, SIZED TO THE LARGEST OF EACH REGION.
 #
 # The core carries one set of base addresses, so the layout cannot move between
-# games — only the contents. kan_spr is 0x240000 on Explosive Breaker and
-# 0x280000 on Magical Crystals, so the slot is the larger of the two and the
-# smaller game simply leaves the tail zero-filled. Sizing it to whichever game
-# was implemented first is how you get a second game that renders garbage from
-# the end of somebody else's sprite ROM.
+# games — only the contents. Every slot below is the largest that region is
+# across all four Tier 1 titles, so this map is final and the RBF and the MRAs
+# stop being a matched pair that changes:
+#
+#            explbrkr  mgcrystl  blazeonj  wingforc     slot
+#   maincpu   0x80000   0x80000  0x100000  0x100000   0x100000
+#   view2_0  0x100000  0x100000  0x100000  0x200000   0x200000
+#   view2_1  0x100000  0x100000         -         -   0x100000
+#   kan_spr  0x240000  0x280000  0x200000  0x200000   0x280000
+#   oki1     0x100000   0x40000         -   0x80000   0x100000
+#   audiocpu        -         -   0x20000   0x10000    0x20000
+#
+# A game leaves the tail of each slot zero-filled. Sizing a slot to whichever
+# game was implemented first is how the next game renders garbage from the end
+# of somebody else's ROM — which is why this was done once, for all of them,
+# rather than grown a title at a time.
 SDRAM_MAP = [
-    ("maincpu", 0x000000, 0x080000),
-    ("view2_0", 0x080000, 0x100000),
-    ("view2_1", 0x180000, 0x100000),
-    ("kan_spr", 0x280000, 0x280000),
-    ("oki1",    0x500000, 0x100000),
+    ("maincpu",  0x000000, 0x100000),
+    ("view2_0",  0x100000, 0x200000),
+    ("view2_1",  0x300000, 0x100000),
+    ("kan_spr",  0x400000, 0x280000),
+    ("oki1",     0x680000, 0x100000),
+    ("audiocpu", 0x780000, 0x020000),
 ]
-SDRAM_END = 0x600000        # 6 MB
+SDRAM_END = 0x7a0000        # 7.625 MB
 
 REGION_SIZE = {
     "mgcrystl": {"view2_0": 0x100000, "view2_1": 0x100000,

@@ -444,11 +444,8 @@ reg [4:0] ym_div;
 always @(posedge clk_sys) ym_div <= (ym_div == 5'd23) ? 5'd0 : ym_div + 5'd1;
 wire ym_cen = (ym_div == 5'd0);        // 48 MHz / 24 = 2 MHz
 
-// oki1 sits at byte 0x500000 in the stream (SDRAM_MAP), so word 0x280000. It
-// moved when kan_spr grew from 0x240000 to 0x280000 to hold Magical Crystals'
-// larger sprite ROM; one layout serves every game, sized to the largest of
-// each region.
-localparam [SDR_AW:1] OKI_BASE = SDR_AW'(25'h280000);
+// oki1 @ byte 0x680000, so word 0x340000.
+localparam [SDR_AW:1] OKI_BASE = SDR_AW'(25'h340000);
 
 wire [7:0] ym0_q, ym1_q;
 wire [7:0] ym0_iob_out;
@@ -771,13 +768,16 @@ localparam [8:0]  SPR_VIS_MIN_Y = 9'd16;
 localparam        SPR_WIDE      = 1'b0;      // screen width is 0x100, not > 0x100
 localparam        SPR_FLIPTYPE  = 1'b0;
 localparam [10:0] SPR_COLBASE   = 11'd0;
-// kan_spr sits at byte 0x280000 in the stream (SDRAM_MAP), so word 0x140000.
-localparam [SDR_AW:1] SPR_BASE  = SDR_AW'(25'h140000);
+// kan_spr @ byte 0x400000, so word 0x200000.
+localparam [SDR_AW:1] SPR_BASE  = SDR_AW'(25'h200000);
 
 // Tile ROM regions, as word addresses in SDRAM (D6, SDRAM_MAP):
 //   view2_0 at byte 0x080000, view2_1 at byte 0x180000.
-localparam [SDR_AW:1] TROM0_BASE = SDR_AW'(25'h040000);
-localparam [SDR_AW:1] TROM1_BASE = SDR_AW'(25'h0c0000);
+// SDRAM layout, final for all four Tier 1 games — see SDRAM_MAP in
+// tools/build_rom_regions.py for how each slot was sized. Word addresses, so
+// half the byte offset.
+localparam [SDR_AW:1] TROM0_BASE = SDR_AW'(25'h080000);   // view2_0 @ 0x100000
+localparam [SDR_AW:1] TROM1_BASE = SDR_AW'(25'h180000);   // view2_1 @ 0x300000
 
 wire [15:0] c0r0 = v2r0_flat[ 0*16 +: 16];
 wire [15:0] c0r1 = v2r0_flat[ 1*16 +: 16];
