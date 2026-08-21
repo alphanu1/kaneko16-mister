@@ -656,6 +656,30 @@ wire [63:0]  ln_scr_data;
 wire [39:0]  ln_vram_addr;
 wire [127:0] ln_vram_data;
 
+// LINE OVERRUN: did the fetch finish before the line was needed?
+//
+// Two wrong guesses at the tearing — the scroll registers, then the tilewall
+// stealing the bus — both plausible and neither settled by looking. This is
+// the measurement that separates "the feeder cannot keep up" from everything
+// else: if the line fetch is still running when the next line starts, the
+// buffer being displayed is stale or half-written, and no amount of reasoning
+// about scroll values matters.
+//
+// Zero means look elsewhere. Non-zero means bandwidth, and the count says how
+// far short.
+wire line_busy;
+reg [15:0] overrun_cnt, overrun_lat;
+always @(posedge clk_sys) begin
+	if (rst_sys) begin
+		overrun_cnt <= 16'd0; overrun_lat <= 16'd0;
+	end else if (vbl_rise) begin
+		overrun_lat <= overrun_cnt;
+		overrun_cnt <= 16'd0;
+	end else if (line_start && line_busy) begin
+		overrun_cnt <= overrun_cnt + 16'd1;
+	end
+end
+
 wire [3:0]  mix_solid;
 wire [11:0] mix_cat;
 wire [23:0] mix_colour;
@@ -664,7 +688,7 @@ wire [15:0] mix_pix;
 kaneko_tmap_line #(.H_VIS(256)) u_line
 (
 	.clk(clk_sys), .rst(rst_sys),
-	.start(line_start), .line_y(screen_y + 9'd1), .busy(),
+	.start(line_start), .line_y(screen_y + 9'd1), .busy(line_busy),
 
 	.layer_en(lay_en), .dx_f(lay_dx), .dy_f(lay_dy),
 	.scroll_x_f(lay_sx), .scroll_y_f(lay_sy), .linescroll_en(lay_ls),
@@ -759,17 +783,26 @@ wire in_irq_row = (screen_y >= 9'd24) && (screen_y < 9'(24 + 6))
 wire [2:0] irq_bit = 3'(IRQ_BITS - 1) - 3'(screen_x[5:3]);
 wire       irq_set = irq_cnt_lat[irq_bit];
 
+// Row 2, cyan: line fetches that overran, per frame, 16 bits. All dark means
+// the feeder is keeping up and the tearing is somewhere else entirely.
+wire in_ovr_row = (screen_y >= 9'd32) && (screen_y < 9'(32 + 6))
+               && (screen_x < 9'(16 * ALV_BIT_W));
+wire [3:0] ovr_bit = 4'd15 - 4'(screen_x[6:3]);
+wire       ovr_set = overrun_lat[ovr_bit];
+
 // One column of every block left dark, so adjacent set bits stay countable.
 //
 // Off by default. The readouts are how the CPU and the interrupts were
 // diagnosed and they stay in the build for the next time something stops, but
 // they sit on top of the picture, so the picture wins unless asked otherwise.
 wire dbg_on   = status[11];
-wire in_dbg   = dbg_on && (in_alive_row || in_irq_row) && (screen_x[2:0] != 3'd7);
-wire dbg_set  = in_alive_row ? alive_set : irq_set;
+wire in_dbg   = dbg_on && (in_alive_row || in_irq_row || in_ovr_row)
+              && (screen_x[2:0] != 3'd7);
+wire dbg_set  = in_alive_row ? alive_set : in_irq_row ? irq_set : ovr_set;
 
 wire [7:0] dbg_r = dbg_set ? (in_irq_row ? 8'hff : 8'h00) : 8'h40;
 wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : 8'hff) : 8'h00;
+wire [7:0] dbg_b = dbg_set && in_ovr_row ? 8'hff : 8'h00;
 
 // The game picture and the palette swatches both come out of the palette RAM,
 // so they share the same decode.
