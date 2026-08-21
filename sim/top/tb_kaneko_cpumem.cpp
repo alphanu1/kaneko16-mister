@@ -19,6 +19,12 @@
 static Vkaneko_cpumem_harness* dut;
 static uint64_t tick_count = 0;
 
+// Bus trace, in the format tools/mame_bus_trace.lua emits, so the two can be
+// diffed directly rather than eyeballed. Written only when --trace is given.
+static FILE*    trace_fp    = nullptr;
+static uint64_t trace_limit = 0;
+static uint64_t trace_n     = 0;
+
 static void tick() {
     dut->clk = 0; dut->eval();
     dut->clk = 1; dut->eval();
@@ -99,6 +105,17 @@ static Stats run(const std::vector<uint8_t>& rom, bool swap, bool verbose,
             st.last_dtack_tick = tick_count;
             uint32_t a = (uint32_t)dut->cpu_addr << 1;
             uint16_t d = dut->cpu_din;
+            if (trace_fp && trace_n < trace_limit) {
+                // MAME reports the value on the bus and the lanes as a mask;
+                // a read takes iEdb, a write takes oEdb.
+                const bool rd = dut->cpu_rw;
+                const uint16_t val = rd ? dut->cpu_din : dut->cpu_dout;
+                const uint16_t msk = (uint16_t)((dut->cpu_uds ? 0xff00 : 0) |
+                                                (dut->cpu_lds ? 0x00ff : 0));
+                std::fprintf(trace_fp, "%06x %s %04x %04x\n",
+                             a, rd ? "R" : "W", val, msk);
+                trace_n++;
+            }
             if (vec.size() < 4 && a < 8) vec.push_back(d);
             if (verbose && shown < 24) {
                 std::printf("    %-6s %06X = %04X\n",
@@ -147,7 +164,15 @@ static void report(const char* name, const Stats& s, uint64_t run_ticks) {
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
 
-    const char* path = (argc > 1) ? argv[1] : "build/roms/explbrkr_maincpu.bin";
+    const char* path = "build/roms/explbrkr_maincpu.bin";
+    const char* trace_path = nullptr;
+    uint64_t    trace_count = 20000;
+    for (int i = 1; i < argc; i++) {
+        if (!std::strcmp(argv[i], "--trace") && i + 1 < argc) trace_path = argv[++i];
+        else if (!std::strcmp(argv[i], "--count") && i + 1 < argc)
+            trace_count = std::strtoull(argv[++i], nullptr, 0);
+        else if (argv[i][0] != '-') path = argv[i];
+    }
     FILE* f = std::fopen(path, "rb");
     if (!f) { std::fprintf(stderr, "cannot open %s\n", path); return 2; }
     std::fseek(f, 0, SEEK_END); long n = std::ftell(f); std::fseek(f, 0, SEEK_SET);
@@ -194,9 +219,23 @@ int main(int argc, char** argv) {
 
     std::printf("== A: HPS packing (byte n -> dout[7:0]), video port hammering\n");
     dut = new Vkaneko_cpumem_harness;
-    Stats a = run(rom, false, true, false, RUN, good_lat, 0);
-    report("result", a, RUN);
+    if (trace_path) {
+        trace_fp = std::fopen(trace_path, "w");
+        if (!trace_fp) { std::fprintf(stderr, "cannot write %s\n", trace_path); return 2; }
+        trace_limit = trace_count;
+        trace_n = 0;
+    }
+    // A trace of N accesses needs a run long enough to make them. Bus cycles
+    // land roughly one per 32 ticks here, so allow a wide margin.
+    const uint64_t run_a = trace_path ? (RUN + trace_count * 64) : RUN;
+    Stats a = run(rom, false, !trace_path, false, run_a, good_lat, 0);
+    report("result", a, run_a);
     delete dut;
+    if (trace_fp) {
+        std::fclose(trace_fp); trace_fp = nullptr;
+        std::printf("  bus trace: %llu accesses -> %s\n",
+                    (unsigned long long)trace_n, trace_path);
+    }
     std::printf("\n");
 
     std::printf("== B: byte-swapped packing (byte n -> dout[15:8])\n");

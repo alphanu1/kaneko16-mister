@@ -145,6 +145,31 @@ test:
 	done; \
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; fi
 
+# ------------------------------------------------------------ bus trace
+# Rule 6: the CPU is settled against MAME, not against a waveform. Both sides
+# emit the same four-column format so they diff directly.
+#
+# Every access crosses into Lua on the MAME side, so the oracle runs far slower
+# than the core does; 100k accesses is about a minute and covers boot through
+# the first clears of palette, sprite RAM and both VIEW2 tilemaps.
+TRACE_N   ?= 100000
+TRACE_DIR ?= build/bustrace
+.PHONY: bustrace
+bustrace: regions
+	@mkdir -p $(TRACE_DIR) build/tmp
+	@echo "== ours"
+	@$(MAKE) --no-print-directory boot SET=$(SET) \
+	  BOOT_ARGS="--trace $(CURDIR)/$(TRACE_DIR)/ours.txt --count $(TRACE_N)" \
+	  | grep -E "bus trace|reset SSP|FAIL|PASS"
+	@echo "== mame"
+	@cd $(TRACE_DIR) && BUS_TRACE_COUNT=$(TRACE_N) BUS_TRACE_OUT=mame.txt \
+	  mame -rompath $(ROMPATH) $(SET) \
+	    -autoboot_script $(CURDIR)/tools/mame_bus_trace.lua \
+	    -skip_gameinfo -autoboot_delay 0 -seconds_to_run 120 \
+	    -video none -sound none -nothrottle 2>&1 | grep "bus trace"
+	@echo "== diff"
+	@tools/diff_bus_trace.py $(TRACE_DIR)/ours.txt $(TRACE_DIR)/mame.txt
+
 # ---------------------------------------------------------------- deploy
 # Copy the core and its MRAs to a MiSTer and verify the checksum. Override the
 # address with MISTER=<ip>. See tools/deploy.sh for why this is a script and
@@ -177,7 +202,7 @@ boot: regions
 	  echo "      sound only, because the frame gate never needed their code."; \
 	  echo "      kaneko_bus also decodes bakubrkr_map alone, so booting another"; \
 	  echo "      title needs its memory map too, not just its ROM."; exit 1; }
-	@./build/obj_kaneko_cpumem/kaneko_cpumem $(ROM_DIR)/$(SET)_maincpu.bin
+	@./build/obj_kaneko_cpumem/kaneko_cpumem $(ROM_DIR)/$(SET)_maincpu.bin $(BOOT_ARGS)
 
 # ------------------------------------------------------------------- area
 MOD ?= kaneko_tmap_fetch

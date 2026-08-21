@@ -50,6 +50,9 @@ module kaneko_cpumem_harness #(
     output wire [23:1] cpu_addr,
     output wire        cpu_rw,
     output wire [15:0] cpu_din,
+    output wire [15:0] cpu_dout,
+    output wire        cpu_uds,
+    output wire        cpu_lds,
     output wire        rom_req,
     output wire        rom_ack,
     output wire [SDR_AW:1] rom_addr,
@@ -224,6 +227,9 @@ module kaneko_cpumem_harness #(
     assign cpu_addr  = eab;
     assign cpu_rw    = eRWn;
     assign cpu_din   = iEdb;
+    assign cpu_dout  = oEdb;
+    assign cpu_uds   = ~UDSn;
+    assign cpu_lds   = ~LDSn;
     assign rom_req   = p1_req;
     assign rom_ack   = p_ack_bus[1];
     assign rom_addr  = p1_addr;

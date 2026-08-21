@@ -2135,3 +2135,93 @@ instead of failing on a missing file.
 Rule 9 still holds for this change: the byte order is a property of the
 `hps_io` interface and the 68000, not of any one game, and `make gate` is
 unchanged at 3 of 4 pixel-exact with mgcrystl at its known 298-pixel anomaly.
+
+## The 68000 matches MAME for 100,000 bus accesses of boot
+
+*Instrument: `make bustrace` — `tools/mame_bus_trace.lua` against
+`sim/top/tb_kaneko_cpumem.cpp`, diffed by `tools/diff_bus_trace.py`.
+Corrected: three open questions and two wrong assumptions about the oracle.*
+
+Rule 6 says settle the CPU against MAME rather than against a waveform. Both
+sides now emit the same four-column format — address, R/W, data, lane mask —
+and the result on explbrkr is:
+
+```
+ours 100000 accesses, 22897 after dropping instruction fetches
+mame 100000 accesses, 22898 after dropping instruction fetches
+MATCH over all 22897 compared accesses
+```
+
+That covers boot through the clears of the palette, sprite RAM and both VIEW2
+tilemaps, every VIEW2 and sprite register write, and the EEPROM/lockout write.
+
+### Instruction fetches are counted, not compared
+
+fx68k reproduces the 68000's prefetch and MAME's core models it differently,
+re-reading words fx68k does not. A raw line diff drowns in that within a dozen
+lines and says nothing about correctness. What is architecturally determined —
+and so must agree exactly — is every **write**, and every **read outside ROM**.
+Those are what the differ compares; fetches are counted and reported.
+
+In practice the two agreed far beyond that. Over the first 10,434 accesses the
+traces are identical line for line, prefetch included.
+
+### The four "unmapped" addresses are unmapped on the board too
+
+`c00000`, `e40000`, `e80000` and `ec0000` are written once each during boot —
+values `0000`, `0002`, `00aa`, `0065` — and **`bakubrkr_map` does not decode any
+of them either**. MAME ignores the writes; so does the core; the traces are
+identical at identical positions. `e4/e8/ec` sit at `e00000 + 0x40000/0x80000/
+0xc0000`, and `e00000-e00007` is the read-only input port block, so partial
+decoding on A18/A19 would land them on a port that ignores writes.
+
+These were carried as an open question since the CPU first ran. They are
+settled: nothing to implement. `unmapped_hit` stays wired so a *new* one is
+still noticed.
+
+`d00000` was never unmapped — it is coin lockout and EEPROM, and the core
+already decodes it. It only looked unexplained because the differ's first
+region table was transcribed from the mgcrystl map, which puts the palette and
+VIEW2 windows elsewhere. Nothing was reported at the wrong addresses, so the
+census looked clean while naming the wrong board.
+
+### Three ways the oracle lied first
+
+None of these produced an error. Each produced a plausible trace.
+
+**MAME segfaults if the taps are installed before `machine:soft_reset()`.**
+Deterministically, a frame and a half later, part-way through the VIEW2 VRAM
+clear — the reset rebuilds the address map and leaves the tap objects dangling,
+and nothing complains until one is next used. Without the reset the same taps
+carry 100,000 accesses. This is why the first capture stopped at ~20,900 and
+looked like a natural limit.
+
+**MAME re-runs an autoboot script on machine reset.** Any "open the output file
+on reset" logic therefore runs again from a fresh chunk, truncating the file
+while the previous chunk's handle keeps its offset. The result was a
+1,900,000-byte file — exactly 100,000 records — that was sparse NULs followed by
+a few hundred lines of early boot. Right size, almost entirely empty.
+
+**A 68000 RESET does not clear D0-D7 or A0-A6.** It loads SSP and PC and touches
+nothing else. MAME has already run a frame by the time an autoboot script can
+install anything, so its registers carried values from that frame while the core
+leaves power-on reset with zeros. The boot code pushes registers it has not
+initialised yet — `MOVEM.L D0/D7/A0-A3,-(SP)` at `016dde` — and the traces
+diverged there on A1 and D7, MAME holding `00700000` and `7fffffff` against the
+core's zeros. Ten thousand accesses of exact agreement, then a difference that
+was entirely the instrument's doing.
+
+The fix for all three is to reset the **CPU** rather than the machine: zero the
+registers, load SSP and PC from the vectors, set SR to supervisor with
+interrupts masked. The memory map is never rebuilt, the script never re-runs,
+and the architectural state matches a core leaving power-on reset. The trace is
+also streamed to disk and flushed rather than accumulated in a Lua table, so a
+run that dies still leaves every access up to the fatal one — which is what
+turned "bisect over whole runs" into "read the tail".
+
+### What this does not cover
+
+The core has no interrupts yet, and 100,000 accesses is roughly two frames, so
+the comparison ends before the game's first VBlank handler would run. The
+divergence that matters next is the one interrupts will introduce, and it cannot
+be measured until IRQ5 and IRQ4 exist.
