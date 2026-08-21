@@ -279,6 +279,15 @@ def build_mra(setname, rompath, outdir):
     if info["manufacturer"]:
         ET.SubElement(root, "manufacturer").text = info["manufacturer"]
 
+    # Save Backup RAM: the 93C46 EEPROM, 64 words of 16 bits.
+    #
+    # The board's only non-volatile storage — settings, high scores and
+    # whatever the game calibrates on first boot. Index 2 is the arcade
+    # convention, and without this element the HPS keeps no file, the core
+    # finds a blank part every time, and the game spends about four seconds
+    # reformatting it before it will start.
+    ET.SubElement(root, "nvram", index="2", size="128")
+
     rom = ET.SubElement(root, "rom", index="0", zip=f"{zname}.zip", md5="none")
     cursor = 0
     for region, base, size in SDRAM_MAP:

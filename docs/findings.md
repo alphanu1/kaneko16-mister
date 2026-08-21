@@ -2582,3 +2582,104 @@ Reading `eepromser.cpp` settled in minutes what several rounds of hypothesis
 had not. The oracle's source is as available as its behaviour, and cheaper.
 
 Final: **20,910 checked reads, zero mismatches.**
+
+## Save Backup RAM, and two framework assumptions that were wrong
+
+*Instrument: MiSTer's own source — `support/arcade/mra_loader.cpp` and
+`menu.cpp`, sparse-checked-out under `third_party/main_mister`.*
+
+The 93C46 is the only non-volatile thing on this board: settings, high scores
+and whatever the game calibrates on first boot. Without persistence it starts
+blank every time and the game spends about four seconds reformatting it.
+
+MRA gets `<nvram index="2" size="128"/>` — 64 words of 16 bits, index 2 being
+the arcade convention. The framework then does both halves itself:
+
+```c
+arcade_nvm_load()  user_io_set_index(nvram_idx); user_io_set_download(1); ...
+arcade_nvm_save()  user_io_set_index(nvram_idx); user_io_set_upload(1);   ...
+```
+
+so the core's side is `ioctl_download && ioctl_index == 2` to load and
+`ioctl_upload` -> `ioctl_din` to save.
+
+### The core has to ASK to be saved
+
+`menu.cpp:2264`:
+
+```c
+if (is_arcade() && spi_uio_cmd(UIO_CHK_UPLOAD)) { arcade_nvm_save(); }
+```
+
+`UIO_CHK_UPLOAD` is command 0x3C, which `hps_io` answers from
+`ioctl_upload_req`. So "Autosave flushes when you open the OSD" is the
+framework asking the core whether it has anything to save — **a core that never
+says yes never autosaves, however correctly it implements the upload.**
+
+The first attempt here added `"R[13],Save Backup RAM;"` to the CONF_STR and
+expected the player to select it. Wrong mechanism. The EEPROM now raises a
+`dirty` flag on any write, erase or erase-all, and that drives
+`ioctl_upload_req`. It is held rather than pulsed and cleared when the upload
+completes, so a write landing during a save still produces a fresh edge.
+
+### Reset is the other way round
+
+There is no framework-provided reset for the core menu. `R` is a CONF_STR
+option type — `menu.cpp:2126`, "check for 'T'oggle and 'R'eset (toggle and then
+close menu)" — and the framework appends only `STD_EXIT`. Reset appears at the
+bottom of most cores' OSD by convention, because they declare `"R0,Reset;"`
+last.
+
+So: **saves need no menu entry and reset needs one.** Both assumptions were
+made the wrong way round before reading the source.
+
+### Contents come from power-up or the loader, never from reset
+
+Two hazards, neither of which bites today and both of which are the wrong shape
+for a non-volatile part:
+
+- The array was cleared in the reset branch. With `rst` tied to power-on that is
+  harmless, but it is one wiring change from erasing the player's saves — and
+  splitting `rst_por` from `rst_sys` was done precisely so a core reset could
+  not. A reset loop over all 64 words also prevents RAM inference outright.
+- The backup write port sat inside the reset gate. The HPS sends the save file
+  the moment it parses `<nvram>`, which is *before* the ROM stream and can be
+  before the core leaves reset; a load dropped there would look exactly like a
+  save that never persisted.
+
+The array now initialises to all ones at power-up — what an unprogrammed part
+reads — and the backup port is outside the reset gate. Load order is safe
+either way: `<nvram>` is parsed before `<rom>`, and the CPU is held in reset
+until `rom_loaded`, so the EEPROM is populated before the game ever reads it.
+
+## Block RAM inference, the second time
+
+*Instrument: `quartus_map` alone — two minutes against the full flow's eighteen.*
+
+Splitting the VIEW2 windows so the video side can read a tile entry and a scroll
+word in the same cycle produced:
+
+```
+Error (170011): Design contains 137160 blocks of type combinational node.
+                However, the device contains only 83820 blocks.
+```
+
+The same failure as the bit-slice writes earlier in the project, with the same
+misleading shape — a design that looks far too big when it is one inference that
+did not happen. Two causes:
+
+- **Arrays of arrays.** `logic [7:0] ta_hi [0:1][0:1][0:1023]`, indexed three
+  deep. Quartus wants one plain one-dimensional array per memory; declaring
+  them inside the generate gives that naturally.
+- **A read inside a mux.** The CPU read-back did
+  `qch <= is_v1 ? tc_hi[...] : is_v0 ? ... ;`, which makes the address and
+  enable conditional and leaves no simple-dual-port to infer. Reading each array
+  unconditionally into its own register and muxing the *registered outputs*
+  costs a 4:1 mux of 16 bits and gets the memory back.
+
+Three things now known to block inference, all of which look like tidy RTL:
+bit-slice writes, conditional reads, and a reset that clears every location.
+
+Checking with `quartus_map` alone is the cheap move: it reports
+`Info (276029): Inferred altsyncram megafunction ...` per array, so the question
+is answered in two minutes rather than after an eighteen-minute fit fails.

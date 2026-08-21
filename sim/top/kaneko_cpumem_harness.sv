@@ -279,7 +279,10 @@ module kaneko_cpumem_harness #(
     kaneko_eeprom93c46 u_eeprom (
         .clk(clk), .rst(cpu_rst),
         .cs(|ym1_iob_out), .sk(eeprom_ctl[0]), .di(eeprom_ctl[1]),
-        .do_out(eeprom_do), .dbg_state(), .dbg_busy(), .dbg_wen(), .dbg_cmd(), .dbg_cmd_valid()
+        .do_out(eeprom_do),
+        .bk_addr(6'd0), .bk_din(16'd0), .bk_we(1'b0), .bk_q(),
+        .dirty(), .dirty_clr(1'b0),
+        .dbg_state(), .dbg_busy(), .dbg_wen(), .dbg_cmd(), .dbg_cmd_valid()
     );
 
     wire [15:0] q_vram0, q_vram1, q_spr, q_pal;
@@ -323,8 +326,14 @@ module kaneko_cpumem_harness #(
         .we_spr(spr_we), .we_pal(pal_we),
         .uds(~UDSn), .lds(~LDSn),
         .q_vram0(q_vram0), .q_vram1(q_vram1), .q_spr(q_spr), .q_pal(q_pal),
-        .v0_addr(13'd0), .v0_q(),
-        .v1_addr(13'd0), .v1_q(),
+        .c0_t0_addr(10'd0), .c0_t0_q(),
+        .c0_t1_addr(10'd0), .c0_t1_q(),
+        .c0_s0_addr(11'd0), .c0_s0_q(),
+        .c0_s1_addr(11'd0), .c0_s1_q(),
+        .c1_t0_addr(10'd0), .c1_t0_q(),
+        .c1_t1_addr(10'd0), .c1_t1_q(),
+        .c1_s0_addr(11'd0), .c1_s0_q(),
+        .c1_s1_addr(11'd0), .c1_s1_q(),
         .spr_addr(12'd0), .spr_q(),
         .pal_addr(11'd0), .pal_q()
     );

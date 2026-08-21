@@ -74,6 +74,7 @@ void eral()  { cs(1); shift_bit(1); send(0b00, 2); send(0b100000, 6); cs(0); }
 
 void reset() {
     dut->rst = 1; dut->cs = 0; dut->sk = 0; dut->di = 0;
+    dut->bk_we = 0; dut->bk_addr = 0; dut->bk_din = 0; dut->dirty_clr = 0;
     for (int i = 0; i < 4; i++) tick();
     dut->rst = 0; settle();
 }

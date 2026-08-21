@@ -20,6 +20,7 @@
   // "openEditors" mode would re-activate the repo the moment those files are
   // opened.
   "git.ignoredRepositories": [
+    "third_party/main_mister",
     "third_party/mame",
     "third_party/template",
     "third_party/fx68k",

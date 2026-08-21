@@ -60,6 +60,9 @@ localparam CONF_STR = {
 	"O[8],Aspect ratio,4:3,16:9;",
 	"O[5:4],SDRAM capture,CL+1,CL+0,CL+2,CL+3;",
 	"O[10:9],Show,Tiles chip0,Tiles chip1,Sprites,Palette+CPU;",
+	"O[11],Debug overlay,Off,On;",
+	"-;",
+	"R[12],Reset;",
 	"-;",
 	"V,v",`BUILD_DATE
 };
@@ -87,7 +90,69 @@ reg [2:0] ce_div;
 always @(posedge clk_sys) ce_div <= ce_div + 3'd1;
 wire ce_pix = (ce_div == 3'd0);
 
-wire rst_sys = ~pll_locked;
+// POWER-ON RESET AND CORE RESET ARE NOT THE SAME THING
+//
+// rst_por is the PLL coming up. rst_sys adds the user's reset — the OSD entry,
+// the physical button, and the HPS RESET line — and is what the CPU, the video
+// timing and the rest of the logic use.
+//
+// The EEPROM takes rst_por ONLY. It is a non-volatile part: resetting the board
+// does not erase it, and a core reset that wiped the game's settings and high
+// scores would be wrong in a way that looks like the EEPROM not working at all.
+// ------------------------------------------------------ save backup RAM
+//
+// The 93C46 holds the game's settings, high scores and whatever it calibrates
+// on first boot. It is non-volatile on the board, so it has to be non-volatile
+// here too — otherwise the game finds a blank part every time and spends about
+// four seconds reformatting it before it will start.
+//
+// Index 2 is the arcade convention; the MRA declares
+// `<nvram index="2" size="128"/>` and the HPS keeps a 128-byte file for it,
+// which is 64 words of 16 bits.
+localparam [7:0] NVRAM_INDEX = 8'd2;
+
+wire        ioctl_upload;
+wire [15:0] ioctl_din;
+wire        nv_sel = (ioctl_index[7:0] == NVRAM_INDEX);
+
+// WIDE=1, so ioctl_addr counts bytes and advances by two per word.
+wire [5:0]  bk_addr = ioctl_addr[6:1];
+wire [15:0] bk_din  = ioctl_dout;
+wire        bk_we   = ioctl_download && ioctl_wr && nv_sel;
+wire [15:0] bk_q;
+
+// Driven only during an upload; hps_io ignores it otherwise, and gating it
+// keeps the EEPROM's read port out of the picture the rest of the time.
+assign ioctl_din = ioctl_upload ? bk_q : 16'd0;
+
+// THE FRAMEWORK ASKS; THE CORE ONLY HAS TO SAY YES
+//
+// There is no menu entry to add. For arcade cores MiSTer checks
+// UIO_CHK_UPLOAD each time the OSD is opened (menu.cpp MENU_SAVE_CHECK) and
+// writes the file if the core says it has something — that is what "Autosave
+// flushes when you open the OSD" actually is. hps_io answers that check from
+// ioctl_upload_req, so all the core does is raise it when the EEPROM changes.
+//
+// Held rather than pulsed, and cleared when the upload finishes: hps_io latches
+// the rising edge, so a write that happens while a save is already in flight
+// still produces a fresh edge afterwards and is not lost.
+wire bk_dirty;
+reg  bk_save_req;
+reg  upload_d;
+always @(posedge clk_sys) begin
+	upload_d <= ioctl_upload;
+	if (rst_por)                        bk_save_req <= 1'b0;
+	else if (bk_dirty)                  bk_save_req <= 1'b1;
+	else if (upload_d && !ioctl_upload) bk_save_req <= 1'b0;   // save taken
+end
+
+// Clear the EEPROM's flag once the request is registered, so the next write
+// sets it again.
+wire bk_dirty_clr = bk_save_req;
+
+wire [1:0] buttons;
+wire rst_por = ~pll_locked;
+wire rst_sys = rst_por | RESET | status[12] | buttons[1];
 
 // ------------------------------------------------------------------ HPS
 wire [63:0] status;
@@ -116,9 +181,18 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 	.ioctl_dout(ioctl_dout),
 	.ioctl_wait(ioctl_wait),
 
+	// Save Backup RAM. The EEPROM is the only non-volatile thing on this
+	// board, and index 2 is the arcade convention the MRA's <nvram> element
+	// names. hps_io asks the HPS to read the data back when upload_req pulses.
+	.ioctl_upload(ioctl_upload),
+	.ioctl_upload_req(bk_save_req),
+	.ioctl_upload_index(8'd2),
+	.ioctl_din(ioctl_din),
+
 	.joystick_0(joystick_0),
 	.joystick_1(joystick_1),
-	.status(status)
+	.status(status),
+	.buttons(buttons)
 );
 
 // ------------------------------------------------------------------ SDRAM
@@ -284,8 +358,14 @@ kaneko_vmem u_vmem
 	.we_spr(spr_we), .we_pal(pal_we),
 	.uds(~UDSn), .lds(~LDSn),
 	.q_vram0(q_vram0), .q_vram1(q_vram1), .q_spr(q_spr), .q_pal(q_pal),
-	.v0_addr(13'd0), .v0_q(),
-	.v1_addr(13'd0), .v1_q(),
+	.c0_t0_addr(10'd0), .c0_t0_q(),
+	.c0_t1_addr(10'd0), .c0_t1_q(),
+	.c0_s0_addr(11'd0), .c0_s0_q(),
+	.c0_s1_addr(11'd0), .c0_s1_q(),
+	.c1_t0_addr(10'd0), .c1_t0_q(),
+	.c1_t1_addr(10'd0), .c1_t1_q(),
+	.c1_s0_addr(11'd0), .c1_s0_q(),
+	.c1_s1_addr(11'd0), .c1_s1_q(),
 	.spr_addr(12'd0), .spr_q(),
 	.pal_addr(pal_rd_addr), .pal_q(pal_rd_q)
 );
@@ -344,11 +424,14 @@ end
 wire eeprom_do;
 kaneko_eeprom93c46 u_eeprom
 (
-	.clk(clk_sys), .rst(cpu_rst),
+	.clk(clk_sys), .rst(rst_por),
 	// MAME passes the whole port B byte to cs_write(), so any bit asserts it.
 	.cs(|ym1_iob_out),
 	.sk(eeprom_ctl[0]), .di(eeprom_ctl[1]),
-	.do_out(eeprom_do), .dbg_state(), .dbg_busy(), .dbg_wen(), .dbg_cmd(), .dbg_cmd_valid()
+	.do_out(eeprom_do),
+	.bk_addr(bk_addr), .bk_din(bk_din), .bk_we(bk_we), .bk_q(bk_q),
+	.dirty(bk_dirty), .dirty_clr(bk_dirty_clr),
+	.dbg_state(), .dbg_busy(), .dbg_wen(), .dbg_cmd(), .dbg_cmd_valid()
 );
 
 // VIEW2 and VU-002 register banks. These decoded but stored nothing until now:
@@ -483,7 +566,12 @@ wire [2:0] irq_bit = 3'(IRQ_BITS - 1) - 3'(screen_x[5:3]);
 wire       irq_set = irq_cnt_lat[irq_bit];
 
 // One column of every block left dark, so adjacent set bits stay countable.
-wire in_dbg   = (in_alive_row || in_irq_row) && (screen_x[2:0] != 3'd7);
+//
+// Off by default. The readouts are how the CPU and the interrupts were
+// diagnosed and they stay in the build for the next time something stops, but
+// they sit on top of the picture, so the picture wins unless asked otherwise.
+wire dbg_on   = status[11];
+wire in_dbg   = dbg_on && (in_alive_row || in_irq_row) && (screen_x[2:0] != 3'd7);
 wire dbg_set  = in_alive_row ? alive_set : irq_set;
 
 wire show_pal = (status[10:9] == 2'd3);

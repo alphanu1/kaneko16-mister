@@ -54,6 +54,29 @@ module kaneko_eeprom93c46 #(
     input  wire        di,           // data in
     output logic       do_out,       // data out
 
+    // Backup RAM port, for MiSTer's Save Backup RAM.
+    //
+    // A 93C46 is non-volatile: settings, high scores and the calibration the
+    // game writes at first boot all live here, and they have to survive the
+    // core being unloaded or they are not saves at all. Without this the game
+    // finds a blank part every time and spends about four seconds reformatting
+    // it before it will start.
+    //
+    // Word-addressed, 64 words, so the file is 128 bytes — which is what
+    // `<nvram index="2" size="128"/>` in the MRA asks the HPS to keep.
+    input  wire [5:0]  bk_addr,
+    input  wire [15:0] bk_din,
+    input  wire        bk_we,
+    output logic [15:0] bk_q,
+
+    // High once the game has changed the contents, until the save is taken.
+    // MiSTer's framework asks the core whether it has anything to save each
+    // time the OSD is opened (menu.cpp MENU_SAVE_CHECK -> UIO_CHK_UPLOAD), and
+    // writes the file if the answer is yes. A core that never says yes never
+    // autosaves, however well it implements the upload itself.
+    output logic       dirty,
+    input  wire        dirty_clr,
+
     // Telemetry for the replay testbench. Unused in the core.
     output logic [2:0] dbg_state,
     output logic [19:0] dbg_busy,
@@ -75,7 +98,21 @@ module kaneko_eeprom93c46 #(
     always_ff @(posedge clk) sk_d <= sk;
     wire sk_rise = sk && !sk_d;
 
+    // CONTENTS COME FROM POWER-UP OR THE LOADER, NEVER FROM RESET
+    //
+    // A 93C46 is non-volatile. Clearing the array in the reset branch made the
+    // contents depend on a reset that must not affect them: with rst tied to
+    // power-on it happens to be harmless, but it is one wiring change away
+    // from erasing the player's saves, and the whole point of splitting
+    // rst_por from rst_sys was to stop that.
+    //
+    // An unprogrammed part reads as all ones, so that is the power-up state.
+    // Quartus turns this into the memory's initialisation file; a reset loop
+    // over all 64 words would also have prevented RAM inference outright.
     logic [15:0] mem [0:63];
+    initial begin
+        for (int k = 0; k < 64; k = k + 1) mem[k] = 16'hffff;
+    end
 
     // S_WAIT_DONE is eepromser.cpp's STATE_WAIT_FOR_COMPLETION. Every command
     // except READ ends there, and it is left only by CS falling. It matters
@@ -110,16 +147,26 @@ module kaneko_eeprom93c46 #(
         else                       do_out = sr[31];
     end
 
+    // Backup port, OUTSIDE the reset gate on purpose. The HPS sends the save
+    // file the moment it parses <nvram> in the MRA, which is before the ROM
+    // stream and can be before the core leaves reset; a load dropped there
+    // would look exactly like a save that never persisted.
+    always_ff @(posedge clk) begin
+        if (bk_we) mem[bk_addr] <= bk_din;
+        bk_q <= mem[bk_addr];
+    end
+
     integer i;
     always_ff @(posedge clk) begin
         dbg_cmd_valid <= 1'b0;
         if (rst) begin
+            dirty <= 1'b0;
             state <= S_RESET; cmd <= 8'd0; sr <= 32'hffff_ffff;
             bits <= 5'd0; addr <= 6'd0; rcnt <= 10'd0;
             wen <= 1'b0; busy <= '0;
-            for (i = 0; i < 64; i = i + 1) mem[i] <= 16'hffff;
         end else begin
             if (busy != '0) busy <= busy - 1'b1;
+            if (dirty_clr) dirty <= 1'b0;
 
             if (!cs) begin
                 state <= S_RESET;
@@ -214,6 +261,7 @@ module kaneko_eeprom93c46 #(
                                         mem[i] <= {sr[14:0], di};
                                     busy <= BUSY_W'(T_ALL);
                                 end
+                                dirty <= 1'b1;
                                 state <= S_WAIT_DONE;
                             end else begin
                                 // A write attempted while locked does not wait

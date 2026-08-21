@@ -30,6 +30,7 @@ int main(int argc, char** argv) {
 
     dut = new Vkaneko_eeprom93c46;
     dut->rst = 1; dut->cs = 0; dut->sk = 0; dut->di = 0;
+    dut->bk_we = 0; dut->bk_addr = 0; dut->bk_din = 0; dut->dirty_clr = 0;
     for (int i = 0; i < 4; i++) tick();
     dut->rst = 0; settle();
 
