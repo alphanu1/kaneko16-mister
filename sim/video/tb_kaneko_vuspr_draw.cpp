@@ -24,8 +24,14 @@
 
 namespace {
 
-constexpr int BMP_LOG2 = 9;
-constexpr int BMP_W = 1 << BMP_LOG2;
+// MUST MATCH the DUT's parameters. The bitmap is no longer square: 512x512
+// was 4.19 Mbit of pixels on a part with 5.66 Mbit of block RAM in total, and
+// it has to be double-buffered. 256x256 is this board's screen (MAME's
+// set_size for bakubrkr and mgcrystl).
+constexpr int BMP_W_LOG2 = 8;
+constexpr int BMP_H_LOG2 = 8;
+constexpr int BMP_W = 1 << BMP_W_LOG2;
+constexpr int BMP_H = 1 << BMP_H_LOG2;
 
 Vkaneko_vuspr_draw* dut;
 
@@ -53,8 +59,8 @@ uint64_t pack(const Spr& s)
 void reference(const std::vector<Spr>& spr, std::vector<uint16_t>& out,
                int x0, int x1, int y0, int y1)
 {
-    out.assign((size_t)BMP_W * BMP_W, 0);
-    std::vector<uint8_t> m((size_t)BMP_W * BMP_W, 0);
+    out.assign((size_t)BMP_W * BMP_H, 0);
+    std::vector<uint8_t> m((size_t)BMP_W * BMP_H, 0);
     const size_t elements = rom.size() / 128;
     for (int i = (int)spr.size() - 1; i >= 0; i--) {      // last to first
         const Spr& s = spr[i];
@@ -71,7 +77,7 @@ void reference(const std::vector<Spr>& spr, std::vector<uint16_t>& out,
                 const uint8_t byte = rom[a % rom.size()];
                 const uint8_t c = (px & 1) ? (byte & 0xf) : (byte >> 4);  // MSB order
                 if (c == 0) continue;
-                const size_t o = (size_t)(py_ & (BMP_W - 1)) * BMP_W + (px_ & (BMP_W - 1));
+                const size_t o = (size_t)(py_ & (BMP_H - 1)) * BMP_W + (px_ & (BMP_W - 1));
                 if (!m[o]) out[o] = (uint16_t)(((s.prio & 3) << 14) | ((s.colour & 0x3f) << 4) | c);
                 m[o] = 1;
             }
@@ -105,15 +111,15 @@ void tick()
         bmp[dut->bmp_addr % bmp.size()] = dut->bmp_data; n_bmp_we++;
         if (getenv("TRACE") && n_bmp_we <= 6)
             printf("    bmp_we  addr=%05x (x=%d,y=%d) data=%04x\n",
-                   (unsigned)dut->bmp_addr, (int)(dut->bmp_addr & 511),
-                   (int)(dut->bmp_addr >> 9), (unsigned)dut->bmp_data);
+                   (unsigned)dut->bmp_addr, (int)(dut->bmp_addr & (BMP_W - 1)),
+                   (int)(dut->bmp_addr >> BMP_W_LOG2), (unsigned)dut->bmp_data);
     }
     if (dut->mask_we) {
         mask[dut->mask_waddr % mask.size()] = 1; n_mask_we++;
         if (getenv("TRACE") && n_mask_we <= 6)
             printf("    mask_we addr=%05x (x=%d,y=%d)  mask_q was %d, raddr=%05x\n",
-                   (unsigned)dut->mask_waddr, (int)(dut->mask_waddr & 511),
-                   (int)(dut->mask_waddr >> 9), (int)dut->mask_q,
+                   (unsigned)dut->mask_waddr, (int)(dut->mask_waddr & (BMP_W - 1)),
+                   (int)(dut->mask_waddr >> BMP_W_LOG2), (int)dut->mask_q,
                    (unsigned)dut->mask_raddr);
     }
 }
@@ -155,8 +161,8 @@ int main(int argc, char** argv)
         table_mem.assign(1024, 0);
         for (int i = 0; i < n; i++) table_mem[i] = pack(spr[i]);
 
-        bmp.assign((size_t)BMP_W * BMP_W, 0);
-        mask.assign((size_t)BMP_W * BMP_W, 0);
+        bmp.assign((size_t)BMP_W * BMP_H, 0);
+        mask.assign((size_t)BMP_W * BMP_H, 0);
 
         dut->rst = 1; dut->start = 0;
         dut->clip_x0 = x0; dut->clip_x1 = x1;

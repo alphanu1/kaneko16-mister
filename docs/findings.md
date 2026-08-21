@@ -1471,13 +1471,18 @@ against already-verified logic, suspect the harness.
 per-line renderer.
 
 ```
-kaneko_vuspr_draw: checks=2097152 fails=0 passes=8/8
+kaneko_vuspr_draw: checks=524288 fails=0 passes=8/8
                    bmp_writes=184340 mask_writes=771885 (rejected=587545)
 ```
 
 499 cells. The reference is the C++ compositor inside the frame gate, which
 produces pixel-exact frames on three games — so this asks only whether the RTL
 reproduces it, ordering included.
+
+(`checks` was 2,097,152 until 2026-08-21, when the bitmap stopped being square:
+one `BMP_W_LOG2` for both axes meant 512x512, and the check count is one per
+pixel per pass. The write counts are unchanged, because they depend on the
+sprites drawn and not on the size of the surface they are drawn onto.)
 
 **The ordering is the substance of this module.** MAME parses first-to-last
 (the multisprite latches carry forward) but *draws* last-to-first with
