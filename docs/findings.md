@@ -3851,3 +3851,74 @@ still fits comfortably:
 
 Gate unchanged on all four games, and `kaneko_vuspr_draw`'s stall-equivalence
 still exact at 655,360 pixels compared.
+
+## The Blaze On board: what it actually needs, read from MAME
+
+Gathered while a build ran, so that resuming does not mean deriving it again.
+The Z80 subsystem is done; everything below is not.
+
+### It is a different PCB, not a different ROM
+
+The driver file carries **12 machine configs, 9 memory maps and 5 state
+classes**. A Neo Geo core runs any cartridge because every cartridge meets the
+same board; this chipset is a family, closer to System 16 or CPS1. The 68000 is
+the one part that does not change.
+
+|  | explbrkr | blazeon |
+|---|---|---|
+| VIEW2 tilemap chips | two | **one** |
+| sound | 2x YM2149 + OKI | **Z80 + YM2151** |
+| EEPROM | yes | **none** |
+| screen | 256x224 | **320x232** |
+| sprite records | 1024 | **512** |
+| sprite offsets | 0, 0 | **0xf980, 0** |
+| sprite priorities | {8,8,8,8} | **{1,2,8,8}** |
+| VIEW2 offset | 0x5b, -0x8 | **0x33, 0x8** |
+| work RAM | 0x100000 | 0x300000 |
+| palette | 0x700000 | 0x500000 |
+
+### The memory map falls out of the page scheme
+
+```
+  work RAM   page 0x30      palette    page 0x50
+  VIEW2 0    page 0x60      sprite RAM page 0x70, 4 KB (512 records)
+  inputs     page 0xc0      sound latch 0xe00000, even byte
+  second VU-002 regs at 0x980000 are plain RAM in MAME — the known gap
+  no EEPROM, no watchdog, no YM2149, no OKI
+```
+
+Only the sound latch needs a new decode. The rest is table entries.
+
+### The inputs do NOT just move
+
+This is the part that is more than a page. On Explosive Breaker start and coin
+are in SYSTEM; on Blaze On they are in the **P1 and P2 words**:
+
+```
+  DSW2_P1  c00000   low byte  difficulty, lives, demo sounds, service DIPs
+                    b8-13     P1 up/down/left/right/B1/B2
+                    b14 START1   b15 COIN1
+  DSW1_P2  c00002   low byte  Coin_A, Coin_B DIPs
+                    b8-13     P2 controls
+                    b14 START2   b15 COIN2
+  UNK      c00004   unused
+  SYSTEM   c00006   b13 service   b14 tilt   b15 service coin
+```
+
+And Blaze On has **real DIP switches** — difficulty, lives, demo sounds,
+coinage — where Explosive Breaker configures everything in its test mode. So
+the OSD needs a DIP menu for this board, and the input word assembly is
+per-game rather than one layout at a movable address.
+
+### Still to do
+
+1. Video timing for 320x232, and the tile line buffer from 256 to 320
+2. Game-table entries: pages, one VIEW2, 512 records, offsets, priorities, dx/dy
+3. Sound latch decode at 0xe00000
+4. Z80 ROM source — 48 KB of the 128 KB region is mapped; in M10K that is about
+   40 blocks against 139 free, and the 320-wide surface has already taken some
+5. Per-game input assembly and a DIP menu
+6. Audio mixing: YM2151 stereo alongside the existing mono path
+
+Done already: the Z80 subsystem, the CPU ROM regions, the SDRAM map sized for
+all four games, and the 320-wide sprite surface.
