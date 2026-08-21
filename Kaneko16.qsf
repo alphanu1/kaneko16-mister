@@ -87,6 +87,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/kaneko_tmap_fetch.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/kaneko_vuspr.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/kaneko_vuspr_draw.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/kaneko_spr_sys.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/kaneko_sprrom.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/kaneko_mixer.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/kaneko_regs16.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/kaneko_tilerom.sv

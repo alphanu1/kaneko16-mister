@@ -41,14 +41,14 @@ module kaneko_sdram_harness #(
 
   // p0 V60 (read/write), p1 tile char, p2 polygon/TGP, p3 sound 68000,
   // p4 MultiPCM. See docs/00-decisions.md D8.
-  input  logic        p0_req, p1_req, p2_req, p3_req, p4_req, p5_req, p6_req,
+  input  logic        p0_req, p1_req, p2_req, p3_req, p4_req, p5_req, p6_req, p7_req,
   input  logic        p0_we,
   input  logic [COL_BITS+15:1] p0_addr, p1_addr, p2_addr, p3_addr, p4_addr,
-                               p5_addr, p6_addr,
+                               p5_addr, p6_addr, p7_addr,
   input  logic [15:0] p0_din,
   input  logic [1:0]  p0_be,
-  output logic [63:0] p0_dout, p1_dout, p2_dout, p3_dout, p4_dout, p5_dout, p6_dout,
-  output logic        p0_ack, p1_ack, p2_ack, p3_ack, p4_ack, p5_ack, p6_ack,
+  output logic [63:0] p0_dout, p1_dout, p2_dout, p3_dout, p4_dout, p5_dout, p6_dout, p7_dout,
+  output logic        p0_ack, p1_ack, p2_ack, p3_ack, p4_ack, p5_ack, p6_ack, p7_ack,
 
   // Device model observability
   output int unsigned violations,
@@ -66,7 +66,7 @@ module kaneko_sdram_harness #(
   output logic [23:0] mon_total
 );
 
-  localparam int unsigned NP    = 7;   // matches Kaneko16.sv NPORTS
+  localparam int unsigned NP    = 8;   // matches Kaneko16.sv NPORTS
   localparam int unsigned T_RCD = 2;
   localparam int unsigned T_RP  = 2;
   localparam int unsigned T_RC  = 7;
@@ -85,13 +85,13 @@ module kaneko_sdram_harness #(
   logic [NP-1:0][63:0] p_dout;
   logic [NP-1:0]       dbg_req, dbg_grant;
 
-  assign p_req  = {p6_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req};
+  assign p_req  = {p7_req, p6_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req};
   assign p_we   = {4'b0000, p0_we};
-  assign p_addr = {p6_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr};
+  assign p_addr = {p7_addr, p6_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr};
   assign p_din  = {64'd0, p0_din};
   assign p_be   = {8'd0, p0_be};
 
-  assign {p6_ack, p5_ack, p4_ack, p3_ack, p2_ack, p1_ack, p0_ack} = p_ack;
+  assign {p7_ack, p6_ack, p5_ack, p4_ack, p3_ack, p2_ack, p1_ack, p0_ack} = p_ack;
   assign p0_dout = p_dout[0];
   assign p1_dout = p_dout[1];
   assign p2_dout = p_dout[2];
@@ -99,6 +99,7 @@ module kaneko_sdram_harness #(
   assign p4_dout = p_dout[4];
   assign p5_dout = p_dout[5];
   assign p6_dout = p_dout[6];
+  assign p7_dout = p_dout[7];
 
   logic        cke, cs_n, ras_n, cas_n, we_n;
   logic [1:0]  ba, dqm;

@@ -216,7 +216,7 @@ localparam int unsigned SDR_AW  = 2 + 13 + SDR_COL;   // 25
 // elaborate. Five is also the configuration its testbench covers, so this build
 // runs the arrangement that is actually verified. Port 0 is the tile fetch;
 // 1..4 are tied idle and cost nothing but arbiter slots.
-localparam int unsigned NPORTS  = 7;
+localparam int unsigned NPORTS  = 8;
 
 wire              mem_ready;
 wire              ldr_wr_req, ldr_wr_ack;
@@ -232,8 +232,13 @@ wire              p2_req, p3_req, p4_req;   // tile feeder, one per layer
 wire [SDR_AW:1]   p2_addr, p3_addr, p4_addr;
 wire              p5_req;                   // OKI M6295 sample fetch
 wire [SDR_AW:1]   p5_addr;
-wire              p6_req;                   // VU-002 sprite ROM fetch
-wire [SDR_AW:1]   p6_addr;
+// Two ports for the sprite ROM, not one: a sprite row needs a block from each
+// half of its address space and they are fetched CONCURRENTLY. See the header
+// of kaneko_sprrom for the derivation of that pattern.
+wire [1:0]            p67_req;
+wire [1:0][SDR_AW:1]  p67_addr;
+wire [1:0]            p67_ack;
+wire [1:0][63:0]      p67_dout;
 wire [NPORTS-1:0]       p_ack_bus;
 wire [NPORTS-1:0][63:0] p_dout_bus;
 wire              p0_ack  = p_ack_bus[0];
@@ -248,8 +253,8 @@ wire              p4_ack  = p_ack_bus[4];
 wire [63:0]       p4_dout = p_dout_bus[4];
 wire              p5_ack  = p_ack_bus[5];
 wire [63:0]       p5_dout = p_dout_bus[5];
-wire              p6_ack  = p_ack_bus[6];
-wire [63:0]       p6_dout = p_dout_bus[6];
+assign p67_ack  = {p_ack_bus[7],  p_ack_bus[6]};
+assign p67_dout = {p_dout_bus[7], p_dout_bus[6]};
 
 wire sd_dq_oe;
 wire [15:0] sd_dq_o;
@@ -272,11 +277,11 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300)) u_sdram
 	.wr_req(ldr_wr_req), .wr_addr(ldr_wr_addr), .wr_din(ldr_wr_din),
 	.wr_be(ldr_wr_be), .wr_ack(ldr_wr_ack),
 
-	.p_req  ({p6_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}),
-	.p_addr ({p6_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
-	.p_din  ({7{16'd0}}),
-	.p_be   ({7{2'b11}}),
-	.p_we   (7'b0),
+	.p_req  ({p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}),
+	.p_addr ({p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
+	.p_din  ({8{16'd0}}),
+	.p_be   ({8{2'b11}}),
+	.p_we   (8'b0),
 	.p_ack  (p_ack_bus),
 	.p_dout (p_dout_bus)
 );
@@ -938,8 +943,8 @@ kaneko_spr_sys #(
 	.regs_flat(sprreg_flat),
 
 	.rom_base(SPR_BASE),
-	.sdr_req(p6_req), .sdr_addr(p6_addr),
-	.sdr_ack(p6_ack), .sdr_dout(p6_dout),
+	.sdr_req(p67_req), .sdr_addr(p67_addr),
+	.sdr_ack(p67_ack), .sdr_dout(p67_dout),
 
 	.rd_x(screen_x[7:0]), .rd_y(screen_y[7:0]),
 	.spr_pix(spr_pix), .spr_prio(spr_prio),

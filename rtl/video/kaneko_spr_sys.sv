@@ -107,10 +107,10 @@ module kaneko_spr_sys #(
 
     // Sprite ROM, through the same feeder the tile layers use.
     input  wire [SDR_AW:1]  rom_base,
-    output wire             sdr_req,
-    output wire [SDR_AW:1]  sdr_addr,
-    input  wire             sdr_ack,
-    input  wire [63:0]      sdr_dout,
+    output wire [1:0]            sdr_req,
+    output wire [1:0][SDR_AW:1]  sdr_addr,
+    input  wire [1:0]            sdr_ack,
+    input  wire [1:0][63:0]      sdr_dout,
 
     // Mixer read port. The pixel arrives ONE clock after the coordinates, in
     // step with kaneko_tmap_line's own registered line-buffer read.
@@ -195,18 +195,18 @@ module kaneko_spr_sys #(
     // ------------------------------------------------------- sprite ROM
     wire [23:0] dr_rom_addr;
     wire [7:0]  feed_data;
-    wire [0:0]  feed_ok;
+    wire        feed_ok;
     logic [7:0] dr_rom_data;
 
-    // LINES(2): a sprite row alternates between two blocks and revisits the
-    // first on the next row, so one entry misses sixteen times per sprite
-    // where two miss eight. See the header of kaneko_tilerom.
-    kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW), .LINES(2)) u_sprrom (
+    // Two SDRAM ports, one per half of the block sequence, so the pair a row
+    // needs is fetched concurrently rather than one after the other. See the
+    // header of kaneko_sprrom for the derivation.
+    kaneko_sprrom #(.SDR_AW(SDR_AW)) u_sprrom (
         .clk(clk), .rst(rst),
         .req_addr(dr_rom_addr),
         .base_addr(rom_base),
         .req_data(feed_data),
-        .port_ready(feed_ok),
+        .ready(feed_ok),
         .sdr_req(sdr_req), .sdr_addr(sdr_addr),
         .sdr_ack(sdr_ack), .sdr_dout(sdr_dout)
     );
@@ -214,7 +214,7 @@ module kaneko_spr_sys #(
     // The renderer wants the byte one clock after the address; the feeder
     // presents it in the same clock, and only when it hits. Registering it on
     // the hit gives both: valid data, one clock late.
-    wire dr_ce = feed_ok[0];
+    wire dr_ce = feed_ok;
     always_ff @(posedge clk) if (dr_ce) dr_rom_data <= feed_data;
 
     // ----------------------------------------------------------- renderer

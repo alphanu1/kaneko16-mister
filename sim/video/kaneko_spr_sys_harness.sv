@@ -89,27 +89,36 @@ module kaneko_spr_sys_harness #(
     // -------------------------------------------------------- SDRAM model
     // Answers LATENCY clocks after a request with eight bytes derived from the
     // word address, so the testbench can predict every byte the renderer sees.
-    wire            sdr_req;
-    wire [SDR_AW:1] sdr_addr;
-    logic           sdr_ack;
-    logic [63:0]    sdr_dout;
-    logic [7:0]     cnt;
+    // One model per sprite port. They answer INDEPENDENTLY, which is the whole
+    // point of there being two: the pair a sprite row needs is in flight at
+    // the same time rather than one after the other.
+    wire [1:0]            sdr_req;
+    wire [1:0][SDR_AW:1]  sdr_addr;
+    logic [1:0]           sdr_ack;
+    logic [1:0][63:0]     sdr_dout;
 
-    always_ff @(posedge clk) begin
-        if (rst) begin
-            cnt <= 8'd0; sdr_ack <= 1'b0;
-        end else begin
-            sdr_ack <= 1'b0;
-            if (sdr_req && !sdr_ack) begin
-                if (cnt == LATENCY[7:0]) begin
-                    for (int k = 0; k < 8; k++)
-                        sdr_dout[8*k +: 8] <= 8'((32'(sdr_addr) << 1) + k);
-                    sdr_ack <= 1'b1;
-                    cnt     <= 8'd0;
-                end else cnt <= cnt + 8'd1;
-            end else cnt <= 8'd0;
+    genvar m;
+    generate
+        for (m = 0; m < 2; m = m + 1) begin : g_mem
+            logic [7:0] cnt;
+            always_ff @(posedge clk) begin
+                if (rst) begin
+                    cnt <= 8'd0; sdr_ack[m] <= 1'b0;
+                end else begin
+                    sdr_ack[m] <= 1'b0;
+                    if (sdr_req[m] && !sdr_ack[m]) begin
+                        if (cnt == LATENCY[7:0]) begin
+                            for (int k = 0; k < 8; k++)
+                                sdr_dout[m][8*k +: 8] <=
+                                    8'((32'(sdr_addr[m]) << 1) + k);
+                            sdr_ack[m] <= 1'b1;
+                            cnt        <= 8'd0;
+                        end else cnt <= cnt + 8'd1;
+                    end else cnt <= 8'd0;
+                end
+            end
         end
-    end
+    endgenerate
 
     kaneko_spr_sys #(
         .BMP_W_LOG2(BMP_W_LOG2), .BMP_H_LOG2(BMP_H_LOG2),

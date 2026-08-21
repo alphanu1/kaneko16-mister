@@ -39,7 +39,7 @@
 // tested five, so the OKI's port was the one port never arbitrated in a test —
 // and it was also the one port blen() forgot, which is how a single-word burst
 // reached hardware and made the sound path silent.
-static const int NP = 7;
+static const int NP = 8;
 
 // Burst length per port. This mirrored a per-port blen() in kaneko_sdram.sv and
 // got it wrong twice — once claiming ports 1 and 2 burst four where the RTL said
@@ -77,10 +77,10 @@ struct Harness {
     d = new Vkaneko_sdram_harness;
     d->clk = 0; d->rst_n = 0;
     d->wr_req = 0; d->wr_addr = 0; d->wr_din = 0; d->wr_be = 3;
-    d->p0_req = d->p1_req = d->p2_req = d->p3_req = d->p4_req = d->p5_req = d->p6_req = 0;
+    d->p0_req = d->p1_req = d->p2_req = d->p3_req = d->p4_req = d->p5_req = d->p6_req = d->p7_req = 0;
     d->p0_we = 0; d->p0_din = 0; d->p0_be = 3;
     d->p0_addr = d->p1_addr = d->p2_addr = d->p3_addr = d->p4_addr =
-        d->p5_addr = d->p6_addr = 0;
+        d->p5_addr = d->p6_addr = d->p7_addr = 0;
     d->mon_sel = 0; d->mon_snap = 0;
     d->eval();
   }
@@ -101,7 +101,7 @@ struct Harness {
       case 0: d->p0_req = v; break; case 1: d->p1_req = v; break;
       case 2: d->p2_req = v; break; case 3: d->p3_req = v; break;
       case 4: d->p4_req = v; break; case 5: d->p5_req = v; break;
-      case 6: d->p6_req = v; break;
+      case 6: d->p6_req = v; break; case 7: d->p7_req = v; break;
       default: abortPort(p);
     }
   }
@@ -110,7 +110,7 @@ struct Harness {
       case 0: d->p0_addr = a; break; case 1: d->p1_addr = a; break;
       case 2: d->p2_addr = a; break; case 3: d->p3_addr = a; break;
       case 4: d->p4_addr = a; break; case 5: d->p5_addr = a; break;
-      case 6: d->p6_addr = a; break;
+      case 6: d->p6_addr = a; break; case 7: d->p7_addr = a; break;
       default: abortPort(p);
     }
   }
@@ -119,7 +119,7 @@ struct Harness {
       case 0: return d->p0_ack; case 1: return d->p1_ack;
       case 2: return d->p2_ack; case 3: return d->p3_ack;
       case 4: return d->p4_ack; case 5: return d->p5_ack;
-      case 6: return d->p6_ack;
+      case 6: return d->p6_ack; case 7: return d->p7_ack;
       default: abortPort(p); return false;
     }
   }
@@ -128,7 +128,7 @@ struct Harness {
       case 0: return d->p0_dout; case 1: return d->p1_dout;
       case 2: return d->p2_dout; case 3: return d->p3_dout;
       case 4: return d->p4_dout; case 5: return d->p5_dout;
-      case 6: return d->p6_dout;
+      case 6: return d->p6_dout; case 7: return d->p7_dout;
       default: abortPort(p); return 0;
     }
   }

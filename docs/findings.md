@@ -3723,3 +3723,46 @@ Reducing it further means not waiting for each fetch rather than making fewer:
 
 Pipelining first, on the same reasoning as last time: it is the cheaper of the
 two and it addresses the term that actually dominates.
+
+### Sprite ROM: two ports, and the pattern that says why
+
+Enumerating all 256 pixels of a sprite in the order the renderer draws them
+gives the block sequence outright, rather than by argument:
+
+```
+0 4 0 4  1 5 1 5  2 6 2 6  3 7 3 7  8 12 8 12  9 13 9 13  ...
+   16 distinct blocks, 32 visits
+```
+
+Two facts fall out, and both are structural rather than statistical:
+
+1. **Bit 2 of the block index — address bit 5, "is x past 8" — splits the
+   sixteen blocks into two halves that never mix.** So an entry per half needs
+   no replacement policy at all: an address selects its entry. The two-entry
+   cache added earlier was really this, discovered from its effect rather than
+   its cause.
+
+2. **Each row pair uses one block from each half, alternating.** Held in two
+   entries the alternation is free, and the cost is the two fetches at the
+   start of each pair — which a single port makes serial.
+
+A port per half makes them concurrent, and it also prefetches without
+predicting anything: while the renderer draws from the first half, the second
+half's entry is already fetching the block it will want, because that block's
+address is a function of the address already presented.
+
+```
+ 1024 records, 0% off screen   1,039,364 -> 673,204 -> 501,340
+               50%               536,394 -> 359,444 -> 276,620
+               90%               154,896 -> 122,010 -> 106,575
+                                                   (budget 811,008)
+```
+
+The worst case the hardware can present now uses 62% of a frame where it
+started at 128%. Half the remaining time is the mask clear, which is a fixed
+65,536 clocks and the next thing worth attacking if this is ever short again.
+
+`kaneko_tilerom`'s `LINES` parameter is left at its default of 1 and the tile
+path is untouched — 39,221 bursts and 315,881 stall cycles, unchanged. Tiles
+walk seventeen different tiles per scanline and revisit none, so neither the
+second entry nor a second port would buy anything there.

@@ -62,7 +62,7 @@ module kaneko_romload_harness #(
   output int unsigned writes_served
 );
 
-  localparam int unsigned NP = 7;   // must match Kaneko16.sv NPORTS
+  localparam int unsigned NP = 8;   // must match Kaneko16.sv NPORTS
 
   logic        ldr_wr_req, ldr_wr_ack;
   logic [SDR_AW:1] ldr_wr_addr;
