@@ -3139,3 +3139,46 @@ cycles per frame) dropping as the object appears would be.
 Do not fix this by guessing. Two tearing diagnoses have already been shipped on
 this core that were each plausible, each fixed something real, and neither was
 the symptom.
+
+### The A/B refuted the frame-pacing explanation
+
+When the sound fix also appeared to fix the uneven frame pacing, the obvious
+story was that a device reading garbage becomes a bandwidth parasite: jt6295
+working from a corrupted sample header would stream from arbitrary addresses,
+miss the eight-byte cache constantly, and hammer the SDRAM every tile layer and
+the 68000 share.
+
+That story is wrong. Two 600M-tick boots of the real ROM, identical but for the
+burst length on port 5 — the bug reintroduced in a scratch copy of
+`kaneko_sdram` outside the repository, so nothing in the tree was modified:
+
+| | broken (port 5 bursts 1) | fixed (all ports burst 4) |
+|---|---|---|
+| OKI ROM fetches | 886,728 | 886,729 |
+| CPU ticks per bus cycle | 18.5 | 18.4 |
+| interrupts taken | 1,477 | 1,486 |
+| OKI busy clocks | 1,185,941 | 210,893,948 |
+| OKI non-zero sample clocks | 633,600 | 210,079,584 |
+| CPU writes to the chip | 904 | 13 |
+
+The bottom three rows confirm the sound fix outright: the chip goes from
+essentially never playing to playing continuously, and the CPU stops re-issuing
+— 904 writes becomes 13, which is the retry loop ending.
+
+**The top three refute the bandwidth story.** SDRAM fetches differ by one in
+886,728. The CPU's bus rate is unchanged. The OKI was never generating extra
+traffic, because an ADPCM stream's fetch rate is set by the sample clock and not
+by which addresses it reads — garbage addresses stream at exactly the same rate
+as good ones.
+
+So there is no measured mechanism by which the burst fix improved frame pacing,
+and the entry stays in `releases/README.md` as unresolved. The likeliest
+explanation is that perceived smoothness changed when audio appeared, which is
+a real effect and not evidence about the video path. It may also simply not
+have recurred yet; it is content-dependent by report.
+
+Note the limit of this instrument, per rule 6: the boot harness has **no video
+path**. Its port 0 is a synthetic hammer, not four tile layers. So it can say
+the OKI's traffic did not change and the CPU's rate did not change, and it
+cannot say anything about tile-fetch contention. Answering the frame-pacing
+question needs the whole-core frame gate that still does not exist.
