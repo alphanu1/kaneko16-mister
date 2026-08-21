@@ -71,7 +71,7 @@ missing.
 | 5 | yellow | OKI sample-ROM fetches answered. |
 | 6 | yellow | Clocks with an OKI channel flagged busy — the chip accepted a play command. |
 | 7 | yellow | Clocks where the OKI produced a non-zero sample. |
-| 8 | white | Sprite passes that did not finish before the next frame started. Zero is correct. 1024 sprites at one pixel per clock, each able to miss a 2.25 MB ROM, is the one part of the video path with no fixed upper bound. |
+| 8 | white | Sprite passes that did not finish before the next frame started. Zero is correct. A pass clears the coverage mask, parses 1024 records and draws them at a pixel per clock, and every pixel can miss a 2.25 MB ROM — about 92,000 clocks of a frame's 811,000, so there is room, but this is the one part of the video path with no fixed upper bound. 16 bits. |
 
 Rows 4-7 are a **chain**, in order. Each one rules out everything above it, so
 the first dark row is where the sound path breaks. All four lit and no audio
