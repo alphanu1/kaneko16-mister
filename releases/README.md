@@ -38,6 +38,35 @@ of the newest build in this directory.
   scanline costs more SDRAM round trips and leaves the 68000 less bandwidth.
 - Screen timing is not PCB-verified (384x264 at 6 MHz, 59.1856 Hz).
 
+## The debug overlay
+
+`Debug overlay` in the OSD (off by default) draws seven rows of per-frame
+counters over the top-left of the picture. Each row is a **binary number, most
+significant bit on the left**, one block per bit: lit means 1, dark red means 0.
+The dark-red field matters — it is how you tell "the count is zero" from "this
+readout is not being drawn at all", which are different faults that want
+opposite fixes.
+
+| Row | Colour | Counts, per frame |
+|---|---|---|
+| 1 | green | 68000 bus cycles. This is the CPU's pulse — if it is dark the CPU is not running, and if it dips the CPU is being starved of memory bandwidth. 20 bits. |
+| 2 | amber | Interrupts acknowledged. Should be a steady 3 per frame (IRQ5, IRQ4, IRQ3). 8 bits. |
+| 3 | cyan | Tile line fetches that overran — the fetch for a scanline was still running when the next one started. Zero is correct. Non-zero means the video path is short of SDRAM bandwidth, and the count says by how much. 16 bits. |
+| 4 | yellow | CPU writes reaching the OKI M6295 at `400401`. 16 bits. |
+| 5 | yellow | OKI sample-ROM fetches answered. |
+| 6 | yellow | Clocks with an OKI channel flagged busy — the chip accepted a play command. |
+| 7 | yellow | Clocks where the OKI produced a non-zero sample. |
+
+Rows 4-7 are a **chain**, in order. Each one rules out everything above it, so
+the first dark row is where the sound path breaks. All four lit and no audio
+means the fault is past the chip, in the mixing or output stage.
+
+These rows were added *during* the silent-sound investigation and the bug was
+actually found by reading the RTL, not by reading them — so treat the chain as
+the instrument for next time rather than a war story. What it would have shown:
+row 4 lit, row 5 lit, row 6 dark, putting the fault between the sample ROM
+arriving and the chip accepting a command.
+
 ## Save Backup RAM
 
 The MRA declares `<nvram index="2" size="128"/>` for the 93C46 EEPROM. Open the

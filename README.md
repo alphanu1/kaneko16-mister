@@ -58,8 +58,14 @@ picture, each a binary count with the MSB at the left:
 | 6 | yellow | clocks with an OKI channel busy |
 | 7 | yellow | clocks with a non-zero OKI sample |
 
+Each row is a binary number with the MSB at the left, one block per bit; a
+clear bit is dark red rather than black, so "the count is zero" is
+distinguishable from "this readout is not being drawn", which are different
+faults wanting opposite fixes.
+
 Rows 4-7 are a chain: the first dark one is where the sound path breaks, and
-each rules out everything above it.
+each rules out everything above it. Row 1 dipping means the CPU is being
+starved of memory bandwidth; row 3 non-zero means the video path is.
 
 M0 frame gate, RTL rendered against a frame MAME actually produced:
 
