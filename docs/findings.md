@@ -3522,3 +3522,45 @@ Four identical numbers to the digit should have been the tell. **A measurement
 that does not move when the input moves is not evidence that the input does not
 matter — it is evidence the input did not move.** Check the knob turns before
 believing the reading.
+
+### The laser cut off early: "keep sprites on screen" was not implemented
+
+Reported from hardware against MAME side by side — Explosive Breaker's laser
+holds on screen in MAME and cleared after a frame here. It is a real device
+feature, and the mistake was architectural rather than a wrong constant.
+
+MAME clears the two sprite surfaces on different conditions:
+
+```cpp
+m_sprites_maskmap[m_buffer].fill(0, clip);        // always
+/* keep sprites on screen - used by mgcrystl when you get the first gem */
+if (!m_keep_sprites)
+    m_sprites_bitmap[m_buffer].fill(0, clip);     // only when not keeping
+```
+
+and decides transparency from the bitmap word itself, not from the mask:
+
+```cpp
+const u16 pri = (srcbitmap[x] & 0xc000) >> 14;
+const u16 pix = srcbitmap[x] & 0x3fff;
+if (pix & 0x3fff) { ... }
+```
+
+`kaneko_spr_sys` gated the mixer on the **mask**, which makes anything not
+drawn this frame invisible — a clear every frame whatever the game asks for.
+The mask is a within-a-pass structure for first-writer-wins; the visible plane
+is the bitmap, and it persists when the game asks.
+
+Fixed: the mixer reads the bitmap and treats a zero pen as transparent, the
+mask is cleared every pass, and the bitmap is cleared only when `keep_sprites`
+is off. `keep_sprites` is `BIT(~data, 2)` of sprite register 0 and is held in
+its own register rather than derived from the register file, because MAME only
+updates it on a write to that register's low byte and starts it false —
+deriving it from the stored value would make it *true* at power-up, when the
+file reads zero and the inversion turns that into "keep".
+
+The lesson is about where the design was checked. `kaneko_vuspr_draw` was
+verified pixel-exact against the frame gate's compositor, and the compositor is
+right — but the gate only ever renders **one** frame, so no test anywhere could
+see a behaviour that is about what survives **between** frames. The whole class
+of cross-frame device behaviour was outside every harness this core had.

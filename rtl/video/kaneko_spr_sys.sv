@@ -25,6 +25,23 @@
 // miss the sample-ROM cache, so rendering spans a frame rather than fitting in
 // vblank. The mixer must therefore read a surface nobody is drawing on.
 //
+// THE MIXER READS THE BITMAP, NOT THE MASK
+//
+// It gated on the mask at first, which makes anything not drawn this frame
+// invisible — a clear every frame, whatever the game asks for. That is not the
+// device. MAME clears the two surfaces separately:
+//
+//     m_sprites_maskmap[m_buffer].fill(0, clip);      // always
+//     if (!m_keep_sprites)
+//         m_sprites_bitmap[m_buffer].fill(0, clip);   // only when not keeping
+//
+// and `copybitmap_common` decides transparency from the bitmap word itself,
+// `if (pix & 0x3fff)`. So the visible plane is the bitmap and it PERSISTS when
+// the game asks; the mask only enforces first-writer-wins within one pass.
+//
+// Explosive Breaker's laser holds on screen this way, and gating on the mask
+// cut it off after a frame.
+//
 // THE MASK IS CLEARED, AND THE CLEVER VERSION DID NOT WORK
 //
 // The first attempt gave each surface a parity bit that flipped when it became
@@ -63,6 +80,13 @@ module kaneko_spr_sys #(
     // One pulse per frame, in vblank. Ignored while a pass is still running —
     // see `overrun`.
     input  wire         frame_start,
+
+    // VU-002 "keep sprites on screen": sprite register 0 bit 2, INVERTED —
+    // MAME's `m_keep_sprites = BIT(~new_data, 2)`. When set, the sprite
+    // bitmap is not cleared and last frame's picture stays under this one.
+    // The coverage mask is cleared either way, so first-writer-wins still
+    // restarts every frame.
+    input  wire         keep_sprites,
 
     // Per-game configuration, all of it from the machine config.
     input  wire [10:0]  sprite_count,
@@ -235,16 +259,23 @@ module kaneko_spr_sys #(
     wire           msk_we = clearing ? 1'b1     : dr_mask_we;
     wire           msk_wd = clearing ? 1'b0     : 1'b1;
 
+    // The bitmap shares the walker but is only cleared when the game is not
+    // asking for its contents to be kept.
+    wire  [AW-1:0] bmp_wa = clearing ? clr_addr : dr_bmp_addr;
+    wire  [15:0]   bmp_wd = clearing ? 16'd0    : dr_bmp_data;
+    wire           bmp_we = clearing ? ~keep_sprites : dr_bmp_we;
+
     wire [AW-1:0] mix_addr = {rd_y, rd_x};
 
     // Only the back surface is written, and only the front is read by the
     // mixer, so each surface needs one read address and one write port.
-    wire [AW-1:0] m0_ra = back ? mix_addr : dr_mask_raddr;
-    wire [AW-1:0] m1_ra = back ? dr_mask_raddr : mix_addr;
+    // Only the renderer reads the mask now, and only on the surface it is
+    // drawing, so there is nothing to mux and nothing for the mixer to wait on.
+    wire [AW-1:0] m_ra = dr_mask_raddr;
 
     always_ff @(posedge clk) begin
-        if (dr_bmp_we  && !back) bmp0[dr_bmp_addr] <= dr_bmp_data;
-        if (dr_bmp_we  &&  back) bmp1[dr_bmp_addr] <= dr_bmp_data;
+        if (bmp_we && !back) bmp0[bmp_wa] <= bmp_wd;
+        if (bmp_we &&  back) bmp1[bmp_wa] <= bmp_wd;
         if (msk_we && !back) msk0[msk_wa] <= msk_wd;
         if (msk_we &&  back) msk1[msk_wa] <= msk_wd;
 
@@ -264,8 +295,8 @@ module kaneko_spr_sys #(
         // Gating the read with `ce` holds the answer that was correct when it
         // was asked for. The front surface is not gated: the mixer reads it
         // every pixel and has nothing to do with the renderer's stalls.
-        if (back || dr_ce)  q_msk0 <= msk0[m0_ra];
-        if (!back || dr_ce) q_msk1 <= msk1[m1_ra];
+        if (dr_ce) q_msk0 <= msk0[m_ra];
+        if (dr_ce) q_msk1 <= msk1[m_ra];
     end
 
     // The renderer tests the surface it is drawing on; the mixer reads the
@@ -273,10 +304,10 @@ module kaneko_spr_sys #(
     // using it directly on the one-clock-late read results is correct.
     assign dr_mask_q = back ? q_msk1 : q_msk0;
 
-    wire         mix_marked = back ? q_msk0 : q_msk1;
-    wire [15:0]  mix_word   = back ? q_bmp0 : q_bmp1;
+    // Transparency is the pen being zero, exactly as copybitmap_common has it.
+    wire [15:0] mix_word = back ? q_bmp0 : q_bmp1;
 
-    assign spr_pix  = mix_marked ? mix_word[13:0] : 14'd0;
+    assign spr_pix  = mix_word[13:0];
     assign spr_prio = mix_word[15:14];
 
     // ------------------------------------------------------------- sequence

@@ -191,7 +191,7 @@ int main(int argc, char** argv) {
 
     const int x0 = 0, x1 = 255, y0 = 16, y1 = 239;
 
-    dut->rst = 1; dut->frame_start = 0; dut->ram_we = 0;
+    dut->rst = 1; dut->frame_start = 0; dut->ram_we = 0; dut->keep_sprites = 0;
     dut->clip_x0 = x0; dut->clip_x1 = x1;
     dut->clip_y0 = y0; dut->clip_y1 = y1;
     dut->visarea_min_y = 16;
@@ -368,6 +368,52 @@ int main(int argc, char** argv) {
         printf("  %ld of 10 consecutive frames had leftover pixels"
                " (worst %ld)\n", bad_frames, worst);
         check(bad_frames == 0, "the surface does not clear on every frame");
+        dut->sprite_count = N;
+    }
+
+    // ------------------------------------------------------------------ 5.7
+    // KEEP SPRITES ON SCREEN.
+    //
+    // MAME clears the coverage mask every frame but only clears the bitmap
+    // when the game is not asking for the picture to be kept:
+    //
+    //     m_sprites_maskmap[m_buffer].fill(0, clip);
+    //     if (!m_keep_sprites) m_sprites_bitmap[m_buffer].fill(0, clip);
+    //
+    // Explosive Breaker's laser holds on screen this way. So: draw a list,
+    // turn keep on, empty the list, and the picture must still be there —
+    // and with keep off it must vanish.
+    printf("== keep sprites on screen\n");
+    {
+        dut->sprite_count = N;
+        dut->keep_sprites = 0;
+        run_frame(); run_frame();
+        if (seen.size() > (size_t)N) seen.resize(N);
+        reference(seen, want, x0, x1, y0, y1);
+
+        // With keep ON and nothing to draw, the picture must survive. Two
+        // frames, because the surfaces alternate and each is reused every
+        // other pass.
+        dut->keep_sprites = 1;
+        dut->sprite_count = 0;
+        run_frame(); run_frame();
+        readback(got);
+        long kept = 0, lost = 0;
+        for (size_t o = 0; o < want.size(); o++) {
+            if (!want[o]) continue;
+            if (got[o] == want[o]) kept++; else lost++;
+        }
+        printf("  keep on:  %ld pixels held, %ld lost\n", kept, lost);
+        check(kept > 0 && lost == 0, "kept sprites did not survive the frame");
+
+        // And with keep OFF the same empty list must wipe it.
+        dut->keep_sprites = 0;
+        run_frame(); run_frame();
+        readback(got);
+        long left = 0;
+        for (size_t o = 0; o < got.size(); o++) if (got[o]) left++;
+        printf("  keep off: %ld pixels left\n", left);
+        check(left == 0, "clearing stopped working when keep was added");
         dut->sprite_count = N;
     }
 

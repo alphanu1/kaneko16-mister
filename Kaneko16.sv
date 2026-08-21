@@ -873,6 +873,28 @@ assign c1_s0_addr = {2'b00, ln_scr_addr[18 +: 9]};
 assign c1_s1_addr = {2'b00, ln_scr_addr[27 +: 9]};
 assign ln_scr_data = { c1_s1_q, c1_s0_q, c0_s1_q, c0_s0_q };
 
+// VU-002 "keep sprites on screen". MAME:
+//
+//     case 0:
+//         if (ACCESSING_BITS_0_7) {
+//             m_sprite_flipx = BIT(new_data, 1);
+//             m_sprite_flipy = BIT(new_data, 0);
+//             if (get_sprite_type() == 0)
+//                 m_keep_sprites = BIT(~new_data, 2);
+//         }
+//
+// Held in its own register rather than read out of the register file, because
+// MAME only updates it on a write to register 0's LOW byte and starts it
+// false. Deriving it from the stored register instead would make it true at
+// power-up, when the file reads zero and the inversion turns that into "keep".
+reg keep_sprites;
+always @(posedge clk_sys) begin
+	if (rst_sys)
+		keep_sprites <= 1'b0;
+	else if (sprreg_we && (reg_addr == 4'd0) && ~LDSn)
+		keep_sprites <= ~reg_din[2];
+end
+
 // ------------------------------------------------------------- sprites
 // The sprite surface is indexed in MAME's screen coordinates, where the
 // visible area starts at visarea().min_y — the parser folds that offset into
@@ -900,6 +922,7 @@ kaneko_spr_sys #(
 (
 	.clk(clk_sys), .rst(rst_sys),
 	.frame_start(vbl_rise),
+	.keep_sprites(keep_sprites),
 
 	.sprite_count(SPR_COUNT),
 	.sprite_xoffs(SPR_XOFFS), .sprite_yoffs(SPR_YOFFS),
