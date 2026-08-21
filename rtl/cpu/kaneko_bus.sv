@@ -342,6 +342,17 @@ module kaneko_bus #(
         else if (sel_v2r0) iEdb = v2r0_q;
         else if (sel_v2r1) iEdb = v2r1_q;
         else if (sel_sprr) iEdb = sprreg_q;
+        // The watchdog reads back as zero. MAME's watchdog_timer_device
+        // reset16_r returns 0, and this was the first place the core's bus
+        // trace differed from MAME's during boot — 55,400 data accesses in,
+        // everything before it identical. It fell through to the 0xffff
+        // default below because sel_wdog was decoded but never given a value.
+        //
+        // The reset itself is deliberately not implemented: a watchdog that
+        // never fires is the safe direction during bring-up, where a core that
+        // silently restarted would be far harder to attribute than one that
+        // hangs. Revisit when the game runs.
+        else if (sel_wdog) iEdb = 16'h0000;
         else if (sel_in)   iEdb = (a[2:1] == 2'd0) ? in_p1
                                 : (a[2:1] == 2'd1) ? in_p2
                                 : (a[2:1] == 2'd2) ? in_system : in_unk;

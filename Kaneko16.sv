@@ -291,6 +291,22 @@ kaneko_irq u_irq
 	.ipl_n(cpu_ipl_n), .vpa_n(cpu_vpa_n), .iack(cpu_iack)
 );
 
+// Interrupts acknowledged per frame. Zero while the game masks — explbrkr does
+// so for its first few seconds of self-test — then three every frame: IRQ5 at
+// scanline 224, IRQ3 at 144, IRQ4 at 64.
+//
+// This is on screen because simulation cannot cheaply reach the point where the
+// game unmasks, and `make boot` can only force level 7 to prove the
+// acknowledge wiring. Whether the game actually gets there, with our stubbed
+// inputs and no EEPROM, is a question only the board answers.
+reg [15:0] irq_cnt, irq_cnt_lat;
+reg        iack_d;
+always @(posedge clk_sys) begin
+	iack_d <= cpu_iack;
+	if (vbl_rise) begin irq_cnt_lat <= irq_cnt; irq_cnt <= 16'd0; end
+	else if (cpu_iack && !iack_d) irq_cnt <= irq_cnt + 16'd1;
+end
+
 // CPU liveness, counted per frame. A number the display can show beats
 // inferring "it is running" from a picture that might be static for other
 // reasons.
@@ -353,15 +369,26 @@ wire [7:0] pal_b = {pal_rd_q[4:0],   pal_rd_q[4:2]};
 // empty and looked exactly like a CPU held in reset. Two failures that want
 // opposite fixes cannot share one indicator — rule 6: check the instrument
 // could have seen it.
-localparam int unsigned ALV_BIT_W = 8;   // pixels per bit
+localparam int unsigned ALV_BIT_W = 8;
 localparam int unsigned ALV_BITS  = 20;
+localparam int unsigned IRQ_BITS  = 8;
 
+// Row 0, green: bus cycles per frame, 20 bits.
 wire in_alive_row = (screen_y >= 9'd16) && (screen_y < 9'(16 + 6))
                  && (screen_x < 9'(ALV_BITS * ALV_BIT_W));
 wire [4:0] alive_bit = 5'(ALV_BITS - 1) - 5'(screen_x[8:3]);
 wire       alive_set = bus_cycles_lat[alive_bit];
+
+// Row 1, amber: interrupts acknowledged per frame, 8 bits. A different colour
+// so the two readouts cannot be mistaken for one wide number.
+wire in_irq_row = (screen_y >= 9'd24) && (screen_y < 9'(24 + 6))
+               && (screen_x < 9'(IRQ_BITS * ALV_BIT_W));
+wire [2:0] irq_bit = 3'(IRQ_BITS - 1) - 3'(screen_x[5:3]);
+wire       irq_set = irq_cnt_lat[irq_bit];
+
 // One column of every block left dark, so adjacent set bits stay countable.
-wire       in_alive_bar = in_alive_row && (screen_x[2:0] != 3'd7);
+wire in_dbg   = (in_alive_row || in_irq_row) && (screen_x[2:0] != 3'd7);
+wire dbg_set  = in_alive_row ? alive_set : irq_set;
 
 wire show_pal = (status[10:9] == 2'd3);
 
@@ -370,12 +397,12 @@ assign CE_PIXEL  = ce_pix;
 assign VGA_DE    = de;
 assign VGA_HS    = hs;
 assign VGA_VS    = vs;
-wire [7:0] alv_r = alive_set ? 8'h00 : 8'h40;
-wire [7:0] alv_g = alive_set ? 8'hff : 8'h00;
+wire [7:0] dbg_r = dbg_set ? (in_irq_row ? 8'hff : 8'h00) : 8'h40;
+wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : 8'hff) : 8'h00;
 
-assign VGA_R = in_alive_bar ? alv_r  : (show_pal ? pal_r : r);
-assign VGA_G = in_alive_bar ? alv_g  : (show_pal ? pal_g : g);
-assign VGA_B = in_alive_bar ? 8'h00  : (show_pal ? pal_b : b);
+assign VGA_R = in_dbg ? dbg_r : (show_pal ? pal_r : r);
+assign VGA_G = in_dbg ? dbg_g : (show_pal ? pal_g : g);
+assign VGA_B = in_dbg ? 8'h00 : (show_pal ? pal_b : b);
 
 endmodule
 

@@ -2429,3 +2429,81 @@ so a new module is invisible to synthesis until someone remembers it.
 `make quartus` now runs `qsf-check` first, which fails if any file under `rtl/`
 is missing from the project. It runs before lint and test, so the answer arrives
 in a second rather than after the gate.
+
+## Why the game never reaches its main loop: two decoded-but-unread registers
+
+*Instrument: `make boot --data-only --tail`, diffed against a MAME trace tapped
+only outside ROM so the oracle can reach frame 229.*
+
+The core boots, runs at MAME's bus rate, and still takes **no interrupts in 370
+frames** — 6.25 s of emulated time against the 3.9 s MAME needs to finish its
+self-test and unmask. Not slowness. A divergence during the self-test.
+
+### Finding it needed two changes to the instrument
+
+**Data-only tracing.** Instruction fetches are 77% of accesses and the differ
+drops them anyway; reaching the point where the game unmasks needs ~9.5 M
+accesses, which is not reachable with a tap on the whole address space. Tapping
+only `0x080000` upwards removes 77% of the Lua callbacks. Nothing writes to the
+ROM window, so nothing is lost.
+
+**A ring buffer of the last N accesses.** A prefix trace answers "do we start
+the same way". When two machines agree for millions of accesses and one is then
+stuck, the question is "where does it end up", and only the tail can say.
+
+### MAME was booting a formatted machine
+
+`build/bustrace/nvram/explbrkr/eeprom` — 128 bytes, written by an earlier run.
+CLAUDE.md already says to run MAME from a scratch directory because it drops
+`nvram/` and `cfg/` wherever it starts; this is what that rule is for. A saved
+EEPROM makes the oracle boot a formatted machine while the core boots a blank
+one, and they take different paths through the setup code.
+
+It happened not to matter here — the blank and saved runs are byte-identical for
+823,998 accesses and first differ at 823,999, which is the first EEPROM read —
+but that was luck, not design. `make bustrace` now clears `nvram/` and `cfg/`
+every run, so the comparison is always first-boot.
+
+### The bug, twice
+
+`kaneko_bus`'s read mux had no case for two decoded regions, so both fell
+through to the `0xffff` default:
+
+| address | ours | MAME | first divergence at |
+| --- | --- | --- | --- |
+| `a80000` watchdog | `ffff` | `0000` | data access 55,400 |
+| `400000` YM2149 | `ffff` | `0000` | data access 823,898 |
+
+Decoding an address without giving it a read value is worse than not decoding
+it: `unmapped_hit` never fires, so the telemetry that exists precisely to catch
+this says nothing. Both looked like correct decodes.
+
+Fixing the watchdog moved the first divergence from 55,400 to **823,898** — a
+15x improvement, and far enough that the core now matches MAME through the whole
+self-test and into the frame-229 sound initialisation.
+
+The watchdog reads back as zero (`watchdog_timer_device::reset16_r`). The reset
+itself is deliberately not implemented: a watchdog that never fires is the safe
+direction during bring-up, where a core that silently restarted would be much
+harder to attribute than one that hangs.
+
+### What is left, and it is a real device
+
+The remaining divergence is the YM2149s, and they cannot be stubbed with a
+register file alone, because the EEPROM hangs off them:
+
+| line | reached via |
+| --- | --- |
+| CLK, DI | `eeprom_w` at `d00001` — bit 0 clk, bit 1 di |
+| CS | YM2149 **#1 port B**, written at `40021e` |
+| DO | YM2149 **#1 port A**, read at `40021c` |
+
+Measured over a blank-EEPROM boot, MAME reads `40021c` **1,024 times** (1,002
+zeros, 22 ones), writes CS 129 times, and clocks `d00001` about 4,000 times with
+the low byte cycling 0/1/2/3 — clk and di exactly as a 93C46 expects. With a
+blank EEPROM it clocks ~50,000 times, formatting it.
+
+So the game genuinely reads data back out of the EEPROM during boot, and the
+bits matter. jt49 is already vendored and exposes `addr`/`cs_n`/`wr_n`/`din`/
+`dout` with `IOA_in`/`IOB_out`, so it supplies the register read-back and the
+port wiring, and the sound path later. The 93C46 has to be written.

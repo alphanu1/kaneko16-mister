@@ -180,6 +180,12 @@ bustrace: regions
 	  BOOT_ARGS="--trace $(CURDIR)/$(TRACE_DIR)/ours.txt --count $(TRACE_N)" \
 	  | grep -E "bus trace|reset SSP|FAIL|PASS"
 	@echo "== mame"
+	@# MAME drops nvram/ and cfg/ wherever it starts, and explbrkr's EEPROM is
+	@# one of them. A saved EEPROM makes the oracle boot a FORMATTED machine
+	@# while the core boots a blank one, so the two take different paths through
+	@# the setup code and the trace diverges for a reason that is nothing to do
+	@# with the core. Cleared every run — the comparison is always first-boot.
+	@rm -rf $(TRACE_DIR)/nvram $(TRACE_DIR)/cfg
 	@cd $(TRACE_DIR) && BUS_TRACE_COUNT=$(TRACE_N) BUS_TRACE_OUT=mame.txt \
 	  mame -rompath $(ROMPATH) $(SET) \
 	    -autoboot_script $(CURDIR)/tools/mame_bus_trace.lua \

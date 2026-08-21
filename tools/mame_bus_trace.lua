@@ -25,6 +25,18 @@
 local MAX = tonumber(os.getenv("BUS_TRACE_COUNT") or "20000")
 local OUT = os.getenv("BUS_TRACE_OUT") or "mame_bus_trace.txt"
 
+-- DATA ONLY: skip the ROM window entirely.
+--
+-- Instruction fetches are ~77% of all accesses and the differ drops them
+-- anyway, because fx68k and MAME prefetch differently. Not tapping them at all
+-- removes 77% of the Lua callbacks, which is what limits how many frames the
+-- oracle can cover — and reaching explbrkr's self-test completion at frame 229
+-- needs about 9.5 M accesses, which is not reachable with the full tap.
+--
+-- Nothing writes to the ROM window, so nothing is lost.
+local DATA_ONLY = (os.getenv("BUS_TRACE_DATA_ONLY") or "0") ~= "0"
+local TAP_LO    = DATA_ONLY and 0x080000 or 0x000000
+
 local mach  = manager.machine
 local space = mach.devices[":maincpu"].spaces["program"]
 
@@ -131,9 +143,9 @@ _G.frame_sub = emu.add_machine_frame_notifier(function()
 
     -- Kept in globals: a tap held only by a local is collected and stops
     -- firing with no error and no output.
-    _G.tap_r = space:install_read_tap(0x000000, 0xffffff, "bustrace_r",
+    _G.tap_r = space:install_read_tap(TAP_LO, 0xffffff, "bustrace_r",
       function(offset, data, mask) record("R", offset, data, mask) end)
-    _G.tap_w = space:install_write_tap(0x000000, 0xffffff, "bustrace_w",
+    _G.tap_w = space:install_write_tap(TAP_LO, 0xffffff, "bustrace_w",
       function(offset, data, mask) record("W", offset, data, mask) end)
     return
   end

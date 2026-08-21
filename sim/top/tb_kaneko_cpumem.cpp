@@ -13,6 +13,7 @@
 #include <cstring>
 #include <cstdint>
 #include <vector>
+#include <string>
 #include "Vkaneko_cpumem_harness.h"
 #include "verilated.h"
 
@@ -21,6 +22,14 @@ static uint64_t tick_count = 0;
 
 // Bus trace, in the format tools/mame_bus_trace.lua emits, so the two can be
 // diffed directly rather than eyeballed. Written only when --trace is given.
+// Ring buffer of the last N accesses. A prefix trace answers "do we start the
+// same way"; when the two machines agree for millions of accesses and then one
+// of them is stuck somewhere, the question is "where does it end up", and only
+// the tail can say.
+static std::vector<std::string> tail_buf;
+static size_t   tail_cap  = 0;
+static bool     data_only = false;   // skip the ROM window, as the Lua can
+static size_t   tail_next = 0;
 static FILE*    trace_fp    = nullptr;
 static uint64_t trace_limit = 0;
 static uint64_t trace_n     = 0;
@@ -120,7 +129,19 @@ static Stats run(const std::vector<uint8_t>& rom, bool swap, bool verbose,
             uint32_t a = (uint32_t)dut->cpu_addr << 1;
             uint16_t d = dut->cpu_din;
             if (a < 0x080000) st.rom_reads++;   // kaneko_bus sel_rom
-            if (trace_fp && trace_n < trace_limit) {
+            if (tail_cap) {
+                const bool rd = dut->cpu_rw;
+                const uint16_t val = rd ? dut->cpu_din : dut->cpu_dout;
+                const uint16_t msk = (uint16_t)((dut->cpu_uds ? 0xff00 : 0) |
+                                                (dut->cpu_lds ? 0x00ff : 0));
+                char line[64];
+                std::snprintf(line, sizeof line, "%06x %s %04x %04x",
+                              a, rd ? "R" : "W", val, msk);
+                if (tail_buf.size() < tail_cap) tail_buf.push_back(line);
+                else { tail_buf[tail_next] = line; }
+                tail_next = (tail_next + 1) % tail_cap;
+            }
+            if (trace_fp && trace_n < trace_limit && !(data_only && a < 0x080000)) {
                 // MAME reports the value on the bus and the lanes as a mask;
                 // a read takes iEdb, a write takes oEdb.
                 const bool rd = dut->cpu_rw;
@@ -222,6 +243,9 @@ int main(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--trace") && i + 1 < argc) trace_path = argv[++i];
         else if (!std::strcmp(argv[i], "--count") && i + 1 < argc)
             trace_count = std::strtoull(argv[++i], nullptr, 0);
+        else if (!std::strcmp(argv[i], "--data-only")) data_only = true;
+        else if (!std::strcmp(argv[i], "--tail") && i + 1 < argc)
+            tail_cap = (size_t)std::strtoull(argv[++i], nullptr, 0);
         else if (!std::strcmp(argv[i], "--ticks") && i + 1 < argc)
             run_ticks_override = std::strtoull(argv[++i], nullptr, 0);
         else if (argv[i][0] != '-') path = argv[i];
@@ -285,6 +309,16 @@ int main(int argc, char** argv) {
     Stats a = run(rom, false, !trace_path, false, run_a, good_lat, 0);
     report("result", a, run_a);
     delete dut;
+    if (tail_cap && trace_path) {
+        FILE* tf = std::fopen(trace_path, "w");
+        if (tf) {
+            const size_t n = tail_buf.size();
+            for (size_t i = 0; i < n; i++)
+                std::fprintf(tf, "%s\n", tail_buf[(tail_next + i) % n].c_str());
+            std::fclose(tf);
+            std::printf("  tail: last %zu accesses -> %s\n", n, trace_path);
+        }
+    }
     if (trace_fp) {
         std::fclose(trace_fp); trace_fp = nullptr;
         std::printf("  bus trace: %llu accesses -> %s\n",
