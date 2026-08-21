@@ -27,55 +27,73 @@ module kaneko_vmem (
     input  wire [15:0] cpu_din,
     input  wire        we_vram0, we_vram1, we_spr, we_pal,
     input  wire        uds, lds,       // byte enables, active high
-    output logic [15:0] q_vram0, q_vram1, q_spr, q_pal,
+    output wire  [15:0] q_vram0, q_vram1, q_spr, q_pal,
 
     // ---- video side, read only
     input  wire [12:0] v0_addr,
-    output logic [15:0] v0_q,
+    output wire  [15:0] v0_q,
     input  wire [12:0] v1_addr,
-    output logic [15:0] v1_q,
+    output wire  [15:0] v1_q,
     input  wire [11:0] spr_addr,
-    output logic [15:0] spr_q,
+    output wire  [15:0] spr_q,
     input  wire [10:0] pal_addr,
-    output logic [15:0] pal_q
+    output wire  [15:0] pal_q
 );
-    // 8K x 16 per VIEW2 window covers VRAM and line scroll for both its layers.
-    logic [15:0] view2_0 [0:8191];
-    logic [15:0] view2_1 [0:8191];
-    logic [15:0] sprram  [0:4095];
-    logic [15:0] palram  [0:2047];
+    // Each memory is TWO BYTE-WIDE ARRAYS, not one 16-bit array written by
+    // bit-slice. Quartus does not infer a byte-enabled memory from
+    // `mem[addr][15:8] <= ...`; it infers no memory at all and builds registers
+    // instead. See the note in kaneko_bus.sv — that mistake produced 438,004
+    // combinational nodes against a device holding 83,820.
+    //
+    // Byte enables are needed because the 68000 writes single bytes, and the
+    // very first store the boot code makes is `move.b #$00, $900009`.
 
-    // Byte enables matter: the 68000 writes single bytes, and a word-wide write
-    // would clobber the neighbouring byte. The boot code does exactly this —
-    // its first store is `move.b #$00, $900009`.
+    localparam int V_N = 8192, S_N = 4096, P_N = 2048;
+
+    logic [7:0] v0_hi [0:V_N-1], v0_lo [0:V_N-1];
+    logic [7:0] v1_hi [0:V_N-1], v1_lo [0:V_N-1];
+    logic [7:0] sp_hi [0:S_N-1], sp_lo [0:S_N-1];
+    logic [7:0] pa_hi [0:P_N-1], pa_lo [0:P_N-1];
+
+    logic [7:0] q0h, q0l, q1h, q1l, qsh, qsl, qph, qpl;
+    logic [7:0] r0h, r0l, r1h, r1l, rsh, rsl, rph, rpl;
+
+    wire [12:0] ca = cpu_addr;
+
     always_ff @(posedge clk) begin
-        if (we_vram0) begin
-            if (uds) view2_0[cpu_addr][15:8] <= cpu_din[15:8];
-            if (lds) view2_0[cpu_addr][7:0]  <= cpu_din[7:0];
-        end
-        if (we_vram1) begin
-            if (uds) view2_1[cpu_addr][15:8] <= cpu_din[15:8];
-            if (lds) view2_1[cpu_addr][7:0]  <= cpu_din[7:0];
-        end
-        if (we_spr) begin
-            if (uds) sprram[cpu_addr[11:0]][15:8] <= cpu_din[15:8];
-            if (lds) sprram[cpu_addr[11:0]][7:0]  <= cpu_din[7:0];
-        end
-        if (we_pal) begin
-            if (uds) palram[cpu_addr[10:0]][15:8] <= cpu_din[15:8];
-            if (lds) palram[cpu_addr[10:0]][7:0]  <= cpu_din[7:0];
-        end
+        if (we_vram0 && uds) v0_hi[ca] <= cpu_din[15:8];
+        if (we_vram0 && lds) v0_lo[ca] <= cpu_din[7:0];
+        if (we_vram1 && uds) v1_hi[ca] <= cpu_din[15:8];
+        if (we_vram1 && lds) v1_lo[ca] <= cpu_din[7:0];
+        if (we_spr   && uds) sp_hi[ca[11:0]] <= cpu_din[15:8];
+        if (we_spr   && lds) sp_lo[ca[11:0]] <= cpu_din[7:0];
+        if (we_pal   && uds) pa_hi[ca[10:0]] <= cpu_din[15:8];
+        if (we_pal   && lds) pa_lo[ca[10:0]] <= cpu_din[7:0];
 
-        q_vram0 <= view2_0[cpu_addr];
-        q_vram1 <= view2_1[cpu_addr];
-        q_spr   <= sprram[cpu_addr[11:0]];
-        q_pal   <= palram[cpu_addr[10:0]];
+        // CPU read-back port
+        q0h <= v0_hi[ca];        q0l <= v0_lo[ca];
+        q1h <= v1_hi[ca];        q1l <= v1_lo[ca];
+        qsh <= sp_hi[ca[11:0]];  qsl <= sp_lo[ca[11:0]];
+        qph <= pa_hi[ca[10:0]];  qpl <= pa_lo[ca[10:0]];
 
-        v0_q    <= view2_0[v0_addr];
-        v1_q    <= view2_1[v1_addr];
-        spr_q   <= sprram[spr_addr];
-        pal_q   <= palram[pal_addr];
+        // Video read port. A second read of the same array is what makes each
+        // of these a duplicated M10K rather than a true-dual-port; that is the
+        // cheap way round the 1W+2R shape and costs block RAM, not logic.
+        r0h <= v0_hi[v0_addr];   r0l <= v0_lo[v0_addr];
+        r1h <= v1_hi[v1_addr];   r1l <= v1_lo[v1_addr];
+        rsh <= sp_hi[spr_addr];  rsl <= sp_lo[spr_addr];
+        rph <= pa_hi[pal_addr];  rpl <= pa_lo[pal_addr];
     end
+
+    assign q_vram0 = {q0h, q0l};
+    assign q_vram1 = {q1h, q1l};
+    assign q_spr   = {qsh, qsl};
+    assign q_pal   = {qph, qpl};
+    assign v0_q    = {r0h, r0l};
+    assign v1_q    = {r1h, r1l};
+    assign spr_q   = {rsh, rsl};
+    assign pal_q   = {rph, rpl};
+
 endmodule
 
 `default_nettype wire

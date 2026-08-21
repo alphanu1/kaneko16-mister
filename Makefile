@@ -87,9 +87,32 @@ quartus-check:
 	echo "quartus: $$v ok ($(QUARTUS_BIN))"
 
 # Hard rule 4: the simulation gate runs before any synthesis.
+# TMPDIR is exported at the top of this file, so Quartus's temporaries land in
+# build/tmp rather than on /tmp. That is not optional here: /tmp is a 16 GB
+# tmpfs shared with other work, and quartus_map died with "ended unexpectedly.
+# Verify that you have sufficient memory available" when it filled — a message
+# that points at RAM when the problem was a full tmpfs.
 quartus: lint test quartus-check
-	@echo "quartus: no project yet — nothing to build."
-	@echo "         When one exists, build it with $(QUARTUS_BIN)/quartus_sh."
+	@mkdir -p build/tmp build/quartus build/db build/incremental_db
+	@# Quartus creates db/ and incremental_db/ in the project root and has no
+	@# assignment that moves them, so they are symlinked into build/. Rule 10.
+	@[ -L db ] || { rm -rf db; ln -s build/db db; }
+	@[ -L incremental_db ] || { rm -rf incremental_db; ln -s build/incremental_db incremental_db; }
+	@# The four tools are run individually with --write_settings_files=off.
+	@# `quartus_sh --flow compile` REWRITES Kaneko16.qsf, which silently reset
+	@# PROJECT_OUTPUT_DIRECTORY back to output_files and put every report in the
+	@# project root again — a build that obeys rule 10 once and then stops.
+	@set -e; for t in quartus_map quartus_fit quartus_asm; do \
+	  echo "== $$t"; \
+	  $(QUARTUS_BIN)/$$t --read_settings_files=on --write_settings_files=off \
+	    Kaneko16 -c Kaneko16 > build/$$t.log 2>&1 || { tail -20 build/$$t.log; exit 1; }; \
+	done
+	@# quartus_sta takes neither settings flag — it is a different front end.
+	@echo "== quartus_sta"
+	@$(QUARTUS_BIN)/quartus_sta Kaneko16 -c Kaneko16 > build/quartus_sta.log 2>&1 \
+	  || { tail -20 build/quartus_sta.log; exit 1; }
+	@echo "quartus: build/quartus/Kaneko16.rbf"
+	@grep -E "Logic utilization|Total block memory bits" build/quartus/Kaneko16.fit.summary || true
 
 
 # ------------------------------------------------------------------- lint

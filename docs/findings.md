@@ -1970,3 +1970,60 @@ DTACK that never comes simply stops, with no error and nothing to see. They are
 counted and printed rather than failed: failing would encode a guess as a
 requirement, and ignoring would lose the question. Settling it is part of the
 trace comparison against MAME, which is the next step and the real gate.
+
+---
+
+## 2026-08-21 — the core with a 68000 in it fits and times
+
+```
+Logic utilization (ALMs)  9,714 / 41,910   (23%)   — was 7,578 without the CPU
+Total registers           14,246
+Total block memory bits   1,360,289 / 5,662,720 (24%)
+Setup / Hold              ZERO negative slack, core PLL constrained
+Worst core-clock slack    +0.180 ns
+```
+
+fx68k costs about 2,100 ALMs here. Slack tightened from +0.247 to +0.180 ns,
+which is the number to watch as the rest of the video path lands.
+
+### The 5x overflow was one inference failing, not a design that is too big
+
+The first attempt died at the fitter:
+
+```
+Error (170011): Design contains 438004 blocks of type combinational node.
+                However, the device contains only 83820 blocks.
+```
+
+Five times the device. That reads like a design far too large, and it was not.
+Both new memories were written as one 16-bit array with **bit-slice writes** —
+`wram[addr][15:8] <= ...` — which Quartus does not recognise as a byte-enabled
+memory. It does not infer a smaller memory or warn; it infers **none**, and
+builds 512 Kbit of work RAM plus the video memories out of flip-flops and
+address muxes.
+
+Rewritten as **two byte-wide arrays per memory**, each written whole, they infer
+every time: block memory went from 405,249 bits to 1,360,289 and the
+combinational explosion vanished.
+
+Byte enables are not optional here — the 68000 writes single bytes, and the very
+first store the boot code makes is `move.b #$00, $900009`.
+
+### `quartus_sh --flow compile` rewrites the .qsf
+
+Rule 10 was set (`PROJECT_OUTPUT_DIRECTORY build/quartus`) and then silently
+undone: the full-flow driver writes settings files by default, which reset the
+assignment to `output_files` and put every report back in the project root. A
+build that obeys the rule once and then stops is worse than one that never did,
+because the second time nobody looks.
+
+`make quartus` now runs `quartus_map`, `quartus_fit` and `quartus_asm`
+individually with `--write_settings_files=off`, and `quartus_sta` separately
+because it accepts neither flag. `db/` and `incremental_db/` have no assignment
+that moves them, so they are symlinked into `build/`.
+
+### Not yet tested on hardware
+
+The MiSTer stopped responding before this build could be deployed — no route to
+host, so powered off or off the network. The bitstream is built, timed and
+staged in `releases/`.

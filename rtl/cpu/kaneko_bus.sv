@@ -115,19 +115,32 @@ module kaneko_bus #(
                  | sel_v2r1 | sel_ctrl | sel_in;
 
     // ---------------------------------------------------------- work RAM
-    // 64 KB as 32k x 16 with byte enables, so an odd-byte write does not
-    // clobber the even byte beside it.
-    logic [15:0] wram [0:32767];
-    logic [15:0] wram_q;
+    // 64 KB as 32k x 16, held as TWO BYTE-WIDE ARRAYS rather than one 16-bit
+    // array with bit-slice writes.
+    //
+    // That is not a style choice. Writing a slice of an array element —
+    // `wram[addr][15:8] <= ...` — is a pattern Quartus does not recognise as a
+    // byte-enabled memory, so it infers none: 512 Kbit becomes flip-flops plus
+    // address muxes. The design then reported
+    //
+    //   Error (170011): Design contains 438004 blocks of type combinational
+    //   node. However, the device contains only 83820 blocks.
+    //
+    // a 5x overflow that looks like the design being far too big when it is
+    // one inference failing. Two byte-wide arrays, each written whole, infer as
+    // M10K every time.
+    logic [7:0] wram_hi [0:32767];
+    logic [7:0] wram_lo [0:32767];
+    logic [7:0] wram_qh, wram_ql;
+    wire [14:0] wram_a = a[15:1];
+
     always_ff @(posedge clk) begin
-        if (as && ds && sel_wram) begin
-            if (wr) begin
-                if (~UDSn) wram[a[15:1]][15:8] <= oEdb[15:8];
-                if (~LDSn) wram[a[15:1]][7:0]  <= oEdb[7:0];
-            end
-            wram_q <= wram[a[15:1]];
-        end
+        if (as && ds && sel_wram && wr && ~UDSn) wram_hi[wram_a] <= oEdb[15:8];
+        if (as && ds && sel_wram && wr && ~LDSn) wram_lo[wram_a] <= oEdb[7:0];
+        wram_qh <= wram_hi[wram_a];
+        wram_ql <= wram_lo[wram_a];
     end
+    wire [15:0] wram_q = {wram_qh, wram_ql};
 
     // ------------------------------------------------- video memory strobes
     // All four windows are addressed by the low word address; the select picks
