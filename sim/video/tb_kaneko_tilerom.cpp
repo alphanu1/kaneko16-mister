@@ -20,30 +20,47 @@ Vkaneko_tilerom_harness* dut;
 std::vector<uint8_t> rom;
 long checks = 0, fails = 0, bursts = 0, stall_cycles = 0;
 
-// A deliberately unhelpful SDRAM: a few cycles of latency, so the feeder
-// cannot accidentally depend on an immediate answer.
-int lat = 0;
-bool pending = false;
-uint32_t pend_addr = 0;
+// Four deliberately unhelpful SDRAM ports, one per layer, each with its own
+// latency so the feeder cannot depend on them answering in step. They are
+// independent because the controller's ports are: that overlap is the whole
+// reason for giving each layer its own.
+int      lat[4]   = {0, 0, 0, 0};
+bool     pend[4]  = {false, false, false, false};
+uint32_t paddr[4] = {0, 0, 0, 0};
+
+uint32_t req_addr_of(int g) {
+    switch (g) {
+        case 0: return dut->sdr_addr0; case 1: return dut->sdr_addr1;
+        case 2: return dut->sdr_addr2; default: return dut->sdr_addr3;
+    }
+}
+void set_dout(int g, uint64_t v) {
+    switch (g) {
+        case 0: dut->sdr_dout0 = v; break; case 1: dut->sdr_dout1 = v; break;
+        case 2: dut->sdr_dout2 = v; break; default: dut->sdr_dout3 = v; break;
+    }
+}
 
 void sdram_step() {
-    dut->sdr_ack = 0;
-    if (!pending && dut->sdr_req) {
-        pending = true; pend_addr = dut->sdr_addr; lat = 5 + (int)(pend_addr % 7);
-        bursts++;
-    } else if (pending) {
-        if (--lat <= 0) {
+    uint32_t ack = 0;
+    for (int g = 0; g < 4; g++) {
+        if (!pend[g] && ((dut->sdr_req >> g) & 1)) {
+            pend[g] = true; paddr[g] = req_addr_of(g);
+            lat[g] = 5 + (int)((paddr[g] + g * 3) % 7);
+            bursts++;
+        } else if (pend[g] && --lat[g] <= 0) {
             // Word address -> byte address; SDRAM word n holds file byte 2n in
-            // its low half, so the block is simply eight consecutive bytes.
-            const uint64_t b = (uint64_t)pend_addr * 2;
+            // its low half, so a burst is eight consecutive bytes.
+            const uint64_t b = (uint64_t)paddr[g] * 2;
             uint64_t v = 0;
             for (int k = 0; k < 8; k++)
                 v |= (uint64_t)rom[(b + k) % rom.size()] << (8 * k);
-            dut->sdr_dout = v;
-            dut->sdr_ack = 1;
-            pending = false;
+            set_dout(g, v);
+            ack |= 1u << g;
+            pend[g] = false;
         }
     }
+    dut->sdr_ack = ack;
 }
 
 void tick() {

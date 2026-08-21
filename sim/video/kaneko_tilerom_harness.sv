@@ -17,10 +17,10 @@ module kaneko_tilerom_harness #(
     output wire [7:0]  d0, d1, d2, d3,
     output wire        ready,
 
-    output wire            sdr_req,
-    output wire [SDR_AW:1] sdr_addr,
-    input  wire            sdr_ack,
-    input  wire [63:0]     sdr_dout
+    output wire [3:0] sdr_req,
+    output wire [SDR_AW:1] sdr_addr0, sdr_addr1, sdr_addr2, sdr_addr3,
+    input  wire [3:0] sdr_ack,
+    input  wire [63:0] sdr_dout0, sdr_dout1, sdr_dout2, sdr_dout3
 );
     kaneko_tilerom #(.NREQ(4), .SDR_AW(SDR_AW)) u_dut (
         .clk(clk), .rst(rst),
@@ -28,7 +28,9 @@ module kaneko_tilerom_harness #(
         .base_addr({base3, base2, base1, base0}),
         .req_data({d3, d2, d1, d0}),
         .ready(ready),
-        .sdr_req(sdr_req), .sdr_addr(sdr_addr),
-        .sdr_ack(sdr_ack), .sdr_dout(sdr_dout)
+        .sdr_req(sdr_req),
+        .sdr_addr({sdr_addr3, sdr_addr2, sdr_addr1, sdr_addr0}),
+        .sdr_ack(sdr_ack),
+        .sdr_dout({sdr_dout3, sdr_dout2, sdr_dout1, sdr_dout0})
     );
 endmodule

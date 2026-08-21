@@ -8,14 +8,23 @@
 // and one SDRAM port, and SDRAM answers in eight-byte bursts after an
 // arbitrated round trip, so something has to sit in between.
 //
-// WHY A CACHE AND NOT A PREFETCHER
+// SIXTEEN-BYTE LINES, BECAUSE THE REUSE IS VERTICAL
 //
-// 4bpp tiles put two pixels in a byte and eight pixels in a tile row, so one
-// aligned eight-byte burst covers a whole tile row and the next. Consecutive
-// screen pixels walk consecutive bytes, so a single held burst per layer hits
-// seven times out of eight. At a 6 MHz pixel clock that is about 3 M bursts a
-// second across four layers, against 48 MHz of SDRAM — comfortable, and it
-// needs no lookahead into a pipeline that does not offer any.
+// The tiles are 16x16 at 4bpp, so one row of one tile is 16 pixels x 4 bits =
+// exactly eight bytes. Within a scanline that means one miss per tile — about
+// seventeen per layer across 256 pixels, allowing for a straddle — and it also
+// means the NEXT scanline of the same tile is a different eight bytes. A cache
+// of one block per layer therefore gets no reuse between lines at all.
+//
+// Holding sixteen bytes covers two tile rows, so every second scanline hits:
+// roughly 68 misses per line across four layers becomes 34. The second burst
+// is nearly free, being the same open row.
+//
+// This was measured, not assumed. An earlier version held one block and the
+// core could not finish a line in time; the line-overrun counter in the top
+// level lit up in step with the tearing, which is what identified bandwidth
+// after two plausible guesses at scroll timing had each fixed something real
+// without fixing the symptom.
 //
 // A miss stalls every layer, not just the one that missed. They advance in
 // lockstep on the same screen_x, so stalling one and not the others would
@@ -48,71 +57,93 @@ module kaneko_tilerom #(
     // Low while any port is missing. Drives kaneko_tmap_fetch's ce.
     output wire ready,
 
-    // SDRAM read port, single outstanding.
-    output logic             sdr_req,
-    output logic [SDR_AW:1]  sdr_addr,
-    input  wire              sdr_ack,
-    input  wire [63:0]       sdr_dout
+    // ONE SDRAM PORT PER LAYER, not one shared between them.
+    //
+    // Sharing serialised the misses: `ready` needs every port to hit, the four
+    // layers cross tile boundaries at different x because their scroll differs,
+    // and a pixel where two of them miss cost two full round trips back to
+    // back. With a port each the controller's round-robin overlaps them, and
+    // the two regions sit in different banks so the row activations overlap
+    // too.
+    //
+    // This was the difference between a line fetch finishing inside its 3072
+    // clocks and not: the line-overrun counter lit in step with the tearing,
+    // and got worse as more distinct tiles appeared on screen.
+    output logic [NREQ-1:0]            sdr_req,
+    output logic [NREQ-1:0][SDR_AW:1]  sdr_addr,
+    input  wire  [NREQ-1:0]            sdr_ack,
+    input  wire  [NREQ-1:0][63:0]      sdr_dout
 );
 
-    logic [NREQ-1:0][20:0] tag;     // req_addr[23:3]
-    logic [NREQ-1:0]       valid;
-    logic [NREQ-1:0][63:0] line;
+    logic [NREQ-1:0][19:0]  tag;     // req_addr[23:4]
+    logic [NREQ-1:0]        valid;
+    logic [NREQ-1:0][127:0] line;
 
     wire [NREQ-1:0] hit;
     genvar g;
     generate
         for (g = 0; g < NREQ; g = g + 1) begin : g_port
-            assign hit[g] = valid[g] && (tag[g] == req_addr[g][23:3]);
-            // Byte within the eight-byte block.
-            assign req_data[g] = line[g][{req_addr[g][2:0], 3'd0} +: 8];
+            assign hit[g] = valid[g] && (tag[g] == req_addr[g][23:4]);
+            // Byte within the sixteen-byte line.
+            assign req_data[g] = line[g][{req_addr[g][3:0], 3'd0} +: 8];
         end
     endgenerate
 
     assign ready = &hit;
 
-    // Which port to serve. Lowest missing index; the ports are equal-rate and
-    // advance together, so there is nothing for a rotation to be fair about.
-    logic [$clog2(NREQ)-1:0] sel;
-    logic                    sel_valid;
-    integer i;
-    always_comb begin
-        sel = '0; sel_valid = 1'b0;
-        for (i = int'(NREQ) - 1; i >= 0; i = i - 1)
-            if (!hit[i]) begin sel = ($clog2(NREQ))'(i); sel_valid = 1'b1; end
-    end
+    // Per-port fill, entirely independent. Two bursts make the sixteen-byte
+    // line; the second lands in the row the first just opened.
+    typedef enum logic [1:0] { S_IDLE, S_LO, S_GAP, S_HI } state_t;
 
-    typedef enum logic { S_IDLE, S_WAIT } state_t;
-    state_t state;
-    logic [$clog2(NREQ)-1:0] pend;
+    generate
+        for (g = 0; g < NREQ; g = g + 1) begin : g_fill
+            state_t st;
+            logic [SDR_AW:1] blk;
 
-    always_ff @(posedge clk) begin
-        if (rst) begin
-            state <= S_IDLE; sdr_req <= 1'b0; valid <= '0;
-        end else begin
-            case (state)
-                S_IDLE: if (sel_valid) begin
-                    // Aligned four-word burst covering the eight-byte block.
-                    // The controller starts a burst at exactly the address
-                    // given, so asking for the aligned one is what makes the
-                    // block a block (see kaneko_bus.sv on the same point).
-                    sdr_addr <= SDR_AW'(base_addr[sel] + SDR_AW'({req_addr[sel][23:3], 2'b00}));
-                    sdr_req  <= 1'b1;
-                    pend     <= sel;
-                    state    <= S_WAIT;
+            always_ff @(posedge clk) begin
+                if (rst) begin
+                    st <= S_IDLE; sdr_req[g] <= 1'b0; valid[g] <= 1'b0;
+                end else begin
+                    case (st)
+                        S_IDLE: if (!hit[g]) begin
+                            // The controller starts a burst at exactly the
+                            // address given, so ask for the aligned one — that
+                            // is what makes the line a line.
+                            blk <= SDR_AW'(base_addr[g]
+                                   + SDR_AW'({req_addr[g][23:4], 3'b000}));
+                            sdr_addr[g] <= SDR_AW'(base_addr[g]
+                                   + SDR_AW'({req_addr[g][23:4], 3'b000}));
+                            sdr_req[g]  <= 1'b1;
+                            st          <= S_LO;
+                        end
+
+                        S_LO: if (sdr_ack[g]) begin
+                            line[g][63:0] <= sdr_dout[g];
+                            sdr_req[g]    <= 1'b0;
+                            sdr_addr[g]   <= blk + SDR_AW'(4);
+                            st            <= S_GAP;
+                        end
+
+                        // One cycle with req low, so the controller sees a
+                        // fresh rising edge for the second transfer.
+                        S_GAP: begin
+                            sdr_req[g] <= 1'b1;
+                            st         <= S_HI;
+                        end
+
+                        S_HI: if (sdr_ack[g]) begin
+                            line[g][127:64] <= sdr_dout[g];
+                            tag[g]          <= req_addr[g][23:4];
+                            valid[g]        <= 1'b1;
+                            sdr_req[g]      <= 1'b0;
+                            st              <= S_IDLE;
+                        end
+
+                        default: st <= S_IDLE;
+                    endcase
                 end
-
-                S_WAIT: if (sdr_ack) begin
-                    sdr_req     <= 1'b0;
-                    line[pend]  <= sdr_dout;
-                    tag[pend]   <= req_addr[pend][23:3];
-                    valid[pend] <= 1'b1;
-                    state       <= S_IDLE;
-                end
-
-                default: state <= S_IDLE;
-            endcase
+            end
         end
-    end
+    endgenerate
 
 endmodule

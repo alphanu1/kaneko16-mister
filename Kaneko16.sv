@@ -59,7 +59,7 @@ localparam CONF_STR = {
 	"-;",
 	"O[8],Aspect ratio,4:3,16:9;",
 	"O[5:4],SDRAM capture,CL+1,CL+0,CL+2,CL+3;",
-	"O[10:9],Show,Game,Tiles chip0,Tiles chip1,Palette+CPU;",
+	"O[9],Show,Game,Palette+CPU;",
 	"O[11],Debug overlay,Off,On;",
 	"-;",
 	"R[12],Reset;",
@@ -214,12 +214,12 @@ wire [SDR_AW:1]   ldr_wr_addr;
 wire [15:0]       ldr_wr_din;
 wire [1:0]        ldr_wr_be;
 
-wire              p0_req;          // video tile fetch
+wire              p0_req;          // tile feeder, layer 0
 wire [SDR_AW:1]   p0_addr;
 wire              p1_req;          // 68000 ROM fetch
 wire [SDR_AW:1]   p1_addr;
-wire              p2_req;          // tile ROM feeder, four layers
-wire [SDR_AW:1]   p2_addr;
+wire              p2_req, p3_req, p4_req;   // tile feeder, one per layer
+wire [SDR_AW:1]   p2_addr, p3_addr, p4_addr;
 wire [NPORTS-1:0]       p_ack_bus;
 wire [NPORTS-1:0][63:0] p_dout_bus;
 wire              p0_ack  = p_ack_bus[0];
@@ -228,6 +228,10 @@ wire              p1_ack  = p_ack_bus[1];
 wire [63:0]       p1_dout = p_dout_bus[1];
 wire              p2_ack  = p_ack_bus[2];
 wire [63:0]       p2_dout = p_dout_bus[2];
+wire              p3_ack  = p_ack_bus[3];
+wire [63:0]       p3_dout = p_dout_bus[3];
+wire              p4_ack  = p_ack_bus[4];
+wire [63:0]       p4_dout = p_dout_bus[4];
 
 wire sd_dq_oe;
 wire [15:0] sd_dq_o;
@@ -250,8 +254,8 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300)) u_sdram
 	.wr_req(ldr_wr_req), .wr_addr(ldr_wr_addr), .wr_din(ldr_wr_din),
 	.wr_be(ldr_wr_be), .wr_ack(ldr_wr_ack),
 
-	.p_req  ({2'b0, p2_req, p1_req, p0_req}),
-	.p_addr ({{2{{SDR_AW{1'b0}}}}, p2_addr, p1_addr, p0_addr}),
+	.p_req  ({p4_req, p3_req, p2_req, p1_req, p0_req}),
+	.p_addr ({p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
 	.p_din  ({5{16'd0}}),
 	.p_be   ({5{2'b11}}),
 	.p_we   (5'b0),
@@ -510,8 +514,7 @@ end
 
 // Which view the OSD is showing. Declared here because the tilewall's SDRAM
 // requests are gated on it — see the note at its instantiation.
-wire [1:0] show      = status[10:9];
-wire       show_game = (show == 2'd0);
+wire show_game = ~status[9];
 
 // ------------------------------------------------------------------ video
 wire [9:0] hcnt, vcnt;
@@ -526,25 +529,11 @@ kaneko_video_timing u_timing
 	.vblank_rise(vbl_rise)
 );
 
-wire [7:0] r, g, b;
-
-kaneko_tilewall #(.SDR_AW(SDR_AW)) u_wall
-(
-	.clk(clk_sys), .rst(rst_sys), .ce_pix(ce_pix),
-	// GATED ON BEING DISPLAYED, and this is not cosmetic.
-	//
-	// The tilewall asks SDRAM for a burst every sixteen pixels whenever
-	// rom_loaded is set, regardless of what the OSD is showing. Left running
-	// behind the game view it took roughly half the bus, and the tile feeder
-	// could not finish a line in time — which showed up as tiles shifting out
-	// of step, tearing both horizontally and vertically. The line-fetch budget
-	// of 58% of a line assumes the feeder actually has the bus.
-	.rom_loaded(rom_loaded && !show_game),
-	.mode({1'b0, status[9]}),
-	.screen_x(screen_x), .screen_y(screen_y), .de(de),
-	.sdr_req(p0_req), .sdr_addr(p0_addr), .sdr_ack(p0_ack), .sdr_dout(p0_dout),
-	.r(r), .g(g), .b(b)
-);
+// The tile contact sheet is gone. It found the SDRAM byte order, the burst
+// addressing and the loader during bring-up, and then caused two problems of
+// its own: it kept fetching behind the game view and took half the bus, and its
+// SDRAM port is worth more to the tile feeder than its picture is to anyone. A
+// debug aid that outlives its usefulness becomes a liability.
 
 // ------------------------------------------------------------- game video
 //
@@ -642,8 +631,11 @@ kaneko_tilerom #(.NREQ(4), .SDR_AW(SDR_AW)) u_trom
 	.base_addr(trom_base_f),
 	.req_data(trom_data_f),
 	.ready(trom_ready),
-	.sdr_req(p2_req), .sdr_addr(p2_addr),
-	.sdr_ack(p2_ack), .sdr_dout(p2_dout)
+	// One port per layer. p1 is the 68000; the rest are the tile feeder's.
+	.sdr_req({p4_req, p3_req, p2_req, p0_req}),
+	.sdr_addr({p4_addr, p3_addr, p2_addr, p0_addr}),
+	.sdr_ack({p4_ack, p3_ack, p2_ack, p0_ack}),
+	.sdr_dout({p4_dout, p3_dout, p2_dout, p0_dout})
 );
 
 // ---------------------------------------------------------- line fetch
@@ -806,9 +798,11 @@ wire [7:0] dbg_b = dbg_set && in_ovr_row ? 8'hff : 8'h00;
 
 // The game picture and the palette swatches both come out of the palette RAM,
 // so they share the same decode.
-wire [7:0] src_r = show_game ? pal_r : (show == 2'd3 ? pal_r : r);
-wire [7:0] src_g = show_game ? pal_g : (show == 2'd3 ? pal_g : g);
-wire [7:0] src_b = show_game ? pal_b : (show == 2'd3 ? pal_b : b);
+// Both remaining views come out of the palette RAM, so they share the decode
+// and differ only in which address was asked for.
+wire [7:0] src_r = pal_r;
+wire [7:0] src_g = pal_g;
+wire [7:0] src_b = pal_b;
 
 wire [7:0] out_r = in_dbg ? dbg_r : src_r;
 wire [7:0] out_g = in_dbg ? dbg_g : src_g;
