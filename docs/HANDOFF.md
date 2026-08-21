@@ -3,142 +3,109 @@
 Read `CLAUDE.md` first, then this. `docs/findings.md` is the measured record;
 `docs/00-decisions.md` is what was decided and what would reverse it.
 
-**Status: M0 in progress. A bring-up core RUNS ON HARDWARE and puts tile
-artwork on screen.** It has no CPU — it loads the ROM into SDRAM and renders a
-contact sheet of the tile ROM. That establishes the loader, the SDRAM
-controller, the PLL, the video timing and the tile decode on the real board.
-What remains for M1 is the 68000, the address decode, work RAM and interrupts. The two hardest *novel* pieces are
-under way; the bulk of first bring-up is conventional integration that has not
-begun.
+**Status: Explosive Breaker boots and renders on hardware.** The 68000 runs its
+main loop, the tilemap layers draw with no visible artefacts, the EEPROM saves
+and restores, and the OKI sample path is fixed but not yet confirmed on the
+board. Sprites and inputs are the two blocks between here and a playable core.
+
+Bring-up title is **Explosive Breaker**, changed from Magical Crystals on
+2026-08-20 (`docs/00-decisions.md` D4).
 
 ---
 
-## What exists
+## What runs on hardware
 
 | | |
 |---|---|
-| `rtl/video/kaneko_tmap.sv` | VIEW2 coordinate pipeline — scroll, line scroll, tile lookup, attribute decode, tile-ROM pixel address. 236 yosys cells. |
-| `rtl/video/kaneko_vuspr.sv` | VU-002 sprite list parser with multisprite latching, plus sprite pixel address. 1231 cells, 216 FF. |
-| `rtl/video/kaneko_mixer.sv` | Layer/sprite priority mixing. 325 cells, combinational. |
-| `rtl/video/kaneko_tmap_fetch.sv` | Tile pixel fetch pipeline, 1 pixel/clock, 4 stages. 301 cells. |
-| `rtl/video/kaneko_vuspr_draw.sv` | Sprite bitmap renderer, first-writer-wins. 499 cells. |
-| `sim/` | Two fuzz harnesses (3.0M + 41k checks, both clean) and the frame gate. |
-| `tools/` | `bootstrap.sh`, `build_rom_regions.py`, `mame_dump_frame.lua`, `mame_view2_census.lua`. |
-| `Makefile` | `lint`, `test`, `area`, `frame`, `quartus` (17.0-guarded). |
+| ROM loader, SDRAM controller, PLL, video timing | yes |
+| 68000 (fx68k) + bus decode | yes — matches MAME exactly over 100k bus accesses |
+| ROM line cache | 16 lines x 4 words, ~0.1% miss; CPU at MAME's bus rate |
+| Scanline interrupts | IRQ5/4/3 autovectored, all three taken once per frame |
+| VIEW2 tilemaps | rendering, no visible artefacts |
+| VIEW2 / sprite register files | `kaneko_regs16`, byte-enabled |
+| 93C46 EEPROM | 20,910 reads replayed against MAME, zero mismatches; Save Backup RAM works |
+| YM2149 x2 (jt49) | wired and mixed; the game keeps their volumes at zero |
+| OKI M6295 (jt6295) | wired, **fix pending hardware confirmation** — see below |
 
-ROMs: all nine sets verify and boot, covering all three tiers.
+## What is left
 
-**These are address engines, not a video path.** They compute where a pixel
-comes from. Nothing yet stores, fetches, mixes or outputs one.
+Ordered as the owner asked for it: **sound, then finish video, then I/O.**
 
-## What the M0 gate says
+### 1. Sound
 
-```
-mgcrystl f600   diff=298   99.48%
-explbrkr f900   diff=0    100.00%   PASS
-blazeonj f600   diff=0    100.00%   PASS
-wingforc f600   diff=0    100.00%   PASS
-```
+- **OKI M6295 — fix in hand, unconfirmed on hardware.** The SDRAM port serving
+  the OKI burst one word instead of four, so the chip read a sample header made
+  of two good bytes and six stale ones. Root cause and the two `default:`
+  clauses that hid it are in `findings.md`. Verify with the debug overlay: rows
+  4-7 are yellow and count the four links in the chain.
+- Z80 + YM2151 subsystem for Blaze On and Wing Force. Different board: the
+  68000 writes a latch at `e00000`, which NMIs the Z80, which drives the
+  YM2151 on ports 0x02/0x03. T80 and jt51 are already pinned in `deps.lock`.
 
-M0's gate is scanline-exact. Neither passes. The tilemap path is close — under
-1% on `explbrkr`. The sprite path is where the error is, and the sprite
-measurement is not yet trustworthy (see below).
+### 2. Video
 
----
+- **Sprites.** `kaneko_vuspr_draw.sv` is written and fuzzed clean but not
+  instantiated. Needs `BMP_W_LOG2` split into separate width and height first;
+  320x256 chosen, about 170 M10K.
+- **Rotation output stage** (decision D3). `screen_rotate` in
+  `sys/arcade_video.v` does the work, but it needs `MISTER_FB=1`, the DDRAM
+  ports wired up (they are currently tied off) and OSD entries. It is a
+  **per-game fact** — `explbrkr` is ROT90, `wingforc` ROT270, `mgcrystl` and
+  Blaze On ROT0 — so it belongs in the game table, not as a constant.
+- Global layer flip is not implemented and no captured frame exercises it.
 
-## What is left before Explosive Breaker boots
+### 3. I/O
 
-(Bring-up title changed from Magical Crystals 2026-08-20 — see
-`docs/00-decisions.md` D4. Its video renders pixel-exact, so a bring-up failure
-points at the CPU or memory rather than the renderer.)
+- Controls and DIPs; inputs currently read as `0xffff`.
+- Coin lockout.
 
-Ordered roughly by dependency. Items marked **novel** have no drop-in source.
+### 4. Per-game support
 
-### 1. Finish the video path (partially started)
+The core is compiled for `explbrkr` alone. The memory map is `bakubrkr_map`
+and the screen offsets, colour base, sprite priorities, layer count and OKI
+`MAX_BANK` are constants. Everything above needs a game configuration table
+selected by the MRA's `<rom index="1">`, and the SDRAM map has to grow —
+`kan_spr` from 0x240000 to 0x280000 — before `mgcrystl` fits. Only `explbrkr`
+ships an MRA until then, because shipping one for a game the core cannot run
+looks like support and fails undiagnosably.
 
-- **novel** VRAM, scroll RAM, palette and sprite RAM in M10K — ~32 KB tile +
-  4 KB palette + 8 KB sprite
-- **novel** tile/sprite ROM fetch from SDRAM (1 MB + 1 MB tiles, 2.5 MB
-  sprites — far too large for M10K)
-- **novel** pixel pipeline and line buffers
-- ~~priority mixer as RTL~~ — done, `kaneko_mixer.sv`, gate-verified
-- ~~sprite bitmap renderer with the mask semantics~~ — done,
-  `kaneko_vuspr_draw.sv`. Still needs its double buffer and the flip each frame.
-- video timing generator, and the **rotation output stage** (decision D3)
+### 5. Verification debt
 
-### 2. CPU and bus
-
-- fx68k integration — drop-in core, but needs bus glue and wait states
-- address decode for `mgcrystl_map`, and 64 KB work RAM
-- interrupts: IRQ5 at scanline 224, IRQ4 at scanline 64, plus the third the
-  driver mentions and does not explain
-- watchdog
-
-### 3. Memory
-
-- SDRAM controller, single module (decision: single-stick is a hard target)
-- MRA ROM loader over the HPS interface, and region mapping matching
-  `ROM_START` — `tools/build_rom_regions.py` already encodes those layouts for
-  simulation and is the reference for it
-
-### 4. Sound
-
-- jt49 x2, including YM2149 port B (EEPROM chip select **and** OKI banking —
-  register I/O, not a separate chip)
-- jt6295 with sample ROM in SDRAM
-- audio mixing and output
-
-### 5. I/O
-
-- 93C46 EEPROM (persisted via the HPS)
-- controls and DIPs, coin lockout
-
-### 6. Framework and build
-
-- `sys/` integration, `sys_top`, OSD config string (including the D3 rotation
-  toggle)
-- PLL: 12 MHz main domain, 2 MHz sound domains
-- Quartus 17.0 project — `.qpf/.qsf/.sdc`, `files.qip`. `make quartus` already
-  guards the toolchain version but has no project to build.
-- MRA for `mgcrystl`
+- **There is no whole-core frame gate against MAME.** The M0 gate compares the
+  RTL renderer against a MAME frame dump; nothing compares the assembled core.
+  This is the single biggest gap, and it is what would have caught the OKI
+  burst bug in minutes.
 
 ---
 
-## Open questions that carry real risk into M1
+## Open questions that carry real risk
 
 1. **Screen timing is not PCB-verified.** MAME uses `set_refresh_hz(60)` with
-   no `set_raw()`, and annotates `vblank_time` `/* not accurate */`. Exact
-   pixel clock and blanking are unknown. This sets the PLL and the video
-   timing generator, so it is on the critical path, and no amount of
-   simulation resolves it — it needs a hardware reference or a PCB capture.
-   Wing Force's `59.1854` Hz is the only precise figure anywhere in the driver
-   and is worth chasing first.
-2. **Sprite lag: one-frame is measured better than two-frame, but is not
-   distinguishable from no lag.** The capture now happens at scanline 223,
-   immediately before the driver's `copy()`. One-frame beats two-frame on the
-   only frame that can separate them (6600 vs 6896) — evidence against MAME's
-   own `// 2 frame delayed normaly` for this board. But the one-frame snapshot
-   is byte-identical to the no-lag snapshot on both dumps, so that half is
-   still open and needs a frame where sprite RAM moves late.
-3. **The line-scroll index is unconfirmed against a frame.** Well-supported by
-   reading `tilemap.cpp`, but every frame tried so far is degenerate. Needs
-   Blaze On's 2nd demo level, which needs harness support for a one-chip,
-   512-sprite configuration.
-4. **Global layer flip is not implemented** and no captured frame exercises it.
-5. **Blaze On has two VU-002 chips** and MAME ignores the second register set
-   at `0x980000`. Deferred, but it is a real hardware behaviour that will need
-   solving for that title.
+   no `set_raw()`. We run 384x264 at 6 MHz, 59.1856 Hz. No amount of simulation
+   resolves this — it needs a hardware reference or a PCB capture. Wing Force's
+   `59.1854` Hz is the only precise figure in the driver.
+2. **`mgcrystl` still shows a 298-pixel line-scroll difference** in the M0 gate.
+   `explbrkr`, `blazeonj` and `wingforc` are exact.
+3. **Line-scroll RAM is read live, where MAME snapshots it.** Not yet shown to
+   matter on any captured frame.
+4. **An OSD reset still looks like it loses the EEPROM** — two orange bars for
+   4-5 seconds on the next boot. Unresolved; a cold power-up reads the saved
+   contents correctly.
+5. **Sprite lag: one-frame beats two-frame but is not distinguishable from
+   none.** Needs a frame where sprite RAM moves late.
+6. **Blaze On has two VU-002 chips** and MAME ignores the second register set at
+   `0x980000`. A real hardware behaviour that will need solving for that title.
 
 ---
 
-## Honest sizing
+## The thing that keeps going wrong
 
-The novel graphics work — the reason this core did not already exist — is
-perhaps a third done: the hard arithmetic is written and partially verified
-against the oracle. Everything in sections 2 through 6 above is conventional
-MiSTer core integration with existing parts, but it is *all* of first bring-up
-and none of it is started.
+Four devices have now been "wired" and found not to work, and every one was
+diagnosed the same way: build the instrument, compare against MAME, and find
+that some link in the chain was never tested. The OKI is the clearest case —
+the chip, the bank map and the ROM feeder were all correct, and the SDRAM port
+underneath them was handing out two valid bytes in eight.
 
-The nearest genuinely useful milestone is not "it boots". It is **closing the
-M0 gate to exact on `mgcrystl`**, because every later mistake is diagnosed
-against a video path known to be right.
+`make lint && make test` is the gate, and it only covers what has a harness.
+When a device is added, its *integration* is the thing to test, not the
+third-party core inside it.
