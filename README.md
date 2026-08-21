@@ -51,7 +51,7 @@ picture, each a binary count with the MSB at the left:
 | Row | Colour | Count |
 |---|---|---|
 | 1 | green | bus cycles |
-| 2 | amber | interrupts acknowledged |
+| 2 | amber | interrupts acknowledged (3 per frame = two lit blocks) |
 | 3 | cyan | line fetches that overran |
 | 4 | yellow | CPU writes reaching the OKI |
 | 5 | yellow | OKI sample-ROM fetches answered |
@@ -62,6 +62,9 @@ Each row is a binary number with the MSB at the left, one block per bit; a
 clear bit is dark red rather than black, so "the count is zero" is
 distinguishable from "this readout is not being drawn", which are different
 faults wanting opposite fixes.
+
+The number of lit blocks is not the number counted: the interrupt row's correct
+reading is 3, which draws as two adjacent lit blocks at the right-hand end.
 
 Rows 4-7 are a chain: the first dark one is where the sound path breaks, and
 each rules out everything above it. Row 1 dipping means the CPU is being

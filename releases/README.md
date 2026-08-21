@@ -47,10 +47,28 @@ The dark-red field matters — it is how you tell "the count is zero" from "this
 readout is not being drawn at all", which are different faults that want
 opposite fixes.
 
+**Count blocks, not the value.** A row is a number written in binary, so the
+number of lit blocks is not the number being counted. Reading right to left,
+the rightmost block is worth 1, the next 2, then 4, 8 and so on:
+
+| lit blocks (rightmost first) | value |
+|---|---|
+| none | 0 |
+| `1` | 1 |
+| `1 0` | 2 |
+| `1 1` | **3** |
+| `1 0 0` | 4 |
+| `1 1 1 1 1 1 1 1` | 255 |
+
+So the interrupt row showing **two adjacent lit blocks at the right-hand end is
+a count of 3**, which is correct and what you want to see. One lit block on its
+own would be a count of 1, and would mean two of the three interrupts are
+missing.
+
 | Row | Colour | Counts, per frame |
 |---|---|---|
 | 1 | green | 68000 bus cycles. This is the CPU's pulse — if it is dark the CPU is not running, and if it dips the CPU is being starved of memory bandwidth. 20 bits. |
-| 2 | amber | Interrupts acknowledged. Should be a steady 3 per frame (IRQ5, IRQ4, IRQ3). 8 bits. |
+| 2 | amber | Interrupts acknowledged. Should be a steady **3** per frame — IRQ5, IRQ4 and IRQ3 — which draws as two adjacent lit blocks at the right-hand end. 8 bits. |
 | 3 | cyan | Tile line fetches that overran — the fetch for a scanline was still running when the next one started. Zero is correct. Non-zero means the video path is short of SDRAM bandwidth, and the count says by how much. 16 bits. |
 | 4 | yellow | CPU writes reaching the OKI M6295 at `400401`. 16 bits. |
 | 5 | yellow | OKI sample-ROM fetches answered. |
