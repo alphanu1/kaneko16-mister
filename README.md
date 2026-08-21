@@ -31,6 +31,7 @@ Miles Rally 1/2.
 | Video timing | 384x264 at 6 MHz, 59.1856 Hz; running on hardware |
 | SDRAM controller, ROM loader | running on hardware |
 | 68000 (fx68k) + bus decode | running on hardware; matches MAME exactly over 100k bus accesses |
+| ROM line cache | 16 lines x 4 words, 0.1% miss; CPU back to MAME's bus rate |
 | Scanline interrupts | IRQ5/4/3 with autovectoring; unit-tested, not yet exercised past boot |
 | VIEW2 / sprite register files | **stubbed** — the CPU's writes go nowhere and read back as 0 |
 | Sound (YM2149 x2, OKI M6295) | **not started** |

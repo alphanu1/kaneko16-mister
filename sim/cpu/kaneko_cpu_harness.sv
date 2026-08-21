@@ -16,9 +16,23 @@ module kaneko_cpu_harness (
     input  wire        clk,
     input  wire        rst,
 
-    // ROM, answered by the testbench
-    output wire [23:1] rom_a,
-    input  wire [15:0] rom_q,
+    // ROM, answered by the testbench.
+    //
+    // A FOUR-WORD BURST AT THE ADDRESS THE BUS ASKS FOR
+    //
+    // This was `rom_a = eab` with a single 16-bit `rom_q` in the low lane,
+    // which was fine while kaneko_bus took one word per burst and threw the
+    // rest away. It stopped being fine the moment the ROM line cache landed:
+    // the bus aligns its request down and stores all four returned words, so a
+    // harness that supplies one real word and three zeros fills the cache with
+    // rubbish and the CPU executes it. The test still "passed" — it just
+    // stopped reaching the unmapped writes it had been counting, which is the
+    // only reason the change was noticed at all.
+    //
+    // rom_a is now the bus's own request, and the testbench must answer with
+    // the four words starting there.
+    output wire [24:1] rom_a,
+    input  wire [63:0] rom_q,
 
     // Bus observability
     output wire [23:1] bus_addr,
@@ -61,16 +75,17 @@ module kaneko_cpu_harness (
     );
 
     // ROM answered in one cycle: request out, data back, ack immediately.
-    assign rom_a = eab;
+    wire [24:1] rom_addr_w;
+    assign rom_a = rom_addr_w;
     wire rom_ack_now = 1'b1;
 
-    kaneko_bus u_bus (
+    kaneko_bus #(.SDR_AW(24)) u_bus (
         .clk(clk), .rst(rst),
         .eab(eab), .ASn(ASn), .LDSn(LDSn), .UDSn(UDSn), .eRWn(eRWn),
-        .oEdb(oEdb), .iEdb(iEdb), .DTACKn(DTACKn),
+        .oEdb(oEdb), .iEdb(iEdb), .DTACKn(DTACKn), .cpu_space(1'b0),
 
-        .rom_req(), .rom_addr(), .rom_ack(rom_ack_now),
-        .rom_dout({16'd0, 16'd0, 16'd0, rom_q}),
+        .rom_req(), .rom_addr(rom_addr_w), .rom_ack(rom_ack_now),
+        .rom_dout(rom_q),
 
         .vram0_we(), .vram1_we(), .spr_we(), .pal_we(),
         .vmem_addr(), .vmem_din(),

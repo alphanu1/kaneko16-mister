@@ -42,7 +42,11 @@
 
 module kaneko_bus #(
     parameter int unsigned SDR_AW   = 25,
-    parameter logic [24:0] ROM_BASE = 25'd0     // word address of ROM in SDRAM
+    parameter logic [24:0] ROM_BASE = 25'd0,  // word address of ROM in SDRAM
+
+    // Four-word lines of ROM cache, direct-mapped. Power of two, at least 2.
+    // Sized by measurement — see the hit-rate table in docs/findings.md.
+    parameter int unsigned ROM_LINES = 16
 )(
     input  wire        clk,
     input  wire        rst,
@@ -165,26 +169,94 @@ module kaneko_bus #(
 
     logic [15:0] rom_word;
 
+    // ---------------------------------------------------- ROM line cache
+    //
+    // Direct-mapped, ROM_LINES lines of four words — one SDRAM burst each.
+    //
+    // Without any cache every instruction fetch cost a whole burst — request,
+    // arbitration, activate, CAS, four words back, three of them thrown away —
+    // and the next fetch was almost always the very next word, so it paid the
+    // whole cost again. Measured at 35.7 clk ticks per bus cycle against the 16
+    // a 12 MHz 68000 needs: the CPU ran at about 45% speed, which is not a
+    // performance problem but a correctness one. A core that runs the game at
+    // half speed is wrong, and wrong in a way that looks like bad timing in
+    // every other block.
+    //
+    // ONE LINE IS NOT ENOUGH, AND THE REASON IS MEASURABLE
+    //
+    // A single line only helps straight-line code. explbrkr's boot self-test
+    // sits in a loop at 00ca14..00ca24 which spans three four-word blocks, so a
+    // one-line cache misses on every fetch of it — requests halved rather than
+    // quartered, and the whole gain came from elsewhere. Direct-mapped over
+    // several lines holds a loop of that size entirely.
+    //
+    // THE REQUEST IS ALIGNED DOWN, WHICH IT WAS NOT BEFORE
+    //
+    // The controller starts a burst at the EXACT word address given and
+    // increments from there (kaneko_sdram.sv S_RD: `xfer_addr[COL_BITS:1] + 1`)
+    // — it does not align. Asking for an unaligned address therefore returned a
+    // window straddling two lines, which cannot be tagged at all. Asking for
+    // `{wa[SDR_AW:3], 2'b00}` makes the burst a natural four-word block, so the
+    // tag is the address above the index and the lane is wa[2:1].
+    //
+    // It also removes a hazard that was there before: the controller wraps a
+    // burst inside the column bits, and an unaligned four-word burst can cross
+    // a row boundary. An aligned one never can, because 1024 words per row
+    // divides evenly into four-word blocks.
+    //
+    // No invalidation. The region is ROM, written once by the loader before
+    // cpu_rst is released and never again. `rst` covers the one case that
+    // matters — a fresh download holds the CPU in reset anyway.
+    localparam int unsigned IDXW  = $clog2(ROM_LINES);
+    localparam int unsigned TAGLO = 3 + IDXW;
+
+    logic [63:0]          cdata  [0:ROM_LINES-1];
+    logic [SDR_AW:TAGLO]  ctag   [0:ROM_LINES-1];
+    logic [ROM_LINES-1:0] cvalid;
+
+    wire [SDR_AW:1]   rom_wa = SDR_AW'(ROM_BASE + {8'd0, a[23:1]});
+    wire [IDXW-1:0]   cidx   = rom_wa[TAGLO-1:3];
+    wire              line_hit = cvalid[cidx] && (ctag[cidx] == rom_wa[SDR_AW:TAGLO]);
+    wire [1:0]        lane     = rom_wa[2:1];
+    wire [15:0]       line_word = cdata[cidx][{lane, 4'd0} +: 16];
+
+    wire [15:0]     burst_word = rom_dout[{lane, 4'd0} +: 16];
+
     always_ff @(posedge clk) begin
         vram0_we <= 1'b0; vram1_we <= 1'b0; spr_we <= 1'b0; pal_we <= 1'b0;
         v2r0_we  <= 1'b0; v2r1_we  <= 1'b0; sprreg_we <= 1'b0;
         unmapped_hit <= 1'b0;
 
         if (rst) begin
-            state   <= S_IDLE;
-            DTACKn  <= 1'b1;
-            rom_req <= 1'b0;
+            state      <= S_IDLE;
+            DTACKn     <= 1'b1;
+            rom_req    <= 1'b0;
+            cvalid     <= '0;
         end else begin
             case (state)
                 S_IDLE: begin
                     DTACKn <= 1'b1;
                     if (as && ds) begin
                         if (sel_rom) begin
-                            // Four words come back per burst; take the one
-                            // addressed. ROM lives at SDRAM word 0 (D6).
-                            rom_addr <= SDR_AW'(ROM_BASE + {8'd0, a[23:1]});
-                            rom_req  <= 1'b1;
-                            state    <= S_ROM;
+                            if (line_hit) begin
+                                // Served without touching SDRAM at all, and
+                                // DTACK goes out on THIS edge rather than on
+                                // the next one in S_DONE. That one clk is the
+                                // difference between landing inside the 68000's
+                                // sampling window for the current cycle and
+                                // missing it, which costs a whole CPU clock —
+                                // four ticks here, and about 20% of the CPU's
+                                // speed once the cache is doing its job.
+                                rom_word <= {line_word[7:0], line_word[15:8]};
+                                DTACKn   <= 1'b0;
+                                state    <= S_DONE;
+                            end else begin
+                                // ROM lives at SDRAM word 0 (D6). Aligned down
+                                // so the burst is a natural line — see above.
+                                rom_addr <= {rom_wa[SDR_AW:3], 2'b00};
+                                rom_req  <= 1'b1;
+                                state    <= S_ROM;
+                            end
                         end else begin
                             if (wr) begin
                                 vram0_we  <= sel_v2w0;
@@ -202,26 +274,22 @@ module kaneko_bus #(
                                 unmapped_hit  <= 1'b1;
                                 unmapped_addr <= a;
                             end
-                            state <= S_DONE;
+                            // Same one-clk saving as the cache hit above: work
+                            // RAM, video memory and the registers all answer
+                            // immediately, so there is no reason to spend an
+                            // edge getting to S_DONE before saying so.
+                            DTACKn <= 1'b0;
+                            state  <= S_DONE;
                         end
                     end
                 end
 
                 S_ROM: if (rom_ack) begin
-                    rom_req <= 1'b0;
-                    // Word 0 of the burst IS the requested word. The controller
-                    // starts a burst at the EXACT address given and increments
-                    // from there — it does not align down (kaneko_sdram.sv
-                    // S_RD: `xfer_addr[COL_BITS:1] + 1`). Selecting a lane by
-                    // a[2:1], as if the burst were 4-word aligned, returned the
-                    // right word only when a[2:1] was 0 — so every odd word
-                    // read as zero and the reset vectors came back
-                    // 0010 0000 0000 0000 instead of 0010 f7fc 0000 0914.
-                    //
-                    // The other three words are discarded here. Caching them
-                    // would serve most sequential fetches from one burst and is
-                    // the obvious optimisation once the CPU runs.
-                    //
+                    rom_req    <= 1'b0;
+                    cdata[cidx]  <= rom_dout;
+                    ctag[cidx]   <= rom_wa[SDR_AW:TAGLO];
+                    cvalid[cidx] <= 1'b1;
+
                     // BYTE ORDER: the swap is not cosmetic.
                     //
                     // hps_io runs WIDE=1, and in WIDE mode file byte n lands in
@@ -243,7 +311,10 @@ module kaneko_bus #(
                     // see it: it fed the CPU big-endian words straight from the
                     // file and never went through the loader at all. sim/top
                     // does, and fails without this line.
-                    rom_word <= {rom_dout[7:0], rom_dout[15:8]};
+                    //
+                    // Taken from rom_dout rather than from line_data: the
+                    // register has not been written yet on this edge.
+                    rom_word <= {burst_word[7:0], burst_word[15:8]};
                     state    <= S_DONE;
                 end
 

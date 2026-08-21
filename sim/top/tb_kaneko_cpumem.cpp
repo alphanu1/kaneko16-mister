@@ -38,6 +38,7 @@ struct Stats {
     bool     got_vectors = false;
     uint64_t unmapped = 0;
     uint32_t first_unmapped = 0;
+    uint64_t rom_reads = 0;      // bus cycles that hit the ROM window
     uint64_t iack[8] = {0};
     uint64_t iack_total = 0;
     uint64_t first_iack_tick = 0;
@@ -118,6 +119,7 @@ static Stats run(const std::vector<uint8_t>& rom, bool swap, bool verbose,
             st.last_dtack_tick = tick_count;
             uint32_t a = (uint32_t)dut->cpu_addr << 1;
             uint16_t d = dut->cpu_din;
+            if (a < 0x080000) st.rom_reads++;   // kaneko_bus sel_rom
             if (trace_fp && trace_n < trace_limit) {
                 // MAME reports the value on the bus and the lanes as a mask;
                 // a read takes iEdb, a write takes oEdb.
@@ -172,11 +174,21 @@ static uint32_t bswap32(uint32_t v) {
 }
 
 static void report(const char* name, const Stats& s, uint64_t run_ticks) {
+    const uint64_t run_ticks_ref = run_ticks;
     std::printf("  %s\n", name);
     std::printf("    AS cycles       %llu\n", (unsigned long long)s.as_edges);
     std::printf("    DTACKs          %llu\n", (unsigned long long)s.dtack_edges);
     std::printf("    ROM req / ack   %llu / %llu\n",
                 (unsigned long long)s.req_edges, (unsigned long long)s.ack_edges);
+    if (s.rom_reads) {
+        const double miss = 100.0 * (double)s.req_edges / (double)s.rom_reads;
+        std::printf("    ROM accesses    %llu, %.1f%% missed the cache\n",
+                    (unsigned long long)s.rom_reads, miss);
+    }
+    if (s.dtack_edges && run_ticks_ref) {
+        std::printf("    ticks/cycle     %.1f  (a 12 MHz 68000 needs 16)\n",
+                    (double)run_ticks_ref / (double)s.dtack_edges);
+    }
     if (s.got_vectors)
         std::printf("    reset SSP/PC    %08X / %08X\n", s.reset_ssp, s.reset_pc);
     std::printf("    last DTACK at   %llu of %llu ticks%s\n",

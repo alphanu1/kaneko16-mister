@@ -2365,3 +2365,67 @@ timing everywhere else.
 
 Three of four sequential fetches should hit a four-word line. That is the next
 change, and this measurement is its gate.
+
+### Fixed: a 16-line ROM cache brings the CPU back to MAME's bus rate
+
+*Instrument: `make boot BOOT_ARGS="--ticks 3000000"`, which now reports miss
+rate and ticks per bus cycle; MAME's own rate measured with a tap counter over
+60 frames.*
+
+MAME does **41,517 bus cycles per frame** on explbrkr. That, not the 68000's
+four-clock minimum, is the number to match — a real 68000 spends plenty of
+clocks on internal cycles with no bus activity, so 16 ticks per cycle is a lower
+bound neither machine reaches.
+
+| ROM cache | bus cycles / frame | vs MAME | ticks / cycle |
+|---|---|---|---|
+| none | 24,412 | 59% | 33.2 |
+| 1 line | 32,236 | 78% | 25.2 |
+| 16 lines | 42,240 | ~102% | 19.2 |
+
+The remaining difference is under 2% and is instruction mix between the two
+measurement windows, not a speed difference: the memory system has stopped being
+the limit.
+
+Two changes got there.
+
+**Direct-mapped, four-word lines, aligned.** The controller starts a burst at
+the exact word address given and increments — it does not align — so an
+unaligned request returns a window straddling two lines that cannot be tagged at
+all. Aligning to `{wa[SDR_AW:3], 2'b00}` makes each burst a natural block, and
+incidentally removes a hazard that was already there: the controller wraps a
+burst inside the column bits, and an unaligned four-word burst can cross a row
+boundary, which an aligned one never can.
+
+**One line is not enough, and the reason is measurable.** A single line only
+helps straight-line code. explbrkr's boot self-test sits in a loop at
+`00ca14..00ca24` spanning three four-word blocks, so a one-line cache misses on
+every fetch of it — ROM requests halved rather than quartered. Direct-mapped
+over several lines holds it entirely: **0.1% miss rate**, and 4 lines measured
+the same as 32.
+
+16 is kept rather than 4 because the 3 M-tick window is dominated by that one
+self-test loop, and the core cannot yet reach the game's actual main loop to
+measure its working set. 16 lines costs **+120 ALMs and +1,296 memory bits** —
+0.3% of the device — which is cheap insurance against a working set this
+measurement cannot see. Revisit it with a real number once the game runs.
+
+**DTACK one clock earlier.** With the cache doing its work the bus was still
+spending an edge getting to `S_DONE` before asserting DTACK. Asserting it in
+`S_IDLE` for the paths that answer immediately — a cache hit, work RAM, video
+memory, the registers — took 19.8 ticks per cycle to 19.2.
+
+The cache is transparent: `make bustrace` still reports MATCH over all 22,897
+compared accesses, which is the check that matters — a cache that returned the
+wrong word would diverge from MAME on the first hit.
+
+### A missing .qsf entry cost a build
+
+`kaneko_irq.sv` was written, linted, unit-tested and wired in, and the Quartus
+build died nine seconds in with "instantiates undefined entity" — after lint and
+the full simulation gate had already run. The `.qsf` lists sources one at a time,
+so a new module is invisible to synthesis until someone remembers it.
+
+`make quartus` now runs `qsf-check` first, which fails if any file under `rtl/`
+is missing from the project. It runs before lint and test, so the answer arrives
+in a second rather than after the gate.

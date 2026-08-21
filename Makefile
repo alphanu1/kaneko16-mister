@@ -93,7 +93,24 @@ quartus-check:
 # tmpfs shared with other work, and quartus_map died with "ended unexpectedly.
 # Verify that you have sufficient memory available" when it filled — a message
 # that points at RAM when the problem was a full tmpfs.
-quartus: lint test quartus-check
+# EVERY RTL FILE MUST BE IN THE PROJECT
+#
+# The .qsf lists sources one by one, so a new module is invisible to Quartus
+# until someone remembers to add it. kaneko_irq.sv was not, and the build died
+# with "instantiates undefined entity" — nine seconds into a run that had
+# already spent several minutes on lint and the simulation gate. Checked here
+# instead, before any of that.
+.PHONY: qsf-check
+qsf-check:
+	@miss=""; for f in $(RTL); do \
+	  grep -qF "$$f" Kaneko16.qsf || miss="$$miss $$f"; done; \
+	if [ -n "$$miss" ]; then \
+	  echo "quartus: these RTL files are not in Kaneko16.qsf:"; \
+	  for f in $$miss; do echo "         $$f"; done; \
+	  echo "         add a SYSTEMVERILOG_FILE line for each."; exit 1; fi
+	@echo "qsf: all $(words $(RTL)) RTL file(s) in the project"
+
+quartus: qsf-check lint test quartus-check
 	@mkdir -p build/tmp build/quartus build/db build/incremental_db
 	@# Quartus creates db/ and incremental_db/ in the project root and has no
 	@# assignment that moves them, so they are symlinked into build/. Rule 10.
