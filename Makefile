@@ -224,6 +224,32 @@ eetest:
 	      $(RTL) sim/io/tb_kaneko_eeprom_replay.cpp; exit 1; }
 	@./build/obj_kaneko_eereplay/kaneko_eereplay $(TRACE_DIR)/ee_stim.txt
 
+# --------------------------------------------------------------- release
+# The layout MiSTer expects, and what a tester copies to the SD card:
+#
+#   releases/Kaneko16_YYYYMMDD.rbf        the bitstream, dated
+#   releases/<Game> (Region).mra          one primary MRA per game
+#   releases/_alternatives/_<Game>/...    regional variants, opt-in
+#
+# The primary MRA is what appears in /_Arcade/ on a stock install; variants are
+# copied by hand. Convention for "primary" is World or USA if one exists,
+# otherwise Japan — so Blaze On's only dumped set here is the Japan one and it
+# sits under _alternatives until a World set turns up.
+#
+# releases/ is gitignored for now: the .rbf changes every build and this core is
+# not ready to publish. Un-ignore it when there is a version worth tagging.
+.PHONY: release
+release:
+	@test -f build/quartus/Kaneko16.rbf || { \
+	  echo "release: no bitstream — run 'make quartus' first"; exit 1; }
+	@mkdir -p releases/_alternatives
+	@d=$$(date +%Y%m%d); cp build/quartus/Kaneko16.rbf releases/Kaneko16_$$d.rbf; \
+	  echo "  releases/Kaneko16_$$d.rbf"
+	@for gf in $(GATE_GAMES); do g=$${gf%%:*}; \
+	  $(MAKE) --no-print-directory mra SET=$$g >/dev/null 2>&1 || true; done
+	@tools/stage_release.py mra releases
+	@find releases -type f | sort | sed 's/^/  /'
+
 # ---------------------------------------------------------------- deploy
 # Copy the core and its MRAs to a MiSTer and verify the checksum. Override the
 # address with MISTER=<ip>. See tools/deploy.sh for why this is a script and

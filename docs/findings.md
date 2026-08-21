@@ -2866,3 +2866,51 @@ none of which look wrong when read:
 And the cheap check for all of them is `quartus_map` alone — two minutes against
 the full flow's eighteen — grepping for `Inferred altsyncram` per array. That
 found this one before a build was spent on it.
+
+### The SDRAM map is sized for explbrkr, and mgcrystl does not fit
+
+`make mra SET=mgcrystl` fails:
+
+```
+kan_spr: 0x280000 bytes does not fit 0x240000
+```
+
+`SDRAM_MAP` allocates 0x240000 for the sprite region, which is explbrkr's size.
+mgcrystl needs 0x280000. The map has to be sized for the LARGEST region across
+every supported game, not the one that was brought up first — a per-game map
+would mean the core's region base addresses change per game, and those are
+compiled in.
+
+Growing kan_spr to 0x280000 pushes oki1 from 0x4c0000 to 0x500000 and the total
+to 0x600000, six megabytes of a 64 MB module. Nothing is short of space; the
+work is that the bases are hardcoded in Kaneko16.sv (TROM0_BASE, TROM1_BASE,
+OKI_BASE) and have to move with the map.
+
+Deferred rather than done: the sound path is mid-debug and changing every ROM
+base underneath it would confuse the two. It belongs with the per-game
+configuration table, where the map should be fixed once for all four games.
+
+### Release layout
+
+The MiSTer convention, recorded because it is not obvious from the tooling:
+
+```
+releases/Kaneko16_YYYYMMDD.rbf        the bitstream, dated
+releases/<Game> (Region).mra          one primary MRA per game
+releases/_alternatives/_<Game>/...    regional variants, opt-in
+```
+
+The primary MRA appears in `/_Arcade/` on a stock install; the alternatives are
+copied by hand. "Primary" is World or USA where one exists, otherwise Japan —
+so Blaze On's only dumped set here is the Japan one and it sits under
+`_alternatives` until a World set turns up.
+
+`make release` builds that layout. `releases/` stays gitignored while the core
+changes every twenty minutes; un-ignore it when there is a version worth
+tagging. The MRAs go to MiSTer-devel/MRA-Alternatives_MiSTer only once the core
+is stable enough for the official update system.
+
+MRAs now carry `<category>`, which `arcade-organizer` uses to sort games. It is
+the one field not taken from MAME — the `GAME()` line has year, manufacturer
+and title but no genre — so it is a hand table in build_rom_regions.py and
+should be checked by someone who knows the games.

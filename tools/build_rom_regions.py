@@ -104,6 +104,25 @@ SETS = {
 # set name -> zip basename, where they differ
 ZIPNAME = {"blazeonj": "blazeon"}
 
+# arcade-organizer categories. Not derivable from MAME's GAME() line — that
+# carries year, manufacturer and title but no genre — so this is a hand table,
+# and it is the one place in this file that is not taken from the oracle.
+# Missing categories do not break anything; they just leave the game out of
+# arcade-organizer's sorted view.
+CATEGORY = {
+    "explbrkr": "Shooter / Flying Vertical",
+    "mgcrystl": "Platform",
+    "blazeonj": "Shooter / Flying Horizontal",
+    "wingforc": "Shooter / Flying Vertical",
+}
+
+# Which MRA is the primary one for a game, and which are variants. The primary
+# sits in releases/ and appears in the /_Arcade/ menu on a stock install;
+# variants go under releases/_alternatives/_<Game>/ and are opt-in. Convention
+# is World or USA if one exists, otherwise Japan.
+PRIMARY = {"explbrkr", "mgcrystl", "wingforc"}
+ALT_PARENT = {"blazeonj": "Blaze On"}
+
 # SDRAM layout: region -> (base, size). This IS the MRA's emission order, and
 # the loader maps it as the identity — stream byte N is SDRAM byte N.
 #
@@ -278,6 +297,8 @@ def build_mra(setname, rompath, outdir):
         ET.SubElement(root, "year").text = info["year"]
     if info["manufacturer"]:
         ET.SubElement(root, "manufacturer").text = info["manufacturer"]
+    if setname in CATEGORY:
+        ET.SubElement(root, "category").text = CATEGORY[setname]
 
     # Save Backup RAM: the 93C46 EEPROM, 64 words of 16 bits.
     #
