@@ -3673,3 +3673,53 @@ extra entries buy nothing. The counts confirm it — `kaneko_tilerom` reports
 and the fix aimed at it. The round-trip *count* was never questioned, and it was
 the term with a factor of two sitting in it for free. Measuring which term
 dominates is not the same as measuring whether that term is necessary.
+
+### Confirmed: the missing laser WAS the sprite overrun
+
+The owner proposed it and was right, against three of my own hypotheses that
+were not. Worth recording how the wrong ones were eliminated, because each was
+eliminated by measurement rather than by argument:
+
+| suspect | how it was ruled out |
+|---|---|
+| keep-sprites inverted | a MAME write tap: sprite register 0 written twice in 2,400 frames, both `0x4fcc`, bit 2 set — `keep_sprites` is never enabled in this game |
+| the off-screen skip | made it an OSD toggle; flipping it changed nothing |
+| the mixer reading the bitmap | never needed testing — the cache fix resolved it first |
+
+The mechanism fits exactly. A pass that overruns its frame means the sequencer
+ignores the next `frame_start`, so **sprite RAM is sampled every other frame**.
+A laser that exists in RAM for a frame or two is then simply not seen — not
+drawn wrongly, absent. That is why it looked intermittent, why it appeared to
+"clear early", and why it tracked changes in pass duration rather than anything
+in the drawing.
+
+The lesson for the next one: the symptom was *a sprite is missing*, and every
+hypothesis I formed was about the sprite pipeline — the parser, the clip, the
+mask, the mixer. None was about **whether the pipeline ran often enough**. The
+owner's was, and the owner's was right.
+
+### The remaining 1.5%
+
+Reported at about 1.5% of frames over a ten-minute run — roughly 530 of 35,500.
+Simulation says the pathological case, 1024 fully visible sprites, now takes
+673,204 clocks of an 811,008 budget: 83% used, 17% spare. Real content is
+lighter than that but the simulation models a fixed 18-clock SDRAM latency with
+no contention, and the board has seven ports competing, so the spare is thinner
+in practice than on paper.
+
+Sixteen fetches per sprite is now the floor, not an inefficiency: a 16x16 4bpp
+sprite is 128 bytes and a block is 8, so all sixteen must be read. The
+one-entry cache was doing **thirty-two** because the A,B,A,B walk evicted each
+block before the next row wanted it; two entries brought it to the minimum.
+
+Reducing it further means not waiting for each fetch rather than making fewer:
+
+- **Pipelining.** A sprite's sixteen block addresses are a deterministic
+  function of `(code, xx, yy)`, so the next can be requested before the current
+  arrives. Two outstanding requests would hide most of the round trip. Contained
+  in `kaneko_tilerom`, no clocks touched.
+- **The 2x SDRAM clock.** Halves every round trip everywhere, not just here, but
+  needs the PLL work, the adapter that does not yet pass, and a retimed design.
+
+Pipelining first, on the same reasoning as last time: it is the cheaper of the
+two and it addresses the term that actually dominates.

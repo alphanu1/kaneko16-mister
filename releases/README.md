@@ -30,6 +30,9 @@ of the newest build in this directory.
 
 - Screen rotation is not implemented. Explosive Breaker is a ROT90 game, so it
   plays sideways on a horizontal monitor until the rotation output stage lands.
+- The sprite renderer still overruns its frame on about 1.5% of frames with
+  heavy content, so sprites occasionally update a frame late. Down from every
+  frame. Debug row 8 counts it.
 - Music is absent: the YM2149s are wired and mixed, but this board's music is
   OKI samples and the game keeps the PSG volumes at zero. Verify against MAME
   before treating that as a fault.
