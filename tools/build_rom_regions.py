@@ -61,6 +61,14 @@ SETS = {
     # same offsets with identical data — the board has two sprite chips fed the
     # same ROMs, which MAME handles as one.
     "blazeonj": {
+        # 68000 program, ROM_LOAD16_BYTE: u80 even bytes, u81 odd. The region
+        # is ROMREGION_ERASEFF, so the tail of the 1 MB slot is 0xff — a game
+        # reading up there gets what the hardware gives it, not zeroes.
+        "maincpu": [
+            ("bz_prg1.u80", 0x000000, 0x040000, [], "16le", 0),
+            ("bz_prg2.u81", 0x000000, 0x040000, [], "16le", 1),
+        ],
+        "audiocpu": [("3.u45", 0x000000, 0x020000, [])],
         "view2_0": [("bz_bg.u2", 0x000000, 0x100000, [])],
         "kan_spr": [
             ("bz_sp1.u20", 0x000000, 0x100000, []),
@@ -70,6 +78,11 @@ SETS = {
     # Wing Force. ONE VIEW2 chip, and its tile region is ROM_LOAD16_BYTE
     # interleaved across four files.
     "wingforc": {
+        "maincpu": [
+            ("e_2.24.u80", 0x000000, 0x080000, [], "16le", 0),
+            ("o_2.24.u81", 0x000000, 0x080000, [], "16le", 1),
+        ],
+        "audiocpu": [("s-drv_2.22.u45", 0x000000, 0x010000, [])],
         "view2_0": [
             ("bg0am.u2", 0x000000, 0x080000, [], "16le", 0),
             ("bg0bm.u2", 0x000000, 0x080000, [], "16le", 1),
@@ -217,8 +230,10 @@ REGION_SIZE = {
     },
     "explbrkr": {"maincpu": 0x080000, "view2_0": 0x100000, "view2_1": 0x100000,
                  "kan_spr": 0x240000, "oki1": 0x100000},
-    "blazeonj": {"view2_0": 0x100000, "kan_spr": 0x200000},
-    "wingforc": {"view2_0": 0x200000, "kan_spr": 0x200000, "oki1": 0x080000},
+    "blazeonj": {"maincpu": 0x100000, "audiocpu": 0x020000,
+                 "view2_0": 0x100000, "kan_spr": 0x200000},
+    "wingforc": {"maincpu": 0x100000, "audiocpu": 0x010000,
+                 "view2_0": 0x200000, "kan_spr": 0x200000, "oki1": 0x080000},
 }
 
 

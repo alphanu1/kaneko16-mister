@@ -965,8 +965,12 @@ wire [15:0] spr_ram_q;
 // the parser folds visarea().min_y into every record. Adding the offset again
 // here shifted every sprite 16 lines, which is a sixteenth of the screen.
 
+// The surface is 320 wide because the Blaze On board is, and one bitstream
+// serves every game — Explosive Breaker simply uses 256 columns of it. 320 is
+// not a power of two, so the address is y*320 + x; rounding up to 512 would
+// not fit in 553 M10K beside everything else.
 kaneko_spr_sys #(
-	.BMP_W_LOG2(8), .BMP_H_LOG2(8), .SPRITES(1024), .SDR_AW(SDR_AW)
+	.BMP_W(320), .BMP_H(256), .SPRITES(1024), .SDR_AW(SDR_AW)
 ) u_spr
 (
 	.clk(clk_sys), .rst(rst_sys),
@@ -989,7 +993,7 @@ kaneko_spr_sys #(
 	.sdr_req(p67_req), .sdr_addr(p67_addr),
 	.sdr_ack(p67_ack), .sdr_dout(p67_dout),
 
-	.rd_x(screen_x[7:0]), .rd_y(screen_y[7:0]),
+	.rd_x(10'(screen_x)), .rd_y(10'(screen_y)),
 	.spr_pix(spr_pix), .spr_prio(spr_prio),
 
 	.busy(spr_busy), .overrun(spr_overrun)

@@ -68,10 +68,10 @@
 `default_nettype none
 
 module kaneko_spr_sys #(
-    parameter int unsigned BMP_W_LOG2 = 8,
-    parameter int unsigned BMP_H_LOG2 = 8,
-    parameter int unsigned SPRITES    = 1024,
-    parameter int unsigned SDR_AW     = 25
+    parameter int unsigned BMP_W   = 320,   // widest screen in the driver
+    parameter int unsigned BMP_H   = 256,
+    parameter int unsigned SPRITES = 1024,
+    parameter int unsigned SDR_AW  = 25
     // No `localparam` in the parameter list — Quartus 17.0 rejects it.
 ) (
     input  wire clk,
@@ -114,8 +114,8 @@ module kaneko_spr_sys #(
 
     // Mixer read port. The pixel arrives ONE clock after the coordinates, in
     // step with kaneko_tmap_line's own registered line-buffer read.
-    input  wire [BMP_W_LOG2-1:0] rd_x,
-    input  wire [BMP_H_LOG2-1:0] rd_y,
+    input  wire [9:0]   rd_x,
+    input  wire [9:0]   rd_y,
     output wire [13:0]      spr_pix,     // 0 = nothing here
     output wire [1:0]       spr_prio,
 
@@ -124,8 +124,8 @@ module kaneko_spr_sys #(
     output logic [15:0] overrun
 );
 
-    localparam int unsigned AW   = BMP_W_LOG2 + BMP_H_LOG2;
-    localparam int unsigned NPIX = 1 << AW;
+    localparam int unsigned NPIX = BMP_W * BMP_H;
+    localparam int unsigned AW   = $clog2(NPIX);
 
     // ------------------------------------------------------ resolved table
     // 47 bits of payload; kaneko_vuspr_draw reads it as a 64-bit record with
@@ -227,8 +227,7 @@ module kaneko_spr_sys #(
     wire          dr_mask_we;
     wire          dr_mask_q;
 
-    kaneko_vuspr_draw #(.BMP_W_LOG2(BMP_W_LOG2), .BMP_H_LOG2(BMP_H_LOG2))
-    u_draw (
+    kaneko_vuspr_draw #(.BMP_W(BMP_W), .AW(AW)) u_draw (
         .clk(clk), .rst(rst), .ce(dr_ce), .skip_en(skip_en),
         .start(dr_start), .sprite_count(sprite_count),
         .busy(dr_busy), .done(dr_done),
@@ -269,7 +268,7 @@ module kaneko_spr_sys #(
     wire  [15:0]   bmp_wd = clearing ? 16'd0    : dr_bmp_data;
     wire           bmp_we = clearing ? ~keep_sprites : dr_bmp_we;
 
-    wire [AW-1:0] mix_addr = {rd_y, rd_x};
+    wire [AW-1:0] mix_addr = AW'(rd_y * BMP_W) + AW'(rd_x);
 
     // Only the back surface is written, and only the front is read by the
     // mixer, so each surface needs one read address and one write port.
@@ -361,7 +360,7 @@ module kaneko_spr_sys #(
                     if (par_done) par_seen <= 1'b1;
                     if (clearing) begin
                         clr_addr <= clr_addr + 1'b1;
-                        if (clr_addr == {AW{1'b1}}) clearing <= 1'b0;
+                        if (clr_addr == AW'(NPIX - 1)) clearing <= 1'b0;
                     end
                     // Only when the surface is blank AND the table is filled.
                     if (!clearing && (par_done || par_seen)) begin

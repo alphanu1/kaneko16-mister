@@ -28,10 +28,11 @@ namespace {
 // was 4.19 Mbit of pixels on a part with 5.66 Mbit of block RAM in total, and
 // it has to be double-buffered. 256x256 is this board's screen (MAME's
 // set_size for bakubrkr and mgcrystl).
-constexpr int BMP_W_LOG2 = 8;
-constexpr int BMP_H_LOG2 = 8;
-constexpr int BMP_W = 1 << BMP_W_LOG2;
-constexpr int BMP_H = 1 << BMP_H_LOG2;
+// 320 is the widest screen in the driver and is NOT a power of two, so the
+// address is y*W + x throughout. Concatenating would agree with a DUT that
+// concatenates, and both would be wrong on the Blaze On board.
+constexpr int BMP_W = 320;
+constexpr int BMP_H = 256;
 
 Vkaneko_vuspr_draw* dut;
 
@@ -77,7 +78,8 @@ void reference(const std::vector<Spr>& spr, std::vector<uint16_t>& out,
                 const uint8_t byte = rom[a % rom.size()];
                 const uint8_t c = (px & 1) ? (byte & 0xf) : (byte >> 4);  // MSB order
                 if (c == 0) continue;
-                const size_t o = (size_t)(py_ & (BMP_H - 1)) * BMP_W + (px_ & (BMP_W - 1));
+                if (px_ < 0 || px_ >= BMP_W || py_ < 0 || py_ >= BMP_H) continue;
+                const size_t o = (size_t)py_ * BMP_W + (size_t)px_;
                 if (!m[o]) out[o] = (uint16_t)(((s.prio & 3) << 14) | ((s.colour & 0x3f) << 4) | c);
                 m[o] = 1;
             }
@@ -131,15 +133,15 @@ void tick()
         bmp[dut->bmp_addr % bmp.size()] = dut->bmp_data; n_bmp_we++;
         if (getenv("TRACE") && n_bmp_we <= 6)
             printf("    bmp_we  addr=%05x (x=%d,y=%d) data=%04x\n",
-                   (unsigned)dut->bmp_addr, (int)(dut->bmp_addr & (BMP_W - 1)),
-                   (int)(dut->bmp_addr >> BMP_W_LOG2), (unsigned)dut->bmp_data);
+                   (unsigned)dut->bmp_addr, (int)(dut->bmp_addr % BMP_W),
+                   (int)(dut->bmp_addr / BMP_W), (unsigned)dut->bmp_data);
     }
     if (dut->mask_we) {
         mask[dut->mask_waddr % mask.size()] = 1; n_mask_we++;
         if (getenv("TRACE") && n_mask_we <= 6)
             printf("    mask_we addr=%05x (x=%d,y=%d)  mask_q was %d, raddr=%05x\n",
-                   (unsigned)dut->mask_waddr, (int)(dut->mask_waddr & (BMP_W - 1)),
-                   (int)(dut->mask_waddr >> BMP_W_LOG2), (int)dut->mask_q,
+                   (unsigned)dut->mask_waddr, (int)(dut->mask_waddr % BMP_W),
+                   (int)(dut->mask_waddr / BMP_W), (int)dut->mask_q,
                    (unsigned)dut->mask_raddr);
     }
 }

@@ -28,9 +28,12 @@
 
 namespace {
 
-constexpr int BMP_W_LOG2 = 8, BMP_H_LOG2 = 8;
-constexpr int BMP_W = 1 << BMP_W_LOG2;
-constexpr int BMP_H = 1 << BMP_H_LOG2;
+// MUST MATCH the DUT. The width is 320 — the widest screen in the driver —
+// and is deliberately NOT a power of two, so every address here is y*W + x and
+// never a concatenation. A test that concatenates would agree with a DUT that
+// concatenates and both would be wrong on the Blaze On board.
+constexpr int BMP_W = 320;
+constexpr int BMP_H = 256;
 constexpr int SDR_LATENCY = 18;
 
 Vkaneko_spr_sys_harness* dut;
@@ -83,8 +86,8 @@ void tick(int n = 1) {
                 printf("    WRITE#%ld back=%d (x=%d,y=%d) data=%04x  "
                        "s_code=%05x s_col=%d tbl_ra=%d tbl_q=%011llx\n",
                        nw, (int)dut->dbg_back,
-                       (int)(dut->dbg_bmp_addr & (BMP_W - 1)),
-                       (int)(dut->dbg_bmp_addr >> BMP_W_LOG2),
+                       (int)(dut->dbg_bmp_addr % BMP_W),
+                       (int)(dut->dbg_bmp_addr / BMP_W),
                        (unsigned)dut->dbg_bmp_data,
                        (unsigned)dut->dbg_scode, (int)dut->dbg_scolour,
                        (int)dut->dbg_tblra, (unsigned long long)dut->dbg_tblq);
@@ -136,8 +139,8 @@ void reference(const std::vector<Rec>& recs, std::vector<uint16_t>& out,
                 if (!c) continue;
                 const int dx = s.x + xx, dy = s.y + yy;
                 if (dx < x0 || dx > x1 || dy < y0 || dy > y1) continue;
-                const size_t o = (size_t)(dy & (BMP_H - 1)) * BMP_W
-                               + (size_t)(dx & (BMP_W - 1));
+                if (dx < 0 || dx >= BMP_W || dy < 0 || dy >= BMP_H) continue;
+                const size_t o = (size_t)dy * BMP_W + (size_t)dx;
                 if (!m[o]) { ref_writes++; out[o] = (uint16_t)((s.prio << 14)
                                     | (s.colour << 4) | c);
                              ref_who[o] = i; ref_xx[o] = xx; ref_yy[o] = yy; }

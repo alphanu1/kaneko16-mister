@@ -16,8 +16,8 @@
 `default_nettype none
 
 module kaneko_spr_sys_harness #(
-    parameter int unsigned BMP_W_LOG2 = 8,
-    parameter int unsigned BMP_H_LOG2 = 8,
+    parameter int unsigned BMP_W = 320,
+    parameter int unsigned BMP_H = 256,
     parameter int unsigned SPRITES    = 1024,
     parameter int unsigned SDR_AW     = 25,
     parameter int unsigned LATENCY    = 18
@@ -39,8 +39,8 @@ module kaneko_spr_sys_harness #(
 
     input  wire [255:0] regs_flat,
 
-    input  wire [BMP_W_LOG2-1:0] rd_x,
-    input  wire [BMP_H_LOG2-1:0] rd_y,
+    input  wire [9:0]   rd_x,
+    input  wire [9:0]   rd_y,
     output wire [13:0]  spr_pix,
     output wire [1:0]   spr_prio,
 
@@ -62,7 +62,7 @@ module kaneko_spr_sys_harness #(
     output wire [9:0]   dbg_tblra,
 
     output wire         dbg_bmp_we,
-    output wire [15:0]  dbg_bmp_addr,
+    output wire [17:0]  dbg_bmp_addr,
     output wire [15:0]  dbg_bmp_data,
     output wire         dbg_back,
     output wire [11:0]  dbg_ramaddr,
@@ -121,7 +121,7 @@ module kaneko_spr_sys_harness #(
     endgenerate
 
     kaneko_spr_sys #(
-        .BMP_W_LOG2(BMP_W_LOG2), .BMP_H_LOG2(BMP_H_LOG2),
+        .BMP_W(BMP_W), .BMP_H(BMP_H),
         .SPRITES(SPRITES), .SDR_AW(SDR_AW)
     ) u_dut (
         .clk(clk), .rst(rst),
@@ -160,7 +160,7 @@ module kaneko_spr_sys_harness #(
     assign dbg_tblq    = u_dut.tbl_q;
     assign dbg_tblra   = u_dut.tbl_ra;
     assign dbg_bmp_we   = u_dut.dr_bmp_we;
-    assign dbg_bmp_addr = 16'(u_dut.dr_bmp_addr);
+    assign dbg_bmp_addr = 18'(u_dut.dr_bmp_addr);
     assign dbg_bmp_data = u_dut.dr_bmp_data;
     assign dbg_back     = u_dut.back;
     assign dbg_ramaddr  = ram_addr;

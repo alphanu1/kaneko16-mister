@@ -3821,3 +3821,33 @@ The rule did not need discovering. It needed following. The lesson is narrower
 and more useful than "model memories correctly": **when a fix is applied to one
 harness, the same fault is in every other harness that models the same thing**,
 and the multi-game gate is what finds them.
+
+### The sprite surface is 320 wide, and 320 is not a power of two
+
+Blaze On and Wing Force are 320 pixels wide; Explosive Breaker and Magical
+Crystals are 256. One bitstream serves all four, so the surface is the wider of
+them and Explosive Breaker uses 256 columns of it.
+
+That breaks the address. `{y, x}` concatenation only works for a power-of-two
+width, and the two ways out are not equal:
+
+- **Round up to 512.** 512 x 256 x 12 bits, twice over for the double buffer,
+  does not fit in 553 M10K beside the tile path, the palette, the work RAM and
+  the Z80's ROM still to come.
+- **`y * BMP_W + x`.** With a constant width this synthesises to shifts and an
+  add — 320 is 256 + 64 — so the honest address is also the cheap one.
+
+Both testbenches were changed with it, and the reason is worth stating: a test
+that concatenates agrees with a DUT that concatenates, and both are wrong on a
+320-wide screen. The width is now a named constant in the testbenches with a
+note that it must match, rather than a shift amount that silently works out.
+
+The clear grew with the surface, 65,536 to 81,920 clocks, and the worst case
+still fits comfortably:
+
+```
+ 1024 fully visible sprites, 320-wide surface   517,724 of 811,008
+```
+
+Gate unchanged on all four games, and `kaneko_vuspr_draw`'s stall-equivalence
+still exact at 655,360 pixels compared.
