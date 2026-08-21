@@ -2979,10 +2979,20 @@ The bank clamp was written as `bank > 6 ? 6 : bank`, which is right only for a
     while (i < length / bankedsize)
         configure_entry(i++, &sample[length - bankedsize]);
 
-Explosive Breaker and Magical Crystals carry 1 MB, so `max_bank` is 7 and bank
-7 aliases bank 6 — the constant happened to be correct. Blaze On and Wing Force
-carry 512 KB, where `max_bank` is 3 and banks 4-7 all alias block 3. The
-hardcoded 6 would have read past those regions and played the wrong sample
-rather than failing, which is exactly the failure mode hard rule 9 exists for.
+Read from each `ROM_REGION` in MAME rather than assumed, because the first
+guess here was wrong in two of four:
+
+| set | oki1 region | max_bank | |
+|---|---|---|---|
+| `explbrkr` | `0x100000` | 7 | bank 7 aliases 6 |
+| `wingforc` | `0x080000` | 3 | banks 4-7 alias 3 |
+| `mgcrystl` | `0x040000` | 1 | banks 2-7 alias 1 |
+| `blazeonj` | none | - | that board is Z80 + YM2151 |
+
+Only Explosive Breaker carries 1 MB, so the hardcoded 6 happened to be right
+for the title being debugged and wrong for the bring-up title, which has a
+quarter of the samples and six aliased banks. It would have read past the
+region and played the wrong sample rather than failing, which is exactly the
+failure mode hard rule 9 exists for.
 It is now `kaneko_oki_bank`'s `MAX_BANK` parameter, checked at ten points
 against MAME's rule, and it joins the game table with everything else.

@@ -29,11 +29,15 @@
 // MAX_BANK IS PER GAME — HARD RULE 9
 //
 // It follows from the region length, and the region length differs across the
-// driver: Explosive Breaker and Magical Crystals carry 1 MB of samples, Blaze
-// On 512 KB, Wing Force 512 KB. A 512 KB region gives max_bank = 3, and banks
-// 4-7 all alias block 3. Wiring the 1 MB answer in as a constant would put
-// three wrong banks on every 512 KB board, which plays the wrong sample rather
-// than failing, so it is a parameter and the game table sets it.
+// driver, so it is a parameter and the game table sets it:
+//
+//     explbrkr   ROM_REGION 0x100000   max_bank 7   bank 7 aliases 6
+//     wingforc   ROM_REGION 0x080000   max_bank 3   banks 4-7 alias 3
+//     mgcrystl   ROM_REGION 0x040000   max_bank 1   banks 2-7 alias 1
+//     blazeonj   no oki1 region at all — that board is Z80 + YM2151
+//
+// Wiring the 1 MB answer in as a constant puts six wrong banks on Magical
+// Crystals, which plays the wrong sample rather than failing.
 `timescale 1ns/1ps
 `default_nettype none
 
