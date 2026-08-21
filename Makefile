@@ -145,6 +145,14 @@ test:
 	done; \
 	if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; fi
 
+# ---------------------------------------------------------------- deploy
+# Copy the core and its MRAs to a MiSTer and verify the checksum. Override the
+# address with MISTER=<ip>. See tools/deploy.sh for why this is a script and
+# not a line of ssh — `setsid` wedged a whole session.
+.PHONY: deploy
+deploy:
+	@tools/deploy.sh $(DEPLOY_ARGS)
+
 # ------------------------------------------------------------------ boot
 # 68000 against the REAL memory system. Kept out of `make test` because it
 # needs assembled ROM regions, which are not in the repo — same reason `frame`

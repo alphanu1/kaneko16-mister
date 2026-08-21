@@ -61,9 +61,24 @@ The oracle frame diff needs MAME and a ROM set:
 make frame SET=mgcrystl ROMPATH=/path/to/roms
 ```
 
+The 68000 is gated against the real memory system — loader, arbiter and an
+SDRAM device model rather than a stubbed ROM — which needs an assembled
+program region, so it sits outside `make test`:
+
+```
+make boot SET=explbrkr ROMPATH=/path/to/roms
+```
+
 Synthesis is pinned to **Quartus 17.0** and `make quartus` refuses any other
 version. 24.x accepts Cyclone V and will build a subtly different core; that is
 why the check exists. See `CLAUDE.md`.
+
+To put a build on a MiSTer and verify what landed:
+
+```
+make deploy                 # core + MRAs, checksum-checked
+make deploy MISTER=1.2.3.4
+```
 
 ## Documentation
 
