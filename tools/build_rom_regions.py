@@ -169,34 +169,58 @@ ALT_PARENT = {"blazeonj": "Blaze On"}
 # Sized for the Tier 1 games. Later tiers have larger sprite ROMs and the map
 # will grow; because the MRA owns the layout, growing it means editing the MRA
 # and this table together, not changing address arithmetic in RTL.
-# ONE LAYOUT FOR EVERY GAME, SIZED TO THE LARGEST OF EACH REGION.
+# A LAYOUT PER GAME, AND EXPLOSIVE BREAKER'S IS FROZEN.
 #
-# The core carries one set of base addresses, so the layout cannot move between
-# games — only the contents. Every slot below is the largest that region is
-# across all four Tier 1 titles, so this map is final and the RBF and the MRAs
-# stop being a matched pair that changes:
+# One shared layout was the mistake. Making room for a game that is not even
+# implemented moved every region, which changed the MRA of a game that WORKED,
+# which broke it. A working artefact does not get churned for a speculative one.
 #
-#            explbrkr  mgcrystl  blazeonj  wingforc     slot
-#   maincpu   0x80000   0x80000  0x100000  0x100000   0x100000
-#   view2_0  0x100000  0x100000  0x100000  0x200000   0x200000
-#   view2_1  0x100000  0x100000         -         -   0x100000
-#   kan_spr  0x240000  0x280000  0x200000  0x200000   0x280000
-#   oki1     0x100000   0x40000         -   0x80000   0x100000
-#   audiocpu        -         -   0x20000   0x10000    0x20000
+# Each game has its own MRA and its own row in the core's game table, so there
+# is no reason for them to share offsets. The core reads its region bases from
+# that table, so a new game cannot disturb an existing one — the property that
+# actually matters, as opposed to merely leaving gaps and being careful.
 #
-# A game leaves the tail of each slot zero-filled. Sizing a slot to whichever
-# game was implemented first is how the next game renders garbage from the end
-# of somebody else's ROM — which is why this was done once, for all of them,
-# rather than grown a title at a time.
-SDRAM_MAP = [
-    ("maincpu",  0x000000, 0x100000),
-    ("view2_0",  0x100000, 0x200000),
-    ("view2_1",  0x300000, 0x100000),
-    ("kan_spr",  0x400000, 0x280000),
-    ("oki1",     0x680000, 0x100000),
-    ("audiocpu", 0x780000, 0x020000),
-]
-SDRAM_END = 0x7a0000        # 7.625 MB
+# EXPLBRKR'S ENTRY IS A FIXED CONTRACT. It is the layout its shipped MRA
+# already uses. Changing it invalidates every copy of that MRA in the wild, so
+# it does not change — not to tidy it, not to align it, not to make room.
+SDRAM_MAPS = {
+    "explbrkr": [
+        ("maincpu", 0x000000, 0x080000),
+        ("view2_0", 0x080000, 0x100000),
+        ("view2_1", 0x180000, 0x100000),
+        ("kan_spr", 0x280000, 0x240000),
+        ("oki1",    0x4c0000, 0x100000),
+    ],
+    "mgcrystl": [
+        ("maincpu", 0x000000, 0x080000),
+        ("view2_0", 0x080000, 0x100000),
+        ("view2_1", 0x180000, 0x100000),
+        ("kan_spr", 0x280000, 0x280000),   # larger than explbrkr's
+        ("oki1",    0x500000, 0x040000),
+    ],
+    # The Blaze On board: one VIEW2 chip, a Z80, and a megabyte of 68000 code.
+    "blazeonj": [
+        ("maincpu",  0x000000, 0x100000),
+        ("view2_0",  0x100000, 0x100000),
+        ("kan_spr",  0x200000, 0x200000),
+        ("audiocpu", 0x400000, 0x020000),
+    ],
+    "wingforc": [
+        ("maincpu",  0x000000, 0x100000),
+        ("view2_0",  0x100000, 0x200000),
+        ("kan_spr",  0x300000, 0x200000),
+        ("oki1",     0x500000, 0x080000),
+        ("audiocpu", 0x580000, 0x010000),
+    ],
+}
+
+def sdram_map(setname):
+    if setname not in SDRAM_MAPS:
+        sys.exit(f"no SDRAM layout for '{setname}'")
+    return SDRAM_MAPS[setname]
+
+def sdram_end(setname):
+    return max(b + n for _, b, n in sdram_map(setname))
 
 REGION_SIZE = {
     "mgcrystl": {"view2_0": 0x100000, "view2_1": 0x100000,
@@ -288,9 +312,9 @@ def build_stream(setname, outdir):
     here keeps the simulation and the MRA driven from one description — see the
     note at the top about the two having to agree.
     """
-    buf = bytearray(SDRAM_END)
+    buf = bytearray(sdram_end(setname))
     placed = []
-    for region, base, size in SDRAM_MAP:
+    for region, base, size in sdram_map(setname):
         path = os.path.join(outdir, f"{setname}_{region}.bin")
         if not os.path.exists(path):
             placed.append((region, base, size, "absent, zero-filled"))
@@ -304,7 +328,7 @@ def build_stream(setname, outdir):
     out = os.path.join(outdir, f"{setname}_stream.bin")
     with open(out, "wb") as f:
         f.write(buf)
-    print(f"  {os.path.basename(out):28s} {SDRAM_END:#09x}  "
+    print(f"  {os.path.basename(out):28s} {sdram_end(setname):#09x}  "
           f"sha1={hashlib.sha1(buf).hexdigest()[:16]}")
     for region, base, size, note in placed:
         print(f"      {base:#09x} {region:9s} {size:#09x}  {note}")
@@ -377,7 +401,7 @@ def build_mra(setname, rompath, outdir):
 
     rom = ET.SubElement(root, "rom", index="0", zip=f"{zname}.zip", md5="none")
     cursor = 0
-    for region, base, size in SDRAM_MAP:
+    for region, base, size in sdram_map(setname):
         entries = SETS[setname].get(region)
         if base != cursor:
             ET.SubElement(rom, "part", repeat=str(base - cursor)).text = "00"

@@ -20,7 +20,7 @@
 module kaneko_cpumem_harness #(
     parameter int unsigned SDR_AW  = 25,
     parameter int unsigned SDR_COL = 10,
-    parameter int unsigned NPORTS  = 6
+    parameter int unsigned NPORTS  = 8
 ) (
     input  wire        clk,
     input  wire        rst,
@@ -146,11 +146,11 @@ module kaneko_cpumem_harness #(
         .wr_req(ldr_wr_req), .wr_addr(ldr_wr_addr), .wr_din(ldr_wr_din),
         .wr_be(ldr_wr_be), .wr_ack(ldr_wr_ack),
 
-        .p_req  ({p5_req, 3'b0, p1_req, p0_req}),
-        .p_addr ({p5_addr, {3{{SDR_AW{1'b0}}}}, p1_addr, p0_addr}),
-        .p_din  ({6{16'd0}}),
-        .p_be   ({6{2'b11}}),
-        .p_we   (6'b0),
+        .p_req  ({p67_req, p5_req, 3'b0, p1_req, p0_req}),
+        .p_addr ({p67_addr, p5_addr, {3{{SDR_AW{1'b0}}}}, p1_addr, p0_addr}),
+        .p_din  ({8{16'd0}}),
+        .p_be   ({8{2'b11}}),
+        .p_we   (8'b0),
         .p_ack  (p_ack_bus),
         .p_dout (p_dout_bus),
         .dbg_req(), .dbg_grant()
@@ -334,6 +334,59 @@ module kaneko_cpumem_harness #(
         .unmapped_hit(unmapped_hit), .unmapped_addr(unmapped_addr)
     );
 
+    // ----------------------------------------------------------- sprites
+    // THE REAL SPRITE SUBSYSTEM, ON ITS REAL PORTS.
+    //
+    // This harness ran six ports while the core ran eight, and the two it was
+    // missing are the sprite ROM's — the heaviest requesters in the design,
+    // sixteen round trips per sprite across a thousand sprites a frame. So a
+    // boot "verified" here was verified against a memory system under a
+    // fraction of the real contention, and the CPU is the port that starves
+    // when contention rises.
+    //
+    // frame_start is synthesised rather than taken from video timing: this
+    // harness has no video, and what matters is that the subsystem runs at a
+    // realistic rate and competes for the bus.
+    wire [1:0]            p67_req;
+    wire [1:0][SDR_AW:1]  p67_addr;
+    wire [11:0]           spr_ram_addr;
+    wire [15:0]           spr_ram_q;
+    wire [13:0]           spr_pix_unused;
+    wire [1:0]            spr_prio_unused;
+
+    localparam int unsigned FRAME_CLKS = 384 * 264 * 8;   // one frame at 48 MHz
+    logic [19:0] frame_ctr;
+    logic        spr_frame;
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            frame_ctr <= '0; spr_frame <= 1'b0;
+        end else begin
+            spr_frame <= (frame_ctr == 20'(FRAME_CLKS - 1));
+            frame_ctr <= (frame_ctr == 20'(FRAME_CLKS - 1)) ? '0 : frame_ctr + 1'b1;
+        end
+    end
+
+    kaneko_spr_sys #(
+        .BMP_W(320), .BMP_H(256), .SPRITES(1024), .SDR_AW(SDR_AW)
+    ) u_spr (
+        .clk(clk), .rst(rst),
+        .frame_start(spr_frame), .keep_sprites(1'b0), .skip_en(1'b1),
+        .sprite_count(11'd1024),
+        .sprite_xoffs(16'd0), .sprite_yoffs(16'd0),
+        .visarea_min_y(9'd16), .wide_screen(1'b0), .fliptype(1'b0),
+        .clip_x0(10'd0), .clip_x1(10'd255),
+        .clip_y0(10'd16), .clip_y1(10'd239),
+        .ram_addr(spr_ram_addr), .ram_data(spr_ram_q),
+        .regs_flat(256'd0),
+        .rom_base(SDR_AW'(25'h140000)),
+        .sdr_req(p67_req), .sdr_addr(p67_addr),
+        .sdr_ack({p_ack_bus[7], p_ack_bus[6]}),
+        .sdr_dout({p_dout_bus[7], p_dout_bus[6]}),
+        .rd_x(10'd0), .rd_y(10'd0),
+        .spr_pix(spr_pix_unused), .spr_prio(spr_prio_unused),
+        .busy(), .overrun()
+    );
+
     // ------------------------------------------------------------- OKI
     // Identical wiring to Kaneko16.sv. ym0_iob_out is the bank register; the
     // YM2149s are not instantiated here, so it is held at the reset value the
@@ -406,7 +459,7 @@ module kaneko_cpumem_harness #(
         .c1_t1_addr(10'd0), .c1_t1_q(),
         .c1_s0_addr(11'd0), .c1_s0_q(),
         .c1_s1_addr(11'd0), .c1_s1_q(),
-        .spr_addr(12'd0), .spr_q(),
+        .spr_addr(spr_ram_addr), .spr_q(spr_ram_q),
         .pal_addr(11'd0), .pal_q()
     );
 

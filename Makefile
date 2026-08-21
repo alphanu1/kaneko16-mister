@@ -128,13 +128,19 @@ quartus-check:
 #
 # Nothing else catches two numbers drifting apart, so this does. Same shape as
 # qsf-check, and for the same reason: the failure is invisible otherwise.
+#
+# It matched `NP = n` and NOT `NPORTS = n`, so the boot harness sat at six
+# ports while the core ran eight and this rule reported "NPORTS=8 everywhere"
+# the whole time. A boot was then verified in simulation against a
+# configuration the core does not have, and reported as reassurance. A guard
+# that names the thing it checks has to actually match the spelling used.
 .PHONY: nports-check
 nports-check:
 	@core=$$(sed -n 's/^localparam int unsigned NPORTS *= *\([0-9]*\);.*/\1/p' Kaneko16.sv); \
 	[ -n "$$core" ] || { echo "nports: could not read NPORTS from Kaneko16.sv"; exit 1; }; \
 	bad=""; \
-	for f in $$(grep -rl 'NP *= *[0-9]' sim/ 2>/dev/null); do \
-	  n=$$(sed -n 's/.*\bNP *= *\([0-9]*\).*/\1/p' "$$f" | head -1); \
+	for f in $$(grep -rlE '\bNP(ORTS)? *= *[0-9]' sim/ 2>/dev/null); do \
+	  n=$$(sed -nE 's/.*\bNP(ORTS)? *= *([0-9]+).*/\2/p' "$$f" | head -1); \
 	  [ "$$n" = "$$core" ] || bad="$$bad $$f:$$n"; done; \
 	if [ -n "$$bad" ]; then \
 	  echo "nports: Kaneko16.sv has NPORTS=$$core, but:"; \

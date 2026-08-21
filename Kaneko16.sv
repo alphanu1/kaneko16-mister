@@ -140,6 +140,33 @@ always @(posedge clk_sys) begin
 		game_id <= ioctl_dout[7:0];
 end
 
+// ------------------------------------------------------- the game table
+// Hard rule 9: a per-game fact belongs here, not wired into shared code. Every
+// entry below differs between the two games and every one of them, wrong,
+// renders a plausible picture rather than failing.
+//
+// Pages are a[23:16] of each window that moves; sizes do not move and stay in
+// kaneko_bus. Read from bakubrkr_map / mgcrystl_map and from the frame gate's
+// table, which is pixel-exact on both.
+//
+//   id 0  explbrkr    id 1  mgcrystl
+wire mg = (game_id == 8'd1);
+
+wire [7:0] PG_WRAM = mg ? 8'h30 : 8'h10;
+wire [7:0] PG_V2W0 = mg ? 8'h60 : 8'h50;
+wire [7:0] PG_V2W1 = mg ? 8'h68 : 8'h58;
+wire [7:0] PG_SPR  = mg ? 8'h70 : 8'h60;
+wire [7:0] PG_PAL  = mg ? 8'h50 : 8'h70;
+wire [7:0] PG_WDOG = mg ? 8'ha0 : 8'ha8;
+wire [7:0] PG_IN   = mg ? 8'hc0 : 8'he0;
+
+// m_view2_2_pri: chip 1 writes its category, or zero. 1 for explbrkr, 0 for
+// mgcrystl — the single most load-bearing per-game bit in the mixer.
+wire VIEW2_2_PRI = ~mg;
+// set_priorities(): {8,8,8,8} above everything on explbrkr, {2,3,5,7}
+// interleaved with the tile layers on mgcrystl.
+wire [15:0] SPR_PRI_SEL = mg ? 16'h7532 : 16'h8888;
+
 // WIDE=1, so ioctl_addr counts bytes and advances by two per word.
 wire [5:0]  bk_addr = ioctl_addr[6:1];
 wire [15:0] bk_din  = ioctl_dout;
@@ -444,8 +471,9 @@ reg [4:0] ym_div;
 always @(posedge clk_sys) ym_div <= (ym_div == 5'd23) ? 5'd0 : ym_div + 5'd1;
 wire ym_cen = (ym_div == 5'd0);        // 48 MHz / 24 = 2 MHz
 
-// oki1 @ byte 0x680000, so word 0x340000.
-localparam [SDR_AW:1] OKI_BASE = SDR_AW'(25'h340000);
+// oki1: byte 0x4c0000 on explbrkr, 0x500000 on mgcrystl (its kan_spr is
+// larger). Word addresses.
+wire [SDR_AW:1] OKI_BASE = mg ? SDR_AW'(25'h280000) : SDR_AW'(25'h260000);
 
 wire [7:0] ym0_q, ym1_q;
 wire [7:0] ym0_iob_out;
@@ -723,32 +751,6 @@ localparam signed [10:0] V2_DX = 11'sd91;      // 0x5b
 localparam signed [10:0] V2_DY = -11'sd8;
 localparam [10:0] TILE_COLBASE = 11'h400;
 
-// ------------------------------------------------------- the game table
-// Hard rule 9: a per-game fact belongs here, not wired into shared code. Every
-// entry below differs between the two games and every one of them, wrong,
-// renders a plausible picture rather than failing.
-//
-// Pages are a[23:16] of each window that moves; sizes do not move and stay in
-// kaneko_bus. Read from bakubrkr_map / mgcrystl_map and from the frame gate's
-// table, which is pixel-exact on both.
-//
-//   id 0  explbrkr    id 1  mgcrystl
-wire mg = (game_id == 8'd1);
-
-wire [7:0] PG_WRAM = mg ? 8'h30 : 8'h10;
-wire [7:0] PG_V2W0 = mg ? 8'h60 : 8'h50;
-wire [7:0] PG_V2W1 = mg ? 8'h68 : 8'h58;
-wire [7:0] PG_SPR  = mg ? 8'h70 : 8'h60;
-wire [7:0] PG_PAL  = mg ? 8'h50 : 8'h70;
-wire [7:0] PG_WDOG = mg ? 8'ha0 : 8'ha8;
-wire [7:0] PG_IN   = mg ? 8'hc0 : 8'he0;
-
-// m_view2_2_pri: chip 1 writes its category, or zero. 1 for explbrkr, 0 for
-// mgcrystl — the single most load-bearing per-game bit in the mixer.
-wire VIEW2_2_PRI = ~mg;
-// set_priorities(): {8,8,8,8} above everything on explbrkr, {2,3,5,7}
-// interleaved with the tile layers on mgcrystl.
-wire [15:0] SPR_PRI_SEL = mg ? 16'h7532 : 16'h8888;
 
 // Sprites, per game (hard rule 9). These are explbrkr's, read from
 // bakubrkr(machine_config) and the frame gate's table, which is pixel-exact on
@@ -768,16 +770,29 @@ localparam [8:0]  SPR_VIS_MIN_Y = 9'd16;
 localparam        SPR_WIDE      = 1'b0;      // screen width is 0x100, not > 0x100
 localparam        SPR_FLIPTYPE  = 1'b0;
 localparam [10:0] SPR_COLBASE   = 11'd0;
-// kan_spr @ byte 0x400000, so word 0x200000.
-localparam [SDR_AW:1] SPR_BASE  = SDR_AW'(25'h200000);
+// kan_spr @ byte 0x280000 on both, so word 0x140000.
+wire [SDR_AW:1] SPR_BASE  = SDR_AW'(25'h140000);
 
 // Tile ROM regions, as word addresses in SDRAM (D6, SDRAM_MAP):
 //   view2_0 at byte 0x080000, view2_1 at byte 0x180000.
-// SDRAM layout, final for all four Tier 1 games — see SDRAM_MAP in
-// tools/build_rom_regions.py for how each slot was sized. Word addresses, so
-// half the byte offset.
-localparam [SDR_AW:1] TROM0_BASE = SDR_AW'(25'h080000);   // view2_0 @ 0x100000
-localparam [SDR_AW:1] TROM1_BASE = SDR_AW'(25'h180000);   // view2_1 @ 0x300000
+// REGION BASES ARE PER GAME, AND EXPLOSIVE BREAKER'S ARE FROZEN.
+//
+// One shared layout meant making room for an unimplemented game moved every
+// region, which changed a working game's MRA and broke it. Each game has its
+// own MRA and its own row here, so they do not share offsets and a new game
+// cannot disturb an existing one.
+//
+// The explbrkr column is a FIXED CONTRACT: it is what its shipped MRA already
+// uses. It does not change to tidy it, align it, or make room. Word addresses,
+// so half the byte offset in tools/build_rom_regions.py.
+//
+//                     explbrkr    mgcrystl
+//   view2_0           0x080000    0x080000
+//   view2_1           0x180000    0x180000
+//   kan_spr           0x280000    0x280000
+//   oki1              0x4c0000    0x500000
+wire [SDR_AW:1] TROM0_BASE = SDR_AW'(25'h040000);
+wire [SDR_AW:1] TROM1_BASE = SDR_AW'(25'h0c0000);
 
 wire [15:0] c0r0 = v2r0_flat[ 0*16 +: 16];
 wire [15:0] c0r1 = v2r0_flat[ 1*16 +: 16];

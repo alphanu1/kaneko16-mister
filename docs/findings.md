@@ -3922,3 +3922,49 @@ per-game rather than one layout at a movable address.
 
 Done already: the Z80 subsystem, the CPU ROM regions, the SDRAM map sized for
 all four games, and the 320-wide sprite surface.
+
+## 2026-08-22 — a working game broken for an unimplemented one
+
+Explosive Breaker went to a black screen with no CPU activity. The cause was
+not a bug in the sense of a wrong line; it was a decision.
+
+The SDRAM layout was one shared map with regions packed nose to tail. Making
+room for Blaze On's larger regions — **for a game that does not run yet** —
+moved every region after `maincpu`, which changed the MRA of a game that
+worked. The RBF and the MRA became a matched pair, the pair was split, and the
+board went dark.
+
+Two things were wrong and only one of them was the layout.
+
+### A working artefact does not get churned for a speculative one
+
+There was no need to touch it at all. SDRAM is 32 MB and 5.75 were in use;
+`audiocpu` could have gone above the last region and the others grown upward
+into space nothing occupied. Repacking was tidier and bought nothing.
+
+### And the layout should never have been shared
+
+Each game already has its own MRA and its own row in the core's game table, so
+there is no reason for them to share offsets. The bases are per game now and
+**the `explbrkr` column is a fixed contract**: it is what its shipped MRA
+already uses, and it does not change to tidy it, align it, or make room. A new
+game can no longer disturb an existing one, which is a property rather than a
+promise to be careful.
+
+### The verification that was quoted as reassurance was worthless
+
+"It boots in simulation" was said, with a real boot to point at. The boot
+harness runs `NPORTS = 6`; the core runs 8. So the boot was verified against a
+memory system with two fewer requesters — and the missing two are the sprite
+ROM's, the heaviest in the design, sixteen round trips per sprite across a
+thousand sprites a frame. The CPU is the port that starves when contention
+rises, and contention was exactly what was not modelled.
+
+`make nports-check` — written this afternoon *specifically* to catch a port
+count drifting between core and harness — matched `NP = n` and not
+`NPORTS = n`, so it reported "NPORTS=8 everywhere" the entire time. **A guard
+that names the thing it checks has to match the spelling actually used.**
+
+Both fixed: the guard matches either spelling, and the boot harness now
+instantiates the real sprite subsystem on its real ports, so a boot verified
+there is verified under the contention the board actually has.
