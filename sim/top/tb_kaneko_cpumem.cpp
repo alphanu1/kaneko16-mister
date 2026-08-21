@@ -38,36 +38,38 @@ struct Stats {
     bool     got_vectors = false;
     uint64_t unmapped = 0;
     uint32_t first_unmapped = 0;
+    uint64_t iack[8] = {0};
+    uint64_t iack_total = 0;
+    uint64_t first_iack_tick = 0;
 };
 
-// Run the whole sequence for one packing. swap=false is what the HPS really
-// does; swap=true is what sim/cpu assumed.
-static Stats run(const std::vector<uint8_t>& rom, bool swap, bool verbose,
-                 bool video_idle, uint64_t run_ticks, int lat,
-                 size_t limit_bytes)
-{
-    Stats st;
-    tick_count = 0;
 
+// Reset, bring up the SDRAM, and stream the program region in exactly as the
+// HPS would. Split out of run() so the interrupt-acknowledge check can get a
+// booted machine without also taking over the observation loop.
+static bool boot_dut(const std::vector<uint8_t>& rom, bool swap, bool video_idle,
+                     int lat, size_t limit_bytes)
+{
+    tick_count = 0;
     dut->rst = 1;
     dut->ioctl_download = 0; dut->ioctl_index = 0; dut->ioctl_wr = 0;
     dut->ioctl_addr = 0; dut->ioctl_dout = 0;
     dut->video_idle = video_idle;
     dut->rd_lat_sel = lat;
+    dut->ipl_force  = 0;
     for (int i = 0; i < 32; i++) tick();
     dut->rst = 0;
 
-    // JEDEC bring-up.
     uint64_t guard = 0;
     while (!dut->mem_ready && guard < 200000) { tick(); guard++; }
-    if (!dut->mem_ready) { std::printf("  SDRAM never became ready\n"); return st; }
+    if (!dut->mem_ready) { std::printf("  SDRAM never became ready\n"); return false; }
 
-    // Stream the maincpu region, honouring ioctl_wait exactly as the HPS must.
     // The latency sweep only needs the reset vectors and the first few
-    // instructions, so it streams a prefix — a full 512 KB load is 6.8 M ticks
+    // instructions, so it streams a prefix — a full 512 KB load is 7.3 M ticks
     // and doing it eight times to answer a four-way question is waste.
     size_t bytes = limit_bytes && limit_bytes < rom.size() ? limit_bytes : rom.size();
     const size_t words = bytes / 2;
+
     dut->ioctl_download = 1;
     dut->ioctl_index = 0;
     for (size_t n = 0; n < words; n++) {
@@ -83,8 +85,19 @@ static Stats run(const std::vector<uint8_t>& rom, bool swap, bool verbose,
 
     guard = 0;
     while (!dut->rom_loaded && guard < 200000) { tick(); guard++; }
-    if (!dut->rom_loaded) { std::printf("  rom_loaded never asserted\n"); return st; }
+    if (!dut->rom_loaded) { std::printf("  rom_loaded never asserted\n"); return false; }
     std::printf("  ROM loaded after %llu ticks\n", (unsigned long long)tick_count);
+    return true;
+}
+
+// Run the whole sequence for one packing. swap=false is what the HPS really
+// does; swap=true is what sim/cpu assumed.
+static Stats run(const std::vector<uint8_t>& rom, bool swap, bool verbose,
+                 bool video_idle, uint64_t run_ticks, int lat,
+                 size_t limit_bytes)
+{
+    Stats st;
+    if (!boot_dut(rom, swap, video_idle, lat, limit_bytes)) return st;
 
     // ------------------------------------------------------------- observe
     int p_as = 0, p_dt = 0, p_rq = 0, p_ak = 0;
@@ -123,6 +136,21 @@ static Stats run(const std::vector<uint8_t>& rom, bool swap, bool verbose,
                 shown++;
             }
         }
+        // Interrupt acknowledge: FC = 7. The level is on A3:A1. This is the
+        // only end-to-end check that kaneko_irq, fx68k's VPAn autovectoring
+        // and kaneko_bus's cpu_space gating actually work together — the unit
+        // test covers the generator alone.
+        {
+            static int p_iack = 0;
+            const int ia = dut->cpu_iack;
+            if (ia && !p_iack) {
+                const unsigned lvl = (unsigned)dut->cpu_addr & 7u;
+                st.iack[lvl]++;
+                st.iack_total++;
+                if (!st.first_iack_tick) st.first_iack_tick = tick_count - start;
+            }
+            p_iack = ia;
+        }
         if (dut->unmapped_hit) {
             if (!st.unmapped) st.first_unmapped = (uint32_t)dut->unmapped_addr << 1;
             st.unmapped++;
@@ -156,6 +184,16 @@ static void report(const char* name, const Stats& s, uint64_t run_ticks) {
                 (unsigned long long)run_ticks,
                 (s.last_dtack_tick && s.last_dtack_tick < run_ticks * 9 / 10)
                     ? "   <-- CPU STOPPED" : "");
+    if (s.iack_total) {
+        std::printf("    interrupts      %llu taken (IRQ5 %llu, IRQ4 %llu, IRQ3 %llu),"
+                    " first at tick %llu\n",
+                    (unsigned long long)s.iack_total,
+                    (unsigned long long)s.iack[5], (unsigned long long)s.iack[4],
+                    (unsigned long long)s.iack[3],
+                    (unsigned long long)s.first_iack_tick);
+    } else {
+        std::printf("    interrupts      none taken\n");
+    }
     if (s.unmapped)
         std::printf("    unmapped        %llu, first at %06X\n",
                     (unsigned long long)s.unmapped, s.first_unmapped);
@@ -167,10 +205,13 @@ int main(int argc, char** argv) {
     const char* path = "build/roms/explbrkr_maincpu.bin";
     const char* trace_path = nullptr;
     uint64_t    trace_count = 20000;
+    uint64_t    run_ticks_override = 0;
     for (int i = 1; i < argc; i++) {
         if (!std::strcmp(argv[i], "--trace") && i + 1 < argc) trace_path = argv[++i];
         else if (!std::strcmp(argv[i], "--count") && i + 1 < argc)
             trace_count = std::strtoull(argv[++i], nullptr, 0);
+        else if (!std::strcmp(argv[i], "--ticks") && i + 1 < argc)
+            run_ticks_override = std::strtoull(argv[++i], nullptr, 0);
         else if (argv[i][0] != '-') path = argv[i];
     }
     FILE* f = std::fopen(path, "rb");
@@ -227,7 +268,8 @@ int main(int argc, char** argv) {
     }
     // A trace of N accesses needs a run long enough to make them. Bus cycles
     // land roughly one per 32 ticks here, so allow a wide margin.
-    const uint64_t run_a = trace_path ? (RUN + trace_count * 64) : RUN;
+    uint64_t run_a = trace_path ? (RUN + trace_count * 64) : RUN;
+    if (run_ticks_override) run_a = run_ticks_override;
     Stats a = run(rom, false, !trace_path, false, run_a, good_lat, 0);
     report("result", a, run_a);
     delete dut;
@@ -238,9 +280,51 @@ int main(int argc, char** argv) {
     }
     std::printf("\n");
 
+    // -------------------------------------------- interrupt acknowledge path
+    // Level 7 is non-maskable, so this fires even though explbrkr is still
+    // masking at 7. What it proves is the wiring: fx68k raising a CPU-space
+    // cycle, kaneko_irq answering with VPA, kaneko_bus keeping out of it, and
+    // the CPU autovectoring through 0x7c instead of hanging or taking a
+    // vectored interrupt off whatever the read mux was driving.
+    std::printf("== C: interrupt acknowledge path (forced level 7)\n");
+    dut = new Vkaneko_cpumem_harness;
+    {
+        if (!boot_dut(rom, false, true, good_lat, 0)) return 2;
+        uint64_t acks = 0, vec_reads = 0;
+        int p_ia = 0;
+        dut->ipl_force = 7;
+        for (uint64_t t = 0; t < 2000000; t++) {
+            tick();
+            if (dut->cpu_iack && !p_ia) {
+                acks++;
+                if (((unsigned)dut->cpu_addr & 7u) != 7u) {
+                    std::printf("  acknowledge for level %u, expected 7\n",
+                                (unsigned)dut->cpu_addr & 7u);
+                    fails++;
+                }
+            }
+            p_ia = dut->cpu_iack;
+            // Autovector 31 lives at 0x7c; the CPU reads the handler address
+            // from there after acknowledging.
+            if (dut->cpu_dtack && dut->cpu_rw) {
+                const uint32_t a = (uint32_t)dut->cpu_addr << 1;
+                if (a == 0x00007c || a == 0x00007e) vec_reads++;
+            }
+        }
+        std::printf("    acknowledges    %llu\n", (unsigned long long)acks);
+        std::printf("    vector 0x7c/7e  %llu reads\n",
+                    (unsigned long long)vec_reads);
+        if (!acks)      { std::printf("  no acknowledge: the IPL never reached the CPU\n"); fails++; }
+        if (!vec_reads) { std::printf("  acknowledged but never autovectored: VPAn is not working\n"); fails++; }
+        dut->ipl_force = 0;
+    }
+    delete dut;
+    std::printf("\n");
+
     std::printf("== B: byte-swapped packing (byte n -> dout[15:8])\n");
     dut = new Vkaneko_cpumem_harness;
-    Stats b = run(rom, true, true, false, RUN, good_lat, 0);
+    Stats b = run(rom, true, !trace_path && !run_ticks_override, false,
+                  RUN, good_lat, 0);
     report("result", b, RUN);
     delete dut;
     std::printf("\n");

@@ -36,6 +36,19 @@ module kaneko_cpumem_harness #(
     // Set to stop the video port requesting, to test the CPU uncontended.
     input  wire        video_idle,
 
+    // TEST ONLY: force an interrupt level onto the CPU, bypassing kaneko_irq.
+    //
+    // explbrkr masks interrupts at level 7 for its first ~240 frames of
+    // self-test and this harness cannot reach that point in a reasonable run,
+    // so the acknowledge path — fx68k's VPAn autovectoring, the FC=7 decode,
+    // and kaneko_bus's cpu_space gating — would otherwise never be exercised
+    // by anything. Level 7 is non-maskable, so forcing it tests exactly that
+    // path against a CPU that is still masking everything else.
+    //
+    // kaneko_irq itself is unit-tested in sim/cpu/tb_kaneko_irq.cpp; this
+    // covers the wiring around it, which no unit test can.
+    input  wire [2:0]  ipl_force,
+
     // Read capture depth. The board wants 0 (CL+1) on hardware evidence; the
     // device model wants 3 (CL+3), which is what the controller resets to. A
     // harness that hard-wired either one would be testing the other machine,
@@ -60,6 +73,9 @@ module kaneko_cpumem_harness #(
     output wire [23:1] unmapped_addr,
     output wire        vid_req,
     output wire        vid_ack,
+    output wire [9:0]  vcnt,
+    output wire [2:0]  cpu_ipl_n,
+    output wire        cpu_iack,
     output int unsigned dram_violations,
     output wire [15:0]  dram_vflags
 );
@@ -159,6 +175,20 @@ module kaneko_cpumem_harness #(
     wire enPhi1 = (cpu_phase == 2'd0);
     wire enPhi2 = (cpu_phase == 2'd2);
 
+    // NOT FRAME-ALIGNED, AND DELIBERATELY SO
+    //
+    // Releasing the CPU at vcnt == 0 would make its interrupts land at a
+    // repeatable point in boot, which looks like it would let the trace be
+    // compared against MAME across interrupts. It would not. MAME runs this
+    // board at 59 Hz over 256 lines; kaneko_video_timing runs 264 lines at
+    // 59.1856 Hz. Different line rate, different frame length — so the two
+    // machines reach scanline 224 a different number of instructions apart no
+    // matter where the CPU is released, and an alignment here would only make
+    // the mismatch look deliberate.
+    //
+    // Screen timing is not PCB-verified (design study §9). Until it is, the
+    // bus-trace comparison covers boot up to the first interrupt and the
+    // interrupt logic is verified by sim/cpu/tb_kaneko_irq.cpp instead.
     wire cpu_rst = rst | ~rom_loaded;
 
     wire        ASn, LDSn, UDSn, eRWn, DTACKn;
@@ -171,13 +201,42 @@ module kaneko_cpumem_harness #(
         .extReset(cpu_rst), .pwrUp(cpu_rst),
         .enPhi1(enPhi1), .enPhi2(enPhi2),
         .eRWn(eRWn), .ASn(ASn), .LDSn(LDSn), .UDSn(UDSn),
-        .E(), .VMAn(), .FC0(), .FC1(), .FC2(),
+        .E(), .VMAn(), .FC0(cpu_fc[0]), .FC1(cpu_fc[1]), .FC2(cpu_fc[2]),
         .BGn(), .oRESETn(), .oHALTEDn(),
-        .DTACKn(DTACKn), .VPAn(1'b1), .BERRn(1'b1),
+        .DTACKn(DTACKn), .VPAn(cpu_vpa_n), .BERRn(1'b1),
         .BRn(1'b1), .BGACKn(1'b1),
-        .IPL0n(1'b1), .IPL1n(1'b1), .IPL2n(1'b1),
+        .IPL0n(cpu_ipl_n[0]), .IPL1n(cpu_ipl_n[1]), .IPL2n(cpu_ipl_n[2]),
         .iEdb(iEdb), .oEdb(oEdb), .eab(eab)
     );
+
+    // Video timing exists here only to drive the scanline interrupts. The
+    // pixel path is not part of this harness.
+    wire ce_pix_h;
+    kaneko_video_timing u_timing
+    (
+        .clk(clk), .rst(rst), .ce_pix(ce_pix_h),
+        .hcnt(), .vcnt(vcnt), .screen_x(), .screen_y(),
+        .hsync(), .vsync(), .hblank(), .vblank(), .de(), .vblank_rise()
+    );
+
+    // 6 MHz pixel clock from 48 MHz, as the core does.
+    logic [2:0] ce_div;
+    always_ff @(posedge clk) ce_div <= ce_div + 3'd1;
+    assign ce_pix_h = (ce_div == 3'd0);
+
+    wire [2:0] cpu_fc;
+    wire       cpu_vpa_n;
+
+    kaneko_irq u_irq
+    (
+        .clk(clk), .rst(cpu_rst),
+        .vcnt(vcnt),
+        .fc(cpu_fc), .as(~ASn), .a_level(eab[3:1]),
+        .ipl_n(irq_ipl_n), .vpa_n(cpu_vpa_n), .iack(cpu_iack)
+    );
+
+    wire [2:0] irq_ipl_n;
+    assign cpu_ipl_n = (ipl_force != 3'd0) ? ~ipl_force : irq_ipl_n;
 
     wire [15:0] q_vram0, q_vram1, q_spr, q_pal;
     wire        vram0_we, vram1_we, spr_we, pal_we;
@@ -188,7 +247,7 @@ module kaneko_cpumem_harness #(
     (
         .clk(clk), .rst(cpu_rst),
         .eab(eab), .ASn(ASn), .LDSn(LDSn), .UDSn(UDSn), .eRWn(eRWn),
-        .oEdb(oEdb), .iEdb(iEdb), .DTACKn(DTACKn),
+        .oEdb(oEdb), .iEdb(iEdb), .DTACKn(DTACKn), .cpu_space(cpu_iack),
 
         .rom_req(p1_req), .rom_addr(p1_addr),
         .rom_ack(p_ack_bus[1]), .rom_dout(p_dout_bus[1]),

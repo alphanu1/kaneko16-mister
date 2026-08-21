@@ -57,6 +57,15 @@ module kaneko_bus #(
     output logic [15:0] iEdb,         // bus -> CPU
     output logic       DTACKn,
 
+    // FC = 7. The 68000 drives it for an interrupt acknowledge, and this bus
+    // must stay out of that cycle entirely: kaneko_irq answers it with VPA so
+    // the CPU autovectors. Decoding it here instead would find nothing mapped
+    // at fffffx, assert DTACK anyway (see the note in S_IDLE), and the CPU
+    // would take a VECTORED interrupt through whatever the read mux happened to
+    // be driving — a jump to a garbage address, one frame after the game
+    // finally enables interrupts.
+    input  wire        cpu_space,
+
     // ---- SDRAM read port for ROM
     output logic            rom_req,
     output logic [SDR_AW:1] rom_addr,
@@ -89,7 +98,7 @@ module kaneko_bus #(
 );
     // ---------------------------------------------------------- decode
     wire [23:1] a = eab;
-    wire        as = ~ASn;
+    wire        as = ~ASn && !cpu_space;
     wire        ds = ~LDSn | ~UDSn;
     wire        wr = ~eRWn;   // reads need no strobe of their own: the read mux
                               // is combinational and the CPU latches on DTACK

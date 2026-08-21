@@ -211,6 +211,9 @@ wire cpu_rst = rst_sys | ~rom_loaded;
 wire        ASn, LDSn, UDSn, eRWn, DTACKn;
 wire [15:0] oEdb, iEdb;
 wire [23:1] eab;
+wire [2:0]  cpu_fc;
+wire [2:0]  cpu_ipl_n;
+wire        cpu_vpa_n, cpu_iack;
 
 fx68k u_cpu
 (
@@ -218,11 +221,11 @@ fx68k u_cpu
 	.extReset(cpu_rst), .pwrUp(cpu_rst),
 	.enPhi1(enPhi1), .enPhi2(enPhi2),
 	.eRWn(eRWn), .ASn(ASn), .LDSn(LDSn), .UDSn(UDSn),
-	.E(), .VMAn(), .FC0(), .FC1(), .FC2(),
+	.E(), .VMAn(), .FC0(cpu_fc[0]), .FC1(cpu_fc[1]), .FC2(cpu_fc[2]),
 	.BGn(), .oRESETn(), .oHALTEDn(),
-	.DTACKn(DTACKn), .VPAn(1'b1), .BERRn(1'b1),
+	.DTACKn(DTACKn), .VPAn(cpu_vpa_n), .BERRn(1'b1),
 	.BRn(1'b1), .BGACKn(1'b1),
-	.IPL0n(1'b1), .IPL1n(1'b1), .IPL2n(1'b1),
+	.IPL0n(cpu_ipl_n[0]), .IPL1n(cpu_ipl_n[1]), .IPL2n(cpu_ipl_n[2]),
 	.iEdb(iEdb), .oEdb(oEdb), .eab(eab)
 );
 
@@ -239,7 +242,7 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 (
 	.clk(clk_sys), .rst(cpu_rst),
 	.eab(eab), .ASn(ASn), .LDSn(LDSn), .UDSn(UDSn), .eRWn(eRWn),
-	.oEdb(oEdb), .iEdb(iEdb), .DTACKn(DTACKn),
+	.oEdb(oEdb), .iEdb(iEdb), .DTACKn(DTACKn), .cpu_space(cpu_iack),
 
 	.rom_req(p1_req), .rom_addr(p1_addr), .rom_ack(p1_ack), .rom_dout(p1_dout),
 
@@ -276,6 +279,16 @@ kaneko_vmem u_vmem
 	.v1_addr(13'd0), .v1_q(),
 	.spr_addr(12'd0), .spr_q(),
 	.pal_addr(pal_rd_addr), .pal_q(pal_rd_q)
+);
+
+// Scanline interrupts. vcnt comes from the video timing below; the reference
+// is kaneko16_state::interrupt and the numbers are its raw vpos values.
+kaneko_irq u_irq
+(
+	.clk(clk_sys), .rst(cpu_rst),
+	.vcnt(vcnt),
+	.fc(cpu_fc), .as(~ASn), .a_level(eab[3:1]),
+	.ipl_n(cpu_ipl_n), .vpa_n(cpu_vpa_n), .iack(cpu_iack)
 );
 
 // CPU liveness, counted per frame. A number the display can show beats

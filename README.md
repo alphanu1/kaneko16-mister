@@ -25,10 +25,20 @@ Miles Rally 1/2.
 
 | Block | State |
 |---|---|
-| VIEW2 tilemap address engine | written, fuzzed clean (3.0M checks), partially oracle-verified |
-| VU-002 sprite list parser | written, fuzzed clean (41k checks), partially oracle-verified |
-| Tilemap/sprite pixel path, mixer, timing | **not written** — mixer exists only as C++ in the frame harness |
-| 68000, SDRAM, ROM loader, sound, I/O, `sys/` | **not started** |
+| VIEW2 tilemap address engine | fuzzed clean (3.0M checks), oracle-verified |
+| VU-002 sprite list parser | fuzzed clean (41k checks), oracle-verified |
+| Tilemap pixel fetch, sprite bitmap renderer, mixer | fuzzed clean; **not yet instantiated in the core** |
+| Video timing | 384x264 at 6 MHz, 59.1856 Hz; running on hardware |
+| SDRAM controller, ROM loader | running on hardware |
+| 68000 (fx68k) + bus decode | running on hardware; matches MAME exactly over 100k bus accesses |
+| Scanline interrupts | IRQ5/4/3 with autovectoring; unit-tested, not yet exercised past boot |
+| VIEW2 / sprite register files | **stubbed** — the CPU's writes go nowhere and read back as 0 |
+| Sound (YM2149 x2, OKI M6295) | **not started** |
+| Inputs, EEPROM, coin lockout | **not started** — inputs read as 0xffff |
+
+The core currently boots the 68000 and shows debug views (tile contact sheet,
+palette, CPU liveness). It does not yet render the game: the pixel path exists
+and is verified, but nothing in the core drives it.
 
 M0 frame gate, RTL rendered against a frame MAME actually produced:
 
@@ -39,7 +49,17 @@ blazeonj 100.00%   (exact)
 wingforc 100.00%   (exact, 71680 pixels)
 ```
 
-The gate is scanline-exact. Neither passes yet.
+The gate is scanline-exact. Three of the four are pixel-exact; mgcrystl's
+298-pixel difference is an unresolved line-scroll anomaly on odd rows, recorded
+in `docs/findings.md`.
+
+CPU gate, the core's 68000 bus trace against MAME's on explbrkr:
+
+```
+ours 100000 accesses, 22897 after dropping instruction fetches
+mame 100000 accesses, 22898 after dropping instruction fetches
+MATCH over all 22897 compared accesses
+```
 
 ## Building and testing
 

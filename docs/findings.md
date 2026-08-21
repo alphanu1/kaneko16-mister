@@ -2225,3 +2225,143 @@ The core has no interrupts yet, and 100,000 accesses is roughly two frames, so
 the comparison ends before the game's first VBlank handler would run. The
 divergence that matters next is the one interrupts will introduce, and it cannot
 be measured until IRQ5 and IRQ4 exist.
+
+## Scanline interrupts: three levels, not two
+
+*Instrument: `kaneko16_state::interrupt` in kaneko16.cpp, plus a frame-by-frame
+SR poll in MAME. Corrected: a working note that had only two of the three.*
+
+```
+scanline 224 -> IRQ5    main vblank; also buffers sprite RAM
+scanline 144 -> IRQ3    translates part of the sprite buffer
+scanline  64 -> IRQ4    translates part of the sprite buffer
+```
+
+A note carried since the CPU first ran said "IRQ5 at scanline 224, IRQ4 at
+scanline 64" and omitted IRQ3 entirely. The driver's own comment on the two
+lower levels is "each of these 2 int are responsible of translating a part of
+sprite buffer from work ram to sprite ram. How these are scheduled is unknown."
+
+### The scanline numbers need no conversion
+
+`set_size(256, 256)` with `set_visarea(0, 255, 16, 239)` — MAME's vpos counts
+from the top of the blanked frame with the visible area starting at line 16,
+which is exactly what `kaneko_video_timing` does with `V_START = 16`. The two
+numberings coincide, so 224/144/64 are used as they appear in the driver.
+
+Note that 224 is sixteen lines *before* the end of the visible area, not the
+start of vblank. That is what the driver does, and its comment — "2 frame
+delayed normaly; differs per PCB?" — says it is not certain either. Reproduced
+rather than corrected.
+
+### HOLD_LINE, and what answers the acknowledge
+
+MAME asserts each level with `HOLD_LINE`: the line stays asserted until the CPU
+acknowledges it. A pulse would be dropped whenever the 68000 happened to be
+masking interrupts, and the game would lose frames in a way that looks like a
+timing fault anywhere but here. `kaneko_irq` holds each level in a flip-flop and
+clears it on the acknowledge for that level.
+
+The board has no vector generator, so every acknowledge is answered with VPA and
+the 68000 autovectors through 0x64..0x7c. Two things this forces:
+
+- **VPAn is asserted only during the acknowledge.** VPAn low in a normal cycle
+  turns that cycle into a synchronous 6800-style one.
+- **`kaneko_bus` must stay out of the acknowledge entirely**, which is why it
+  now takes a `cpu_space` input. Left to itself it would decode FC=7 as an
+  ordinary access, find nothing mapped at `fffffx`, and assert DTACK anyway —
+  the deliberate "answer everything so the CPU cannot hang" behaviour. The CPU
+  would then take a *vectored* interrupt through whatever the read mux was
+  driving: a jump to a garbage address, one frame after the game finally
+  enables interrupts, with nothing in the trace to point at the cause.
+
+### The game does not enable interrupts for about four seconds
+
+Polling SR once per frame in MAME:
+
+```
+frame  60 SR=2700 mask=7 PC=00cc9e
+frame 180 SR=2709 mask=7 PC=00ccca
+frame 240 SR=2700 mask=7 PC=009d9e
+frame 300 SR=2504 mask=5 PC=009f08
+```
+
+The first instruction at the reset PC is `ORI #$0700,SR`, so interrupts are
+masked from the start, and the mask stays at 7 for roughly 240 frames while the
+boot code runs a long self-test — a loop at `00ca14..00ca24` that walks about
+two thousand bytes of sprite RAM comparing each one. Our core runs the same loop
+over the same addresses; the 300,000-access trace matches MAME exactly, and
+**neither machine takes a single interrupt in that window**.
+
+`mask=5` at frame 300 is not the game running with level 5 blocked — it is the
+CPU sitting *inside* the IRQ5 handler, which is where a frame-boundary sample
+lands most of the time once the handler is running every frame.
+
+### Why the bus trace stops being the right instrument here
+
+Once interrupts are live the two machines diverge legitimately: MAME runs this
+board at 59 Hz over 256 lines, `kaneko_video_timing` runs 264 lines at
+59.1856 Hz. Different line rate, different frame length, so scanline 224 arrives
+a different number of instructions into boot on each side no matter where the
+CPU is released from reset. Aligning the harness to a frame boundary was tried
+and reverted: it would have made the mismatch look deliberate without removing
+it.
+
+Screen timing is not PCB-verified (design study §9). Until it is, the bus trace
+covers boot up to the first interrupt — which it does exactly — and the
+interrupt logic is verified by `sim/cpu/tb_kaneko_irq.cpp` (91 checks) plus an
+end-to-end acknowledge count in `make boot`.
+
+### The acknowledge path is tested with level 7
+
+explbrkr masks at level 7 for its first ~240 frames, and the harness cannot
+reach that in a run of any reasonable length (see below), so nothing would have
+exercised the acknowledge wiring at all. Level 7 is non-maskable, so `make boot`
+forces it once the machine has booted:
+
+```
+== C: interrupt acknowledge path (forced level 7)
+    acknowledges    1
+    vector 0x7c/7e  15 reads
+```
+
+One acknowledge, not many, is correct: the 68000 recognises level 7 on the
+*transition* to 7 rather than on the level, so a held 7 is taken once. fx68k
+models that. The vector reads at 0x7c are the autovector for level 7 — proof
+that VPAn is being answered rather than the cycle being DTACKed by the bus.
+
+## The 68000 is running at about 45% speed: every ROM fetch is a full SDRAM burst
+
+*Instrument: `make boot BOOT_ARGS="--ticks 300000000"`.*
+
+```
+DTACKs          8397878
+last DTACK at   299999804 of 300000000 ticks
+interrupts      none taken
+```
+
+8,397,878 bus cycles in 300 M ticks at 48 MHz is **35.7 ticks per bus cycle**,
+or 0.744 us. A 68000 at 12 MHz completes a bus cycle in four clocks — 0.333 us,
+16 ticks here. The core is 2.23x slower than the part it is replacing, so the
+CPU is effectively running at about 5.4 MHz.
+
+That is why the 300 M tick run — roughly 370 frames — takes no interrupts at
+all. MAME's SR poll puts the game's unmask at around frame 240-300, and at 45%
+speed the core has only made about 165 frames' worth of progress by then. The
+interrupt logic is not implicated: nothing had asked for one yet.
+
+`kaneko_bus` fetches four words from SDRAM and keeps one:
+
+```systemverilog
+rom_word <= {rom_dout[7:0], rom_dout[15:8]};
+```
+
+The other three are discarded, and the next instruction fetch — almost always
+the very next word — starts a fresh burst, arbitration and all. The comment
+there already called caching them "the obvious optimisation once the CPU runs".
+It is no longer an optimisation: a core that runs the game at half speed is
+wrong, not slow, and it will be wrong on hardware in a way that looks like bad
+timing everywhere else.
+
+Three of four sequential fetches should hit a four-word line. That is the next
+change, and this measurement is its gate.
