@@ -31,9 +31,14 @@ assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;
 
+// Audio. Both YM2149s are mono into the cabinet's single speaker, so the two
+// outputs are summed and sent to both channels. AUDIO_S = 0: jt49's `sound` is
+// an unsigned 10-bit level, not a signed sample.
+//
+// The OKI M6295 is not connected yet; when it is, it mixes in here.
 assign AUDIO_S   = 0;
-assign AUDIO_L   = 0;
-assign AUDIO_R   = 0;
+assign AUDIO_L   = ym_mix;
+assign AUDIO_R   = ym_mix;
 assign AUDIO_MIX = 0;
 
 assign LED_USER  = ioctl_download;
@@ -405,6 +410,14 @@ always @(posedge clk_sys) ym_div <= (ym_div == 5'd23) ? 5'd0 : ym_div + 5'd1;
 wire ym_cen = (ym_div == 5'd0);        // 48 MHz / 24 = 2 MHz
 
 wire [7:0] ym0_q, ym1_q;
+wire [9:0] ym0_snd, ym1_snd;
+
+// Two 10-bit unsigned levels summed to 11 bits, then shifted up to fill the
+// framework's 16-bit sample. Both chips are routed to the same speaker at the
+// same gain in MAME (add_route(ALL_OUTPUTS, "mono", 0.5) each), so a plain sum
+// is the right mix and the 0.5 is just MAME avoiding clipping its own bus.
+wire [10:0] ym_sum = {1'b0, ym0_snd} + {1'b0, ym1_snd};
+wire [15:0] ym_mix = {ym_sum, 5'd0};
 wire [7:0] ym1_ioa_in = {7'h7f, eeprom_do};
 wire [7:0] ym1_iob_out;
 
@@ -413,7 +426,7 @@ jt49 u_ym0
 	.rst_n(~cpu_rst), .clk(clk_sys), .clk_en(ym_cen),
 	.addr(ym_addr), .cs_n(~ym0_we), .wr_n(~ym0_we), .din(ym_din),
 	.sel(1'b1), .dout(ym0_q),
-	.sound(), .A(), .B(), .C(), .sample(),
+	.sound(ym0_snd), .A(), .B(), .C(), .sample(),
 	.IOA_in(8'hff), .IOA_out(), .IOA_oe(),
 	.IOB_in(8'hff), .IOB_out(), .IOB_oe()
 );
@@ -423,7 +436,7 @@ jt49 u_ym1
 	.rst_n(~cpu_rst), .clk(clk_sys), .clk_en(ym_cen),
 	.addr(ym_addr), .cs_n(~ym1_we), .wr_n(~ym1_we), .din(ym_din),
 	.sel(1'b1), .dout(ym1_q),
-	.sound(), .A(), .B(), .C(), .sample(),
+	.sound(ym1_snd), .A(), .B(), .C(), .sample(),
 	.IOA_in(ym1_ioa_in), .IOA_out(), .IOA_oe(),
 	.IOB_in(8'hff), .IOB_out(ym1_iob_out), .IOB_oe()
 );
