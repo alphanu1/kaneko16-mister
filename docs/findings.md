@@ -3205,11 +3205,18 @@ whole-core frame gate. Neither the boot harness nor any module harness renders
 a frame through the real controller, so no simulation here can currently
 reproduce a pacing fault.
 
-### OPEN: the interrupt row occasionally reads 7 instead of 3
+### OPEN: the interrupt row occasionally reads 4 instead of 3
 
 Reported 2026-08-21. Row 2 normally shows two adjacent lit blocks — a count of
-3, one each for IRQ5, IRQ4 and IRQ3. Occasionally a third block lights for a
-fraction of a second, making it 7. The game is unaffected.
+3, one each for IRQ5, IRQ4 and IRQ3. Occasionally, for a fraction of a second,
+those two go dark and the next block up lights: `100` instead of `011`, a count
+of **4**. The game is unaffected.
+
+3 to 4 is a clean increment of one, which is worth more than it looks: it is
+one extra interrupt counted in that frame, not a corrupted readout. A latch
+race produces exactly this and so does a genuinely doubled interrupt, so the
+reading does not distinguish them — but it does rule out the counter being
+scrambled.
 
 Simulation says a steady 3: the 600M-tick boot takes 1,486 interrupts over
 about 500 frames of interrupt activity, split 496/495/495 across the three
@@ -3226,3 +3233,97 @@ Two measurements would separate them, neither done: count interrupts over 64
 frames rather than one and check the total is 192 rather than looking at one
 frame's value, and compare per-level counts, since a latch race would show up
 in whichever level fires nearest the boundary.
+
+## 2026-08-21 — the sprite subsystem, and three bugs the module tests could not see
+
+`rtl/video/kaneko_spr_sys.sv` wraps the parser and the renderer and owns the
+memory between and after them: the resolved table, the double-buffered bitmap
+and its coverage mask, and the mixer's read port.
+
+```
+tb_kaneko_spr_sys: 65543 checks, 0 fails
+  render and read back   5403 reference pixels, 0 differ, write counts exact
+  double buffering       4097 of the previous frame readable mid-pass
+  parity mask            0 pixels left over from the previous frame
+```
+
+Every one of the three bugs it found was in a module that already passed its
+own tests. That is the point of the integration test and it is worth saying
+plainly: **module tests verify a module against its harness's idea of the
+world, and the bugs live in the difference between that idea and the core.**
+
+### 1. The parser read every word of every sprite one cycle early
+
+`tb_kaneko_vuspr.cpp` carried the line
+
+```c++
+// Synchronous read: data presented one clock after the address.
+dut->ram_data = g_ram[dut->ram_addr % g_ram.size()];
+```
+
+The comment says synchronous; the code is combinational. It hands the module
+the word for the address it is presenting *this* cycle. `kaneko_vmem`'s sprite
+port is a registered block RAM and answers one cycle later, so against the real
+memory the parser latched the attribute word as the code, the code as X, and so
+on for all 1024 records.
+
+It never showed up because the module was only ever run from reset in its own
+harness, where the address happens to start at 0 and the first word is right by
+luck. The subsystem test caught it on the *second* pass, where the address left
+over from the first pass is not 0.
+
+Fixed on both sides: the parser gained an `S_PRIME` state that lets the first
+address settle, and the testbench now holds the address at the edge and
+presents its data on the following cycle. The parser still matches MAME
+exactly — 40,960 checks, identical latch counts — so the fix is
+behaviour-preserving against the oracle and correct against real memory.
+
+**This is the third occurrence of this exact trap**, and
+`tb_kaneko_vuspr_draw.cpp` already carried a comment about the previous two.
+Writing the warning down did not stop it happening again in a file that did not
+have the warning in it.
+
+### 2. One sprite pixel per sprite, dropped, only when the ROM stalls
+
+The renderer's mask address is combinational from its pixel counters, and those
+counters advance on the **last** cycle of a sprite. So when the sprite ROM
+misses immediately afterwards — which it does, because the next sprite is
+somewhere else in a 2.25 MB region — the address has already moved to the next
+sprite's first pixel while stage B still owes a decision on the last one.
+
+Reading the mask every cycle then replaces the correct answer with one for the
+wrong address. When `ce` returns, the final pixel of the sprite is judged
+already-marked and dropped: about one pixel per sprite, eleven per frame at
+twenty-four sprites, and the pixels *downstream* of it change too, because a
+mask that was never set lets a further-back sprite win. 43 wrong pixels from 11
+missing writes.
+
+The fix is one line — freeze the back surface's mask read with `ce` — and the
+front surface is deliberately not frozen, because the mixer reads it every
+pixel and has nothing to do with the renderer's stalls.
+
+Worth noting what did **not** find this: the renderer's own stall-equivalence
+test, which compares a stalled run against an unstalled one over 524,288 pixels
+and passes. It passes because its harness advances the held mask address only
+on `ce` — modelling the correct behaviour, and therefore unable to detect that
+the RTL around it does not implement it. A harness that models the fix cannot
+test the fix.
+
+A wrong first guess is recorded too: the same symptom looks exactly like a
+read-during-write collision, so an explicit write-first bypass was added to the
+mask first. It changed nothing, which is how it was ruled out.
+
+### 3. A sprite count of zero drew 2048 sprites
+
+`index <= sprite_count - 1` underflows to 2047. Not hypothetical: the subsystem
+uses an empty list to mean "draw nothing this frame", and the surface filled
+with stale table entries instead. Guarded in `S_IDLE`.
+
+### The mask is never cleared
+
+Clearing 65,536 mask bits every frame is a pass the frame does not have to
+spare. Each surface carries a parity bit that flips when it becomes the back
+buffer, and a pixel counts as marked when its stored bit **equals** that
+parity — so two frames of staleness read as clear for nothing. The bitmap needs
+no clearing either, because the mixer gates on the mask. Verified: 0 pixels
+left over across a swap.

@@ -178,11 +178,21 @@ module kaneko_vuspr_draw #(
             b_valid <= 1'b0;
 
             case (state)
+                // A count of zero would underflow to 2047 and draw the whole
+                // table, which is not a hypothetical: the subsystem uses an
+                // empty list to mean "draw nothing this frame", and without
+                // this the surface fills with stale table entries instead.
                 S_IDLE: if (start) begin
-                    busy     <= 1'b1;
-                    index    <= sprite_count - 11'd1;
-                    tbl_addr <= 10'(sprite_count - 11'd1);
-                    state    <= S_FETCH;
+                    if (sprite_count == 11'd0) begin
+                        busy  <= 1'b0;
+                        done  <= 1'b1;
+                        state <= S_IDLE;
+                    end else begin
+                        busy     <= 1'b1;
+                        index    <= sprite_count - 11'd1;
+                        tbl_addr <= 10'(sprite_count - 11'd1);
+                        state    <= S_FETCH;
+                    end
                 end
 
                 S_FETCH: state <= S_LATCH;   // table read latency

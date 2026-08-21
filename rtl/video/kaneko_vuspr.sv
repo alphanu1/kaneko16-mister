@@ -105,7 +105,7 @@ module kaneko_vuspr #(
     wire [15:0] max_val = wide_screen ? 16'h8000 : 16'h4000;
 
     // ------------------------------------------------------------------ FSM
-    typedef enum logic [2:0] { S_IDLE, S_W0, S_W1, S_W2, S_W3 } state_t;
+    typedef enum logic [2:0] { S_IDLE, S_PRIME, S_W0, S_W1, S_W2, S_W3 } state_t;
     state_t state;
 
     logic [$clog2(SPRITES):0] index;
@@ -206,8 +206,26 @@ module kaneko_vuspr #(
                         lat_flipx  <= 1'b0;
                         lat_flipy  <= 1'b0;
                         ram_addr   <= 12'd0;
-                        state      <= S_W0;
+                        state      <= S_PRIME;
                     end
+                end
+
+                // ONE DEAD CYCLE, AND WHY IT HAS TO BE HERE.
+                //
+                // Sprite RAM is a registered block RAM: the word for an
+                // address appears the cycle AFTER that address is presented.
+                // S_IDLE issues address 0, so during the next cycle the data
+                // bus still carries whatever the previous address read — and
+                // without this state S_W0 would latch that as the attribute
+                // and every following word one place early.
+                //
+                // It was missing because the testbench modelled sprite RAM
+                // combinationally while claiming to model it synchronously, so
+                // the parser matched MAME in simulation and read the wrong word
+                // of every record against the real memory.
+                S_PRIME: begin
+                    ram_addr <= ram_addr + 12'd1;
+                    state    <= S_W0;
                 end
 
                 // ram_addr is registered on one edge, its data is valid on the

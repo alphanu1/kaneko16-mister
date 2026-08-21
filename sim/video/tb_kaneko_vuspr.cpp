@@ -130,11 +130,26 @@ std::vector<Out> model(const std::vector<uint16_t>& ram, const Cfg& cfg)
 Vkaneko_vuspr* dut;
 std::vector<uint16_t> g_ram;
 
+// SYNCHRONOUS READ, MODELLED PROPERLY THIS TIME.
+//
+// This was `ram_data = g_ram[dut->ram_addr]` under a comment claiming it was a
+// synchronous read. It is not: it hands the module the data for the address it
+// is presenting THIS cycle, which is a combinational ROM. kaneko_vmem's sprite
+// port is a registered block RAM and answers one clock later, so the parser was
+// verified against a memory that does not behave like the one it is wired to,
+// and read every record's four words one cycle early on real hardware.
+//
+// Third occurrence of this exact trap — tb_kaneko_vuspr_draw carries a comment
+// about the previous two. The address is held at the edge and its data
+// presented on the following cycle, which is what an M10K does.
+uint32_t held_ram = 0;
+
 void tick()
 {
     dut->clk = 0; dut->eval();
-    // Synchronous read: data presented one clock after the address.
-    dut->ram_data = g_ram[dut->ram_addr % g_ram.size()];
+    dut->ram_data = g_ram[held_ram % g_ram.size()];
+    dut->eval();
+    held_ram = dut->ram_addr;
     dut->clk = 1; dut->eval();
 }
 
