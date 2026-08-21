@@ -81,9 +81,18 @@ echo "  Kaneko16.rbf  $want  ok"
 
 if [ "$CORE_ONLY" = 0 ]; then
   shopt -s nullglob
-  mras=("$ROOT"/mra/*.mra)
+  # From releases/, not build/mra. `make mra` writes an MRA for every game the
+  # ROM tables describe, including ones the core cannot run yet; releases/ is
+  # the filtered set, staged through SUPPORTED. Copying the unfiltered set puts
+  # entries in the arcade menu that look supported and fail undiagnosably.
+  #
+  # This looked in mra/ at the repository root, which has never existed, so it
+  # always printed "none" and no MRA was ever deployed. Harmless while the
+  # SDRAM map never moved; not harmless now that the map is sized for four
+  # games and the RBF and its MRA are a matched pair.
+  mras=("$ROOT"/releases/*.mra)
   if [ ${#mras[@]} -eq 0 ]; then
-    say "== mra: none in mra/ — run 'make mra' to build them"
+    say "== mra: none in releases/ — run 'make release'"
   else
     say "== mra"
     for m in "${mras[@]}"; do
