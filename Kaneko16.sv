@@ -435,6 +435,7 @@ wire [10:0] c0_s0_addr, c0_s1_addr, c1_s0_addr, c1_s1_addr;
 wire [15:0] c0_s0_q,    c0_s1_q,    c1_s0_q,    c1_s1_q;
 wire [255:0] v2r0_flat, v2r1_flat, sprreg_flat;
 wire        unmapped_hit;
+wire [23:1] unmapped_addr;
 
 kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 (
@@ -475,7 +476,7 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.in_p1(in_p1), .in_p2(in_p2),
 	.in_system(in_system), .in_unk(16'hffff),
 
-	.unmapped_hit(unmapped_hit), .unmapped_addr()
+	.unmapped_hit(unmapped_hit), .unmapped_addr(unmapped_addr)
 );
 
 // Video-side read ports. Only the palette is consumed in this build; the
@@ -752,6 +753,42 @@ always @(posedge clk_sys) begin
 	dtack_d <= ~DTACKn;
 	if (vbl_rise) begin bus_cycles_lat <= bus_cycles; bus_cycles <= 20'd0; end
 	else if (~DTACKn && !dtack_d) bus_cycles <= bus_cycles + 20'd1;
+end
+
+// WHAT THE CPU ASKED FOR THAT WE DID NOT ANSWER.
+//
+// Added for the Blaze On black screen: the overlay showed bus cycles running
+// and interrupts at zero, which says the 68000 is executing but has them
+// masked — stuck in early init. Simulation runs the same ROM and reaches its
+// main loop, so the difference is something the harness does not model, and
+// static reading of the memory map had already been wrong twice.
+//
+// An unmapped access is acknowledged, so it never hangs the bus; it just
+// returns a value the game did not expect. That makes it invisible unless the
+// address is reported, and it is the one thing that distinguishes "the map is
+// wrong" from "the map is right and something else is". blazeon_map has at
+// least one window this core does not decode — 0x980000, the second VU-002's
+// registers, which MAME backs with plain RAM because the game touches it.
+//
+// The address is LATCHED AND HELD, not sampled per frame: a stuck CPU asks
+// for the same thing every time, and a value that survives to the next frame
+// is one a photograph can read.
+reg [23:1] unmapped_addr_lat;
+reg [15:0] unmapped_cnt, unmapped_cnt_lat;
+always @(posedge clk_sys) begin
+	if (cpu_rst) begin
+		unmapped_addr_lat <= 23'd0;
+		unmapped_cnt <= 16'd0; unmapped_cnt_lat <= 16'd0;
+	end else begin
+		if (unmapped_hit) begin
+			unmapped_addr_lat <= unmapped_addr;
+			if (~&unmapped_cnt) unmapped_cnt <= unmapped_cnt + 1'd1;
+		end
+		if (vbl_rise) begin
+			unmapped_cnt_lat <= unmapped_cnt;
+			unmapped_cnt     <= unmapped_hit ? 16'd1 : 16'd0;
+		end
+	end
 end
 
 // Which view the OSD is showing. Declared here because the tilewall's SDRAM
@@ -1300,6 +1337,28 @@ wire in_spr_row = (screen_y >= 9'd72) && (screen_y < 9'(72 + 6))
 wire [3:0] spr_bit = 4'd15 - 4'(screen_x[6:3]);
 wire       spr_set = spr_overrun_lat[spr_bit];
 
+// Rows 10 and 11: the unmapped access. Added for the Blaze On black screen,
+// where every other row read zero and there was nothing left to look at.
+//
+//   10  orange  unmapped accesses this frame, 16 bits
+//   11  blue    the address of the last one, a[23:8] — the top 16 bits of the
+//               23-bit word address, so 0x980000 reads as 9800 and a page is
+//               identifiable without counting to 23
+//
+// Below the joystick row and separated from it, because they are a different
+// kind of readout: row 10 is per-frame like the counters above, row 11 is a
+// latched value that HOLDS until the next unmapped access, which is what makes
+// a stuck CPU photographable.
+wire in_unm_row = (screen_y >= 9'd92) && (screen_y < 9'(92 + 6))
+               && (screen_x < 9'(16 * ALV_BIT_W));
+wire [3:0] unm_bit = 4'd15 - 4'(screen_x[6:3]);
+wire       unm_set = unmapped_cnt_lat[unm_bit];
+
+wire in_uad_row = (screen_y >= 9'd100) && (screen_y < 9'(100 + 6))
+               && (screen_x < 9'(16 * ALV_BIT_W));
+wire [3:0] uad_bit = 4'd15 - 4'(screen_x[6:3]);
+wire       uad_set = unmapped_addr_lat[uad_bit + 4'd8];
+
 // Row 2, cyan: line fetches that overran, per frame, 16 bits. All dark means
 // the feeder is keeping up and the tearing is somewhere else entirely.
 wire in_ovr_row = (screen_y >= 9'd32) && (screen_y < 9'(32 + 6))
@@ -1314,18 +1373,22 @@ wire       ovr_set = overrun_lat[ovr_bit];
 // they sit on top of the picture, so the picture wins unless asked otherwise.
 wire dbg_on   = status[11];
 wire in_dbg   = dbg_on && (in_alive_row || in_irq_row || in_ovr_row || in_oki_row
-                           || in_spr_row || in_joy_row)
+                           || in_spr_row || in_joy_row
+                           || in_unm_row || in_uad_row)
               && (screen_x[2:0] != 3'd7);
 wire dbg_set  = in_alive_row ? alive_set : in_irq_row ? irq_set
               : in_ovr_row ? ovr_set : in_spr_row ? spr_set
-              : in_joy_row ? joy_set : oki_set;
+              : in_joy_row ? joy_set
+              : in_unm_row ? unm_set : in_uad_row ? uad_set : oki_set;
 
 wire [7:0] dbg_r = dbg_set ? ((in_irq_row || in_oki_row || in_spr_row
-                                || in_joy_row) ? 8'hff : 8'h00) : 8'h40;
-wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : in_joy_row ? 8'h00 : 8'hff)
+                                || in_joy_row || in_unm_row) ? 8'hff : 8'h00)
+                          : 8'h40;
+wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : in_unm_row ? 8'h80
+                              : (in_joy_row || in_uad_row) ? 8'h00 : 8'hff)
                            : 8'h00;
-wire [7:0] dbg_b = dbg_set && (in_ovr_row || in_spr_row || in_joy_row)
-                     ? 8'hff : 8'h00;
+wire [7:0] dbg_b = dbg_set && (in_ovr_row || in_spr_row || in_joy_row
+                               || in_uad_row) ? 8'hff : 8'h00;
 
 // The game picture and the palette swatches both come out of the palette RAM,
 // so they share the same decode.

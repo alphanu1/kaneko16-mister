@@ -4242,3 +4242,77 @@ With that in place all three supported titles reach their main loop:
 The unmapped accesses are all at 0xe40000 and above, which MAME has as
 `nopr()` IRQ acknowledges on this board. They are acknowledged and harmless;
 decoding them explicitly is a separate change.
+
+### Blaze On, second pass: the CPU runs and takes no interrupts
+
+The overlay, decoded against the source rather than eyeballed:
+
+```
+  row 0  green  20 bits  bus cycles per frame     -- BITS SET, CPU executing
+  row 1  amber   8 bits  interrupts acknowledged  -- ZERO
+  row 2  cyan   16 bits  line-fetch overruns      -- zero
+  rows 4-7 yellow        the OKI chain            -- zero, no sound wired
+  row 8  white  16 bits  sprite overruns          -- zero
+  row 9  magenta         live joystick word       -- zero, nothing pressed
+```
+
+A running 68000 with zero acknowledged interrupts is one with them masked: it
+is stuck in early init, before the game enables them. The IRQ path itself is
+not implicated — `kaneko_irq` compares raw `vcnt` against 224/144/64 and
+`V_TOTAL` is a fixed 264, so the levels fire whatever the per-game geometry is,
+and simulation confirms 47 of each per second.
+
+### ROMREGION_ERASEFF, and a fill byte that is a per-game fact
+
+```
+  ROM_REGION( 0x100000, "maincpu", ROMREGION_ERASEFF )
+  ROM_LOAD16_BYTE( "bz_prg1.u80", 0x000000, 0x040000, ... )
+  ROM_LOAD16_BYTE( "bz_prg2.u81", 0x000001, 0x040000, ... )
+```
+
+512 KB of program in a 1 MB window, and MAME fills the rest with **0xFF**.
+`tools/build_rom_regions.py` padded every region with `00`. `blazeon_map` maps
+the whole megabyte as ROM, so the game can read up there, and a checksum over
+the region gets a different answer from 0x00 than from 0xFF.
+
+It is the only Tier 1 region with the flag — explbrkr's is exactly filled,
+mgcrystl's says `ROMREGION_ERASE` (zero), wingforc's 1 MB is fully populated by
+two 512 KB ROMs. So the table has one entry, and the stream hashes confirm the
+scope: blazeonj's changed, the other two are byte-identical.
+
+**This is a real fix and it is NOT known to be the black screen.** The boot
+harness produces byte-identical behaviour with either fill, because the CPU
+does not read above 0x080000 in the window simulated. Corrected because MAME
+says so, not because it was measured to matter.
+
+### The instrument, because static reading had already been wrong twice
+
+`kaneko_bus` reports the address of any unmapped access and the top level threw
+it away. Two rows added:
+
+```
+  row 10  orange  unmapped accesses this frame, 16 bits
+  row 11  blue    address of the last one, a[23:8], HELD until the next
+```
+
+Held rather than sampled per frame: a stuck CPU asks for the same thing every
+time, and a value that survives to the next frame is one a photograph can read.
+
+An unmapped access is acknowledged, so it never hangs the bus — it returns a
+value the game did not expect, which is invisible unless the address is
+reported. The standing suspect is `map(0x980000, 0x98001f).ram()`, the second
+VU-002's register block, which MAME backs with plain RAM because the game
+touches it and this core does not decode it at all. If that is it, row 11 reads
+`9800`.
+
+### The boot harness disagreed with hardware, and that was its own bug
+
+`kaneko_cpumem_harness` left `kaneko_video_timing`'s geometry inputs
+unconnected — the same class as the memory-map pages, tied to 0, giving a
+visible area of zero height and a `vblank_rise` that never fires. Wired from
+the game table. It did not reproduce the fault, but a harness that disagrees
+with hardware about the thing being debugged cannot be used to reason about it.
+
+Verilator's PINMISSING would have caught this too; the harness build passes
+`-Wno-fatal`, so it was a warning in a wall of warnings. Unlike the Quartus
+case there is no guard for it yet.

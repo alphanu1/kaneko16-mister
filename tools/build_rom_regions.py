@@ -126,6 +126,32 @@ GAME_ID = {
     "wingforc": 3,
 }
 
+# ROM_REGION fill byte, where it is not zero.
+#
+# MAME fills an unfilled part of a ROM region with 0x00 unless the region says
+# otherwise. blazeonj's says otherwise:
+#
+#   ROM_REGION( 0x100000, "maincpu", ROMREGION_ERASEFF )
+#   ROM_LOAD16_BYTE( "bz_prg1.u80", 0x000000, 0x040000, ... )
+#   ROM_LOAD16_BYTE( "bz_prg2.u81", 0x000001, 0x040000, ... )
+#
+# 512 KB of program in a 1 MB window, and the upper half reads 0xFF on the real
+# board, not 0x00. That is not decoration: blazeon_map maps the whole megabyte
+# as ROM, so the game can read up there, and a checksum over the region gets a
+# different answer from 0x00 than from 0xFF.
+#
+# Every other Tier 1 region is either exactly filled or explicitly ERASE (zero),
+# so this table has one entry and must stay that way by inspection, not by
+# assumption — check ROM_START before adding a game.
+FILL = {
+    ("blazeonj", "maincpu"): 0xFF,
+}
+
+
+def fill_of(setname, region):
+    return FILL.get((setname, region), 0x00)
+
+
 # set name -> zip basename, where they differ
 ZIPNAME = {"blazeonj": "blazeon"}
 
@@ -300,7 +326,7 @@ def build(setname, rompath, outdir):
         names = set(z.namelist())
         for region, entries in SETS[setname].items():
             size = REGION_SIZE[setname][region]
-            buf = bytearray(size)
+            buf = bytearray([fill_of(setname, region)]) * size
             for entry in entries:
                 fname, off, length, reloads = entry[0], entry[1], entry[2], entry[3]
                 mode = entry[4] if len(entry) > 4 else "flat"
@@ -460,7 +486,8 @@ def build_mra(setname, rompath, outdir):
         written = 0
         for off, ent, is_pair in placements:
             if off > written:
-                ET.SubElement(rom, "part", repeat=str(off - written)).text = "00"
+                ET.SubElement(rom, "part", repeat=str(off - written)).text = \
+                    f"{fill_of(setname, region):02X}"
                 written = off
             if is_pair:
                 il = ET.SubElement(rom, "interleave", output="16")
@@ -474,7 +501,10 @@ def build_mra(setname, rompath, outdir):
                 written += ent[2]
 
         if written < size:
-            ET.SubElement(rom, "part", repeat=str(size - written)).text = "00"
+            # The region's OWN fill, not zero — see FILL. This is the tail of
+            # blazeonj's maincpu: 512 KB of 0xFF that the game can read.
+            ET.SubElement(rom, "part", repeat=str(size - written)).text = \
+                f"{fill_of(setname, region):02X}"
         cursor = base + size
 
     ET.indent(root, space="    ")

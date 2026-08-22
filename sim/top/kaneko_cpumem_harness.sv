@@ -229,6 +229,8 @@ module kaneko_cpumem_harness #(
     kaneko_video_timing u_timing
     (
         .clk(clk), .rst(rst), .ce_pix(ce_pix_h),
+        .h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
+        .v_start(CFG_V_START), .h_sync_start(CFG_HSYNC),
         .hcnt(), .vcnt(vcnt), .screen_x(), .screen_y(),
         .hsync(), .vsync(), .hblank(), .vblank(), .de(), .vblank_rise()
     );
@@ -310,6 +312,10 @@ module kaneko_cpumem_harness #(
     // title is not just its ROM — kaneko_bus decodes a DIFFERENT map per game.
     wire [7:0] PG_WRAM, PG_V2W0, PG_V2W1, PG_SPR, PG_PAL, PG_WDOG, PG_IN, PG_SND;
     wire       ROM_1MB;
+    // Geometry too. Left unconnected these tie to 0, which gives a visible
+    // area of zero height and a vblank_rise that never fires — the harness
+    // then disagrees with hardware about the one thing being debugged.
+    wire [9:0] CFG_H_VIS, CFG_V_VIS, CFG_V_START, CFG_HSYNC;
 
     kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg (
         .clk(clk), .rst(rst),
@@ -323,7 +329,9 @@ module kaneko_cpumem_harness #(
         .base_trom0(), .base_trom1(), .base_spr(), .base_oki(),
         .v2_dx(), .v2_dy(), .view2_2_pri(), .spr_pri_f(),
         .two_chips(), .spr_count(), .spr_xoffs(), .visarea_min_y(),
-        .wide_screen(), .h_vis(), .v_vis(), .v_start(), .h_sync_start(),
+        .wide_screen(),
+        .h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
+        .v_start(CFG_V_START), .h_sync_start(CFG_HSYNC),
         .inputs_blazeon(), .base_z80(), .has_z80()
     );
 
