@@ -40,7 +40,14 @@ module kaneko_gamecfg #(
     input  wire [7:0]  ioctl_index,
     input  wire [7:0]  ioctl_dout,
 
-    output logic [7:0] game_id,
+    // An OSD override, applied inside the table so every derived output moves
+    // together. Exists because the MRA's config byte does not arrive on
+    // hardware and nothing in the per-game table has ever been exercised there
+    // — see findings.md, 2026-08-22.
+    input  wire        id_force_en,
+    input  wire [7:0]  id_force,
+
+    output wire  [7:0] game_id,
 
     // ---- memory map, a[23:16] of each window that moves
     output wire [7:0]  pg_wram, pg_v2w0, pg_v2w1, pg_spr, pg_pal,
@@ -88,12 +95,19 @@ module kaneko_gamecfg #(
 
     // Held through a core reset and cleared only by power-on. An OSD reset must
     // not lose which game is loaded, and the byte arrives once, before the ROM.
+    // The latch holds what the MRA said; game_id is what the core ACTS on.
+    // Keeping them separate matters: the override must move every derived
+    // output AND the reported id together, or the core runs a chimera of two
+    // boards and the readout lies about which.
+    logic [7:0] id_latched;
     always_ff @(posedge clk) begin
         if (rst)
-            game_id <= 8'd0;
+            id_latched <= 8'd0;
         else if (ioctl_wr && (ioctl_index == CFG_INDEX))
-            game_id <= ioctl_dout;
+            id_latched <= ioctl_dout;
     end
+
+    assign game_id = id_force_en ? id_force : id_latched;
 
     // Unknown ids fall back to game 0 rather than decoding nothing. A core that
     // runs the wrong game is diagnosable; one that shows a black screen is what

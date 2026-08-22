@@ -125,6 +125,7 @@ int main(int argc, char** argv) {
     d = new Vkaneko_gamecfg;
 
     d->rst = 1; d->ioctl_wr = 0; d->ioctl_index = 0; d->ioctl_dout = 0;
+    d->id_force_en = 0; d->id_force = 0;
     tick(4);
     d->rst = 0; tick(2);
 
@@ -168,6 +169,21 @@ int main(int argc, char** argv) {
     check(d->game_id == 3, "Wing Force selected");
     d->rst = 1; tick(4); d->rst = 0; tick(2);
     check(d->game_id == 0, "power-on reset clears it to game 0");
+
+    // ---------------------------------------------------------------- 5
+    // The OSD override must move EVERY derived output, not just game_id. It
+    // exists because the MRA's config byte does not arrive on hardware, so it
+    // is the only thing that has ever exercised the per-game table there — if
+    // it moved only some outputs the core would run a chimera of two boards.
+    printf("== the OSD override drives the whole table\n");
+    ioctl_byte(1, 0);                      // MRA says game 0
+    for (const auto& g : GAMES) {
+        if (g.id == 0) continue;
+        d->id_force_en = 1; d->id_force = g.id; tick(2);
+        verify(g);                          // every output must match that game
+    }
+    d->id_force_en = 0; tick(2);
+    verify(GAMES[0]);                       // and release restores the MRA's id
 
     printf("\ntb_kaneko_gamecfg: %ld checks, %ld fails\n", checks, fails);
     delete d;

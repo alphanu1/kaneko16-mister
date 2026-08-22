@@ -72,6 +72,7 @@ localparam CONF_STR = {
 	"O[15],Sprite offscreen skip,On,Off;",
 	"O[16],Sprites,On,Off;",
 	"O[17],Tilemaps,On,Off;",
+	"O[20:19],Game override,Off(MRA),1 Magical Crystals,2 Blaze On,3 Wing Force;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
@@ -156,11 +157,42 @@ wire [7:0]  PG_SND;
 wire        ROM_1MB;
 wire        BLAZEON_IO;
 
+// THE MRA's GAME-ID BYTE DOES NOT ARRIVE, AND THIS IS BOTH THE PROBE AND THE
+// WAY ROUND IT.
+//
+// Proven twice on hardware: Blaze On reports 256x224 in the OSD, which is
+// Explosive Breaker's geometry, and Explosive Breaker's own ROMs relabelled as
+// game 01 still boot Explosive Breaker. game_id is stuck at its reset value.
+// Every wire has been checked — hps_io and this module share clk_sys, rst_por
+// is only PLL lock, WIDE=1, index 1 is emitted with md5="none" after index 0 —
+// and the byte still never lands.
+//
+// cfg_writes counts ioctl writes seen at index 1, which separates "the
+// transfer never happens" from "it happens and the value is wrong". Those are
+// different faults and nothing so far distinguishes them.
+//
+// The override exists so the rest of the core is testable meanwhile: the game
+// table, the per-game map, the geometry and the inputs are all verified
+// against MAME and none of them has ever been exercised on hardware, because
+// the selector that reaches them never arrives. Off means use the MRA.
+reg [15:0] cfg_writes;
+always @(posedge clk_sys) begin
+	if (rst_por) cfg_writes <= 16'd0;
+	else if (ioctl_wr && (ioctl_index[7:0] == 8'd1) && ~&cfg_writes)
+		cfg_writes <= cfg_writes + 1'd1;
+end
+
+wire [1:0] game_ovr = status[20:19];
+
 kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 (
 	.clk(clk_sys), .rst(rst_por),
 	.ioctl_wr(ioctl_wr), .ioctl_index(ioctl_index[7:0]),
 	.ioctl_dout(ioctl_dout[7:0]),
+	// Applied INSIDE the table, so every consumer — pages, geometry, inputs,
+	// ROM bases — sees one consistent id. Muxing the output would leave the
+	// table's internals on the MRA's value.
+	.id_force_en(game_ovr != 2'd0), .id_force({6'd0, game_ovr}),
 	.game_id(game_id),
 
 	.pg_wram(PG_WRAM), .pg_v2w0(PG_V2W0), .pg_v2w1(PG_V2W1),

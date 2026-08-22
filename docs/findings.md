@@ -4782,3 +4782,52 @@ one title anybody was testing.
 incident of a default that returns a plausible value: the SDRAM burst length,
 the harness port count, `GAME_ID.get(setname, 0)`, and now the reset value of
 `game_id` itself.
+
+### The two-byte fix did not work, and the md5 theory was wrong
+
+Blaze On still reports 256x224 with a two-byte `<part>02 02</part>`. So the
+WIDE=1 word-count theory was not it, or not all of it.
+
+The follow-up theory — that a missing `md5` attribute stopped the transfer —
+is disproved by MiSTer's own source. `mra_loader.cpp` clears `arc_info->md5`
+at the start of every `<rom>` element (line 477), and
+
+```
+  int checksumsame = !strlen(arc_info->zipname) || !strcasecmp(md5, hex);
+  int no_checksum  = !strcasecmp(md5, "none") || !strlen(md5);
+  checksumsame |= no_checksum;
+  rom_finish(checksumsame, ...)
+```
+
+forces `checksumsame` true when there is no zipname, which a config rom does
+not have. It would have been sent either way. `md5="none"` and emitting index 1
+after index 0 are kept as tidying, not as fixes.
+
+Everything on the core side checks out and has been verified line by line:
+`hps_io` and `kaneko_gamecfg` share `clk_sys` so no pulse can be lost across
+domains; `rst_por` is only `~pll_locked` and released long before download;
+`ioctl_index[7:0]` is compared against 1; `ioctl_dout[7:0]` is the low byte
+that WIDE=1 fills first. The byte still does not land, and no more theorising
+is going to settle it.
+
+### So: a probe, and a way round it
+
+`cfg_writes` counts ioctl writes seen at index 1. That separates two faults
+nothing so far distinguishes — the transfer never happening, versus happening
+with the wrong value.
+
+And an OSD **Game override** selects the id directly. This matters more than
+the probe: **nothing in the per-game table has ever been exercised on
+hardware.** The pages, ROM bases, geometry, layer count, sprite list size and
+input assembly are all verified against MAME and all of them have only ever run
+as Explosive Breaker's values on the board, because the selector never
+arrived. The override makes the whole table testable while the delivery
+problem is still open.
+
+It is applied INSIDE the table rather than muxed onto its output, so every
+derived signal moves together. The testbench caught the first attempt doing
+this wrong: `game_id` still reported the latched MRA value while the table
+acted on the forced one — a core running one board's pages with another's
+geometry, and a readout lying about which. There is now one effective id, and
+the test asserts the override moves every output, not just the one being
+looked at.
