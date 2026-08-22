@@ -111,12 +111,13 @@ module kaneko_sdram_harness #(
     .COL_BITS(COL_BITS),
     .NP(NP), .T_RCD(T_RCD), .T_RP(T_RP), .T_RC(T_RC), .T_RAS(T_RAS),
     .T_WR(T_WR), .CL(CL), .T_REFI(T_REFI), .INIT_NOP(INIT_NOP), .ACK_HOLD(2),
-    // Same split the core uses: ports 0-4 are the tile feeder and the 68000,
-    // which have deadlines; 5-7 are OKI and sprites, which have a whole frame.
-    // The harness must test the arbitration the core actually ships, not the
-    // default — a harness that measures the wrong configuration is how the
-    // per-game pages and the input words both got past this project already.
-    .URGENT(8'b0001_1111)
+    // Same split the core uses: 0-4 tile feeder and 68000, 5 the OKI — all
+    // real-time — and 6-7 the sprite engine, which has a whole frame. The OKI
+    // started in the slack tier and that broke Explosive Breaker's audio on
+    // hardware within minutes: it consumes a sample every 66us with nothing
+    // buffering it. The harness must test the arbitration the core actually
+    // ships, not the default.
+    .URGENT(8'b0011_1111)
   ) dut (
     .clk(clk), .rst_n(rst_n), .ready(ready),
     // CL+3, what the device MODEL needs, and after the selector range moved

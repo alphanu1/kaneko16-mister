@@ -5399,3 +5399,63 @@ continuously. In the core the feeder goes idle once the line is fetched, so
 sprites get the rest of every line plus hblank and vblank. That is an argument
 rather than a measurement, and the sprite overrun row is where it would show if
 it is wrong.
+
+### The arbitration fixed the overruns and did NOT fix the smearing
+
+Hardware, after the tiered arbiter:
+
+```
+  wingforc   no tile overruns, no sprite overruns.  Angel and copyright still wrong.
+  blazeonj   no tile overruns, no sprite overruns.  Copyright and the pilot
+             background still wrong.
+  explbrkr   no overruns — and AUDIO BROKEN.
+```
+
+So the arbitration change did what it was designed to do: the tilemap feeder now
+meets its deadline on the Blaze On board, where it was overrunning to three
+bars. **And the smearing is unchanged**, which kills the theory that the
+smearing WAS the overrun. That theory fitted every piece of evidence available
+at the time — sprites off cleared the overruns, a partially filled line buffer
+looks like a smear, the heavier layer is the one that misses — and it was
+wrong.
+
+Worth keeping the change regardless: overruns were real, they are gone, and
+tearing under load would have surfaced eventually.
+
+### And it broke Explosive Breaker's audio, because the OKI is not slack
+
+The first mask put the OKI in the tier that waits. It is not a batch consumer:
+it takes a sample every 66us with nothing buffering behind it, so starving it
+breaks the audio outright, which is what happened within minutes of the build
+landing.
+
+`URGENT` is now `8'b0011_1111` — tile feeder, 68000 and OKI are all real-time;
+only the sprite engine, which has a whole frame to fill its bitmap, waits.
+
+The mis-classification is the interesting part. "Has a deadline" was reasoned
+about per port and the OKI was filed under sound, which felt like something
+that could wait. Its deadline is tighter than the tilemap's: 66us against a
+scanline's 64us, and unlike the tilemap there is no buffer to absorb a late
+arrival. **Sound is not slack.**
+
+### Parked: the tile drawing fault
+
+Still unexplained, and every stage of the chain is verified:
+
+```
+  VRAM contents        0 of 1024 tiles differ from MAME, both banks
+  renderer             100% pixel-exact on MAME's data, several frames
+  registers and latch  correct on the board
+  layer offset +2      confirmed best on the board, all four positions tried
+  line scroll          off on the affected screens
+  tile ROM addressing  correct, no truncation
+  line buffer at 320   518 checks, placement and stall invariance
+  fetcher deadline     now met, overruns zero
+```
+
+Set down deliberately to get the Z80 and YM2151 in, so Blaze On and Wing Force
+are playable with sound and known graphics glitches, rather than perfect and
+silent. The next instrument when it is picked up again should be the structural
+one this list keeps pointing at: render the frame gate through the REAL
+`kaneko_vmem` and `kaneko_tmap_line` instead of C++ arrays, so the picture can
+be reproduced off-hardware instead of one build at a time.

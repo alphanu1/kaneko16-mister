@@ -489,8 +489,8 @@ int main(int argc, char** argv) {
 
   // ------------------------------------------------- deadline ports win
   //
-  // Ports 0-4 are the tile feeder and the 68000 and have deadlines; 5-7 are
-  // the OKI and the sprite engine and have a whole frame. Under the old pure
+  // Ports 0-5 are the tile feeder, the 68000 and the OKI, all of which have
+  // real-time deadlines; 6-7 are the sprite engine, which has a whole frame. Under the old pure
   // round-robin all eight shared equally, the tile feeder missed its line and
   // the sprite engine made its frame comfortably — which on hardware was a
   // smeared tilemap layer, and turning sprites off took the overruns to zero.
@@ -507,14 +507,14 @@ int main(int argc, char** argv) {
       h.step();
       for (int i = 0; i < NP; i++)
         if (!h.port[i].busy) {
-          (i < 5 ? urgent : slack)++;
+          (i < 6 ? urgent : slack)++;
           h.issue(i, 0x2000 + i * 0x400 + ((c * 8) & 0x3ff), false, 0);
         }
     }
     for (int i = 0; i < NP; i++) h.port[i].busy = false;
     h.drain();
     h.checks++;
-    printf("  arbitration under full load: urgent(0-4) served %ld, slack(5-7) served %ld\n",
+    printf("  arbitration under full load: urgent(0-5) served %ld, slack(6-7) served %ld\n",
            urgent, slack);
     if (urgent == 0 || slack > urgent / 4) {
       printf("  FAIL deadline ports did not get priority\n");

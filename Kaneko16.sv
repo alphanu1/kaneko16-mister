@@ -365,8 +365,12 @@ wire rom_loaded, ldr_overflow;
 //
 //   p0, p2, p3, p4   tile feeder, one per layer — must finish a LINE
 //   p1               68000 ROM fetch — the CPU stalls on DTACK waiting
-//   p5               OKI samples — a whole frame of slack
-//   p6, p7           sprite ROM — a whole frame of slack
+//   p5               OKI samples — REAL TIME. The chip consumes a sample
+//                    every 66us and there is no buffer behind it; starve it
+//                    and the audio breaks, which is exactly what putting it in
+//                    the slack tier did to Explosive Breaker.
+//   p6, p7           sprite ROM — a whole frame of slack, and the only ports
+//                    here that genuinely have any
 //
 // Round-robin gave all eight an equal share, so the sprite ports took their
 // slots on schedule while the tile feeder missed its line. On hardware that
@@ -374,9 +378,10 @@ wire rom_loaded, ldr_overflow;
 // turning sprites off took those overruns to zero — the measurement that
 // identified this.
 //
-// 8'b0001_1111: tiles and the CPU first, sound and sprites with what is left.
+// 8'b0011_1111: tiles, the CPU and the OKI first; only the sprite engine, which
+// has a whole frame to fill its bitmap, waits.
 kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300),
-               .URGENT(8'b0001_1111)) u_sdram
+               .URGENT(8'b0011_1111)) u_sdram
 (
 	.clk(clk_sdram), .rst_n(pll_locked), .ready(mem_ready),
 	.rd_lat_sel(status[5:4]),
