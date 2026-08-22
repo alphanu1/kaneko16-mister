@@ -66,6 +66,13 @@ qdb/
 *.sof
 *.pof
 *.rbf
+# ...except the published ones. A blanket *.rbf keeps build output out, and it
+# silently swallowed `git add releases/` too — the release bitstream was
+# skipped without a word while the old one had just been removed, leaving
+# upstream with no core at all. An ignore rule that is right for build/ is not
+# automatically right for the one directory whose entire purpose is to carry
+# a bitstream.
+!/releases/*.rbf
 *.jic
 *.map
 *.fit
