@@ -5655,3 +5655,55 @@ guard that forced this into the open: `make quartus` refuses to build when a
 harness declares a different NP from `Kaneko16.sv`, because "a port the harness
 does not drive is a port nothing tests". Without it the tag bug would have
 reached the board.
+
+### Stalling the CPU stalled the sound chip with it
+
+Wing Force played its menu music, played about half a second of the demo tune
+and then went silent, with no effects at all. Blaze On, on the same Z80 and the
+same jt51, sounded correct.
+
+The census rows and MAME's own numbers cornered it. `tools/mame_z80_ports.lua`
+counts what the oracle's Z80 writes, per second:
+
+```
+t= 2s  r03=7202          w02=242 w03=242            menu: YM only
+t=13s  r03=6433 r0a=10   w02=540 w03=540  w0a=15    demo: YM + OKI
+```
+
+Two facts came out of that. Wing Force's MUSIC is the YM2151, not the OKI --
+the OKI only carries effects. And the driver POLLS THE YM'S STATUS REGISTER
+about seven thousand times a second, waiting on its timer flags.
+
+On hardware the OKI-write row read zero through the whole demo where MAME
+writes it fifteen to fifty times a second, and the stall counter -- 4 MHz ticks
+lost to a ROM-cache miss -- was reading half its bits.
+
+**The Z80's clock enable was driving the YM2151.** `kaneko_z80snd` had
+
+```
+assign ym_cen    = ce;
+assign ym_cen_p1 = ce && ce_d;
+```
+
+which was harmless for as long as `ce` was a free-running 4 MHz tick. It
+stopped being one in this session's change: the Z80's program ROM became a
+cache over SDRAM, a miss stalls the CPU by holding its enable low, and that
+took the sound chip's clock with it. The YM's timers stopped whenever the CPU
+waited, the driver's seven-thousand-a-second poll never saw the tick it wanted,
+and it wedged part-way through starting the tune -- which is precisely "half a
+second of music and then nothing", and precisely why no effects were ever
+requested afterwards.
+
+**A stalled CPU is a CPU that has not got there yet. A stalled sound chip is a
+sound chip keeping the wrong time**, and nothing downstream recovers it. Only
+the CPU may stall. jt51 now runs on `ym_ce`, the unconditional tick, and
+`kaneko_z80snd` has no CPU clock enable at all -- everything else in it is
+paced by the Z80's own bus strobes, which only move when the CPU does.
+
+Blaze On is not evidence against this and never was. It sounded right, which is
+not the same as being complete; nobody had compared it against anything, and
+its cache miss rate is simply a different number. Its census should be read too.
+
+The rate itself was never wrong: MAME clocks the YM2151 at 4 MHz on both
+boards, `YM2151(config, m_ymsnd, 4000000)` for Blaze On and `XTAL(16'000'000)/4`
+for Wing Force. Only the gating was.

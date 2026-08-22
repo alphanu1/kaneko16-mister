@@ -19,7 +19,7 @@ int  ce_div = 0;
 
 void tick(int n = 1) {
     for (int i = 0; i < n; i++) {
-        d->ce = (ce_div == 0);
+        d->ym_ce = (ce_div == 0);   // free-running; the CPU's stall never gates it
         ce_div = (ce_div + 1) % 12;      // 48 MHz / 12 = 4 MHz
         d->clk = 0; d->eval();
         d->clk = 1; d->eval();

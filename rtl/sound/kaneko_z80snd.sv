@@ -41,7 +41,12 @@
 module kaneko_z80snd (
     input  wire        clk,
     input  wire        rst,
-    input  wire        ce,           // 4 MHz enable
+    // THE SOUND CHIP'S ENABLE, free-running 4 MHz, never gated by the ROM-cache
+    // stall -- see the note on ym_cen below. There is deliberately no CPU
+    // clock enable here any more: everything else in this module is paced by
+    // the Z80's own bus strobes, which only move when the CPU does, so a
+    // second copy of that timing would be one more thing to keep in step.
+    input  wire        ym_ce,           // 4 MHz enable
 
     // ---- 68000 side
     input  wire        latch_we,     // one clk pulse
@@ -161,11 +166,28 @@ module kaneko_z80snd (
     end
 
     // -------------------------------------------------- YM2151 interface
+    //
+    // DRIVEN BY ym_ce, NOT ce, AND THE DIFFERENCE IS A REAL BUG THAT SHIPPED.
+    //
+    // These were `ce`, which was harmless while `ce` was a free-running 4 MHz
+    // enable. It stopped being one when the Z80's program ROM became a cache
+    // over SDRAM: a miss now stalls the CPU by holding its clock enable low,
+    // and that took the YM2151's clock down with it. The chip's TIMERS stop
+    // while the CPU waits, and the driver polls those timer flags about seven
+    // thousand times a second -- so it started a tune, fell behind its own
+    // sequencer and wedged. On hardware that was music for a split second when
+    // the demo began and then silence, with the stall counter reading half its
+    // bits.
+    //
+    // A stalled CPU is a CPU that has not got there yet. A stalled sound chip
+    // is a sound chip keeping the wrong time, and nothing downstream can
+    // recover it. Only the CPU may stall.
+    //
     // cen_p1 is documented as half of cen.
     logic ce_d;
-    always_ff @(posedge clk) if (ce) ce_d <= ~ce_d;
-    assign ym_cen    = ce;
-    assign ym_cen_p1 = ce && ce_d;
+    always_ff @(posedge clk) if (ym_ce) ce_d <= ~ce_d;
+    assign ym_cen    = ym_ce;
+    assign ym_cen_p1 = ym_ce && ce_d;
     assign ym_cs_n   = ~sel_ym;
     assign ym_wr_n   = wr_n;
     assign ym_a0     = cpu_addr[0];

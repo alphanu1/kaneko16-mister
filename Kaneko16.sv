@@ -787,7 +787,10 @@ always @(posedge clk_sys) z80_cediv <= (z80_cediv == 4'd11) ? 4'd0 : z80_cediv +
 wire        z80_rom_ready;
 wire        z80_rom_rd = ~z80_mreq_n && ~z80_rd_n && (z80_a < 16'hc000);
 wire        z80_stall  = z80_rom_rd && !z80_rom_ready;
-wire z80_ce = (z80_cediv == 4'd0) && !z80_stall;
+// The CPU's enable stalls; the sound chip's does not. z80_ce_free is the
+// unconditional 4 MHz tick and is what jt51 runs on.
+wire z80_ce_free = (z80_cediv == 4'd0);
+wire z80_ce      = z80_ce_free && !z80_stall;
 
 // Held in reset when the board has no Z80. Not merely idle: a Z80 free-running
 // over whatever the block RAM powered up with would drive the YM2151 with
@@ -820,7 +823,7 @@ kaneko_z80rom #(.SDR_AW(SDR_AW)) u_z80rom
 
 kaneko_z80snd u_z80snd
 (
-	.clk(clk_sys), .rst(~z80_rst_n), .ce(z80_ce),
+	.clk(clk_sys), .rst(~z80_rst_n), .ym_ce(z80_ce_free),
 	.latch_we(z80_latch_we), .latch_din(z80_latch_din),
 	.cpu_addr(z80_a), .cpu_dout(z80_do), .cpu_din(z80_di),
 	.mreq_n(z80_mreq_n), .iorq_n(z80_iorq_n),
