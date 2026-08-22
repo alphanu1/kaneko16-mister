@@ -1455,10 +1455,24 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 //
 // 0000 on both means the register writes are not landing on hardware, which on
 // its own produces exactly the two-pixel split.
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? c0r2
-                        : (screen_y < 9'd52) ? c0r0
-                        : (screen_y < 9'd58) ? oki_busy_lat
-                                             : oki_snd_lat;
+// All four rows carry the scroll path, raw and latched, because the raw
+// registers came back CORRECT on hardware (7340 / 72c0, exactly MAME) and the
+// engine does not use them directly — it uses `lay_sx`, a copy taken once per
+// frame at frame_start. If that copy is not updating it holds its reset value
+// of zero, and then layer 0 is dx 51 + 0 and layer 1 is dx 53 + 0: a
+// two-pixel split, and the whole tilemap displaced, which is both symptoms.
+//
+//   row 4  lay_sx layer 0, LATCHED    expect 7340
+//   row 5  lay_sx layer 1, LATCHED    expect 72c0
+//   row 6  c0r2, raw register         known 7340
+//   row 7  c0r0, raw register         known 72c0
+//
+// Rows 6 and 7 are the control: they are already confirmed, so if 4 and 5
+// disagree with them the latch is the fault and nothing downstream is.
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? lay_sx[15:0]
+                        : (screen_y < 9'd52) ? lay_sx[31:16]
+                        : (screen_y < 9'd58) ? c0r2
+                                             : c0r0;
 wire       oki_set = oki_row_val[oki_bit];
 
 // Row 9, magenta: the RAW joystick word for pad 1, live — not a per-frame
