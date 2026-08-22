@@ -4885,3 +4885,48 @@ being cited as evidence. The fix is a visible marker that changes every build �
 a new OSD entry, a version nibble on the overlay — checked before any reading
 is trusted. `releases/` already has a rule that working is defined by the
 device and not by the build directory; this is the same rule one level deeper.
+
+### First real hardware readings for the Blaze On board
+
+With the correct bitstream finally loading:
+
+```
+  explbrkr   works
+  blazeonj   RUNS. Warning screen and attract render. Tilemap SCROLLING is
+             correct. Text is doubled with a ~2 pixel horizontal offset.
+             Sprites present but displaced about an eighth of the screen
+             (~40px of 320) and drawn half-complete. Inputs work.
+  wingforc   RUNS from its own MRA, same symptoms.
+  mgcrystl   boots, overlay healthy, screen black.
+```
+
+MAME's own frames for blazeonj at the same point are 320x232 with clean
+single-width text and whole sprites, so none of this is the game.
+
+### Where the gate cannot see, and why that matters
+
+`sim/video/tb_kaneko_frame.cpp` does NOT instantiate `kaneko_vmem`. It feeds
+VRAM from a C++ array straight into the renderer through `t_vram_attr_addr` and
+`t_vram_code_addr`. So the 100% frame match proves the RENDERER correct given
+correct VRAM, and proves nothing at all about:
+
+- `kaneko_vmem`'s bank decode (vram_0 / vram_1 / scroll_0 / scroll_1)
+- the CPU write path from `kaneko_bus` into that memory
+- sprite RAM contents as the CPU actually writes them
+
+Every symptom above lives in exactly that blind spot. The layer/register
+mapping was checked by hand and is consistent between the gate, the top level
+and `kaneko_vmem` — tmap0 takes regs 2/3 and VRAM 0x1000, tmap1 takes regs 0/1
+and VRAM 0x0000, enables are bits 12 and 4 active low — so the swap theory is
+not supported and the fault is elsewhere in the same region.
+
+The structural fix is to drive the gate's VRAM through the CPU write path
+rather than loading it directly. That closes the blind spot permanently instead
+of chasing each symptom onto hardware one build at a time. It is the same
+lesson as the boot harness, which agreed with whatever it was handed until it
+was given the real register banks and the real input words.
+
+Sprite displacement of roughly 40px on a 320-wide screen, with half-drawn
+sprites, suggests 256-wide assumptions surviving in the sprite clip or wrap —
+`spr_xoffs` is 0xF980 from MAME's `set_offsets(0x10000 - 0x680, 0)` and is
+applied, so it is not that constant.
