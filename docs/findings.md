@@ -5131,3 +5131,19 @@ frame gate proves the renderer, the boot harness proves the CPU, and every
 video fault has lived in the seam between them. Three of those seams are now
 closed with tests that fail on the real defect — the line buffer's placement at
 320, the two-layer coincidence, and the SDRAM bases against the ROM layout.
+
+### Two edits that did nothing, reported as done
+
+`str.replace()` matched nothing on two occasions and the script printed a
+success line regardless, because the print was unconditional. The overlay rows
+were never restored to the OKI chain and the scroll-register probe was never
+added. `git add Kaneko16.sv` then staged an unchanged file, the commit carried
+only docs and a testbench, and Quartus rebuilt a **byte-identical bitstream**.
+
+The identical md5 against the previous deploy is the only thing that caught it.
+That is the second time in one day that the fix for a reported change was
+"check the artefact actually changed" — the first was `Kaneko16_GOOD.rbf`
+shadowing the real core for twelve hours.
+
+Every scripted edit now asserts the anchor text exists before replacing, and
+greps for the result afterwards. A rule is in CLAUDE.md.

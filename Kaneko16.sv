@@ -1439,8 +1439,24 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 // 0x100 — a row spending a whole build to display nothing. It now carries the
 // exception vector number, and row 5 the low half of the last bus address as a
 // cross-check that should read 0080..0082 for a loop at 0x100-0x105.
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? {10'd0, vec_lat}
-                        : (screen_y < 9'd52) ? {9'd0, bus_addr_lat[7:1]}
+// Rows 4 and 5 carry the two VIEW2 scroll registers as the top level sees
+// them, for one measurement.
+//
+// The arithmetic says chip 0's two layers must coincide exactly — layer 0 is
+// dx 51 + scroll 461 and layer 1 is dx 53 + scroll 459, both 512, both
+// map_x = x. The game writes layer 1's scroll two lower for exactly that
+// reason. Simulation reads back 0x7340 and 0x72c0 and a directed test confirms
+// the two layers then emit identical pixels in all 320 columns; hardware draws
+// them two pixels apart. One of those numbers is not reaching the engine on
+// the board, and only reading them there will say which.
+//
+//   row 4  c0r2, layer 0's scroll x   expect 7340
+//   row 5  c0r0, layer 1's scroll x   expect 72c0
+//
+// 0000 on both means the register writes are not landing on hardware, which on
+// its own produces exactly the two-pixel split.
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? c0r2
+                        : (screen_y < 9'd52) ? c0r0
                         : (screen_y < 9'd58) ? oki_busy_lat
                                              : oki_snd_lat;
 wire       oki_set = oki_row_val[oki_bit];
