@@ -486,9 +486,26 @@ module kaneko_bus #(
         // that returns nothing has cost this core three sessions already.
         else if (sel_snd)  iEdb = 16'h0000;
         else if (sel_iack2 || sel_iack3) iEdb = 16'h0000;
+        // THE THIRD AND FOURTH INPUT WORDS ARE SWAPPED BETWEEN THE BOARDS.
+        //
+        //   bakubrkr_map   e00000 P1   e00002 P2   e00004 SYSTEM  e00006 UNK
+        //   blazeon_map    c00000 P1   c00002 P2   c00004 UNK     c00006 SYSTEM
+        //
+        // Blaze On has an extra unused word at offset 4 which pushes SYSTEM to
+        // offset 6. This mux was written for bakubrkr_map, so on the Blaze On
+        // board a read of SYSTEM returned the UNUSED word instead — 0xffff,
+        // where the board reads 0xff00. The game tests it, fails, and jumps to
+        // the park loop at 0x000100.
+        //
+        // Found by the bus-trace diff against MAME, not by reading the map:
+        //
+        //     ours   c00006 R ffff        mame   c00006 R ff00
+        //
+        // A per-game fact sitting in shared code, which is hard rule 9.
         else if (sel_in)   iEdb = (a[2:1] == 2'd0) ? in_p1
                                 : (a[2:1] == 2'd1) ? in_p2
-                                : (a[2:1] == 2'd2) ? in_system : in_unk;
+                                : blazeon_io ? ((a[2:1] == 2'd2) ? in_unk : in_system)
+                                             : ((a[2:1] == 2'd2) ? in_system : in_unk);
         // Undriven reads float high on this board's bus, and 0xffff is also
         // what an unpressed input reads, so it is the honest default.
         else               iEdb = 16'hffff;

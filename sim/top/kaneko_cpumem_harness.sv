@@ -311,7 +311,7 @@ module kaneko_cpumem_harness #(
     // MRA's <rom index="1"> config byte selects the memory map. Booting a
     // title is not just its ROM — kaneko_bus decodes a DIFFERENT map per game.
     wire [7:0] PG_WRAM, PG_V2W0, PG_V2W1, PG_SPR, PG_PAL, PG_WDOG, PG_IN, PG_SND;
-    wire       ROM_1MB, BLAZEON_IO;
+    wire       ROM_1MB, BLAZEON_IO, INPUTS_BLAZEON;
     // Geometry too. Left unconnected these tie to 0, which gives a visible
     // area of zero height and a vblank_rise that never fires — the harness
     // then disagrees with hardware about the one thing being debugged.
@@ -332,7 +332,7 @@ module kaneko_cpumem_harness #(
         .wide_screen(),
         .h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
         .v_start(CFG_V_START), .h_sync_start(CFG_HSYNC),
-        .inputs_blazeon(), .base_z80(), .has_z80()
+        .inputs_blazeon(INPUTS_BLAZEON), .base_z80(), .has_z80()
     );
 
     // THE REGISTER BANKS, WHICH THIS HARNESS DID NOT HAVE.
@@ -401,7 +401,12 @@ module kaneko_cpumem_harness #(
         .pg_spr(PG_SPR),  .pg_pal(PG_PAL),
         .pg_wdog(PG_WDOG), .pg_in(PG_IN), .pg_snd(PG_SND),
         .rom_1mb(ROM_1MB), .blazeon_io(BLAZEON_IO),
-        .in_system(16'hffff), .in_unk(16'hffff),
+        // NOT a blanket 0xffff. The Blaze On board's SYSTEM word reads 0xFF00
+        // idle, because MAME's port defines only the high byte and undefined
+        // bits read zero. Tying it to all-ones here is what let the core ship
+        // the same mistake — a harness that feeds an idealised value cannot
+        // catch a wrong one.
+        .in_system(INPUTS_BLAZEON ? 16'hff00 : 16'hffff), .in_unk(16'hffff),
 
         .unmapped_hit(unmapped_hit), .unmapped_addr(unmapped_addr)
     );

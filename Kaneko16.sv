@@ -809,7 +809,12 @@ always @(posedge clk_sys) begin
 	// On the DTACK edge, so one completed access latches once. eab[23:8]==0
 	// is a byte address below 0x100, which is the vector table and nothing
 	// else — the loop itself sits at 0x100 and is excluded deliberately.
-	else if (~DTACKn && !dtack_d && eRWn && (eab[23:8] == 16'd0))
+	// eab[23:7], NOT eab[23:8]. eab is bits 23:1 of the byte address, so
+	// eab[23:8]==0 admits byte addresses up to 0x1ff — which includes the park
+	// loop at 0x100-0x105, and the loop then overwrote the latch with its own
+	// fetches every pass. The instrument was measuring itself. CLAUDE.md:
+	// check the instrument could have seen it.
+	else if (~DTACKn && !dtack_d && eRWn && (eab[23:7] == 17'd0))
 		vec_lat <= eab[7:2];
 end
 
@@ -1277,7 +1282,27 @@ wire [15:0] in_sys_eb = { 1'b1, ~svc_coin, ~pause, 1'b1,
 wire [7:0]  dsw2 = { dip_service, 7'h7f };
 wire [15:0] in_p1_bz  = { ~coin1, ~start1, p1_bits, dsw2 };
 wire [15:0] in_p2_bz  = { ~coin2, ~start2, p2_bits, 8'hff };
-wire [15:0] in_sys_bz = { dip_service, ~pause, ~svc_coin, 13'h1fff };
+// SYSTEM on this board reads 0xFF00 IDLE, NOT 0xFFFF. From MAME's
+// INPUT_PORTS_START(blazeon), the port defines only the high byte:
+//
+//   0x8000  IPT_SERVICE1            (service coin)
+//   0x4000  IPT_TILT
+//   0x2000  PORT_SERVICE_NO_TOGGLE  (the service-mode DIP)
+//   0x1000..0x0100  IPT_UNKNOWN     (active low, so 1 when idle)
+//   0x00ff  NOT DEFINED AT ALL
+//
+// Undefined bits in a MAME port read ZERO. This core returned all ones, and
+// the bus-trace diff against MAME caught it as the first divergence past the
+// self-test:
+//
+//     ours   c00006 R ffff        mame   c00006 R ff00
+//
+// The game reads SYSTEM, tests the low byte, finds it non-zero and jumps to
+// the park loop at 0x000100 — which is why the 68000 was found spinning in
+// three instructions there with no exception ever taken. An idle input word is
+// not "all ones"; it is whatever the board actually drives, and the unwired
+// half of this one drives nothing.
+wire [15:0] in_sys_bz = { ~svc_coin, ~pause, dip_service, 5'h1f, 8'h00 };
 
 wire [15:0] in_p1     = INPUTS_BLAZEON ? in_p1_bz  : in_p1_eb;
 wire [15:0] in_p2     = INPUTS_BLAZEON ? in_p2_bz  : in_p2_eb;

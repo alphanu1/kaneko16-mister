@@ -4569,3 +4569,94 @@ experiment's half is not a result, and the leading theory has now been wrong
 four times on this bug — sprite bandwidth, the second VU-002 registers, the ROM
 window and fill, and now SDRAM capture timing. Every one of them died to a
 measurement, and none of them died to an argument.
+
+## 2026-08-22 — the Blaze On black screen: TWO bugs on one input read
+
+The oracle found it in one line, after two earlier divergences were cleared out
+of the way so the comparison could reach this far:
+
+```
+  ours   c00006 R ffff        mame   c00006 R ff00
+```
+
+0xc00006 is SYSTEM on this board. Two independent faults land on that read, and
+either alone is fatal.
+
+### 1. The third and fourth input words are SWAPPED between the boards
+
+```
+  bakubrkr_map   e00000 P1   e00002 P2   e00004 SYSTEM  e00006 UNK
+  blazeon_map    c00000 P1   c00002 P2   c00004 UNK     c00006 SYSTEM
+```
+
+Blaze On has an extra unused word at offset 4 which pushes SYSTEM to offset 6.
+The read mux in `kaneko_bus` was written for bakubrkr_map:
+
+```
+  (a[2:1] == 2'd2) ? in_system : in_unk
+```
+
+so on the Blaze On board a read of SYSTEM returned the UNUSED word. A per-game
+fact sitting in shared code, which is hard rule 9, and it is now gated on
+`blazeon_io`.
+
+### 2. An idle input word is not "all ones"
+
+MAME's `INPUT_PORTS_START(blazeon)` SYSTEM port defines ONLY the high byte:
+
+```
+  0x8000 IPT_SERVICE1   0x4000 IPT_TILT   0x2000 PORT_SERVICE_NO_TOGGLE
+  0x1000..0x0100 IPT_UNKNOWN (active low, 1 when idle)
+  0x00ff  NOT DEFINED AT ALL
+```
+
+Undefined bits in a MAME port read **zero**, so the word reads 0xFF00 idle.
+This core built it as 0xFFFF on the assumption that an unpressed input is all
+ones. It is not: it is whatever the board actually drives, and the unwired half
+of this one drives nothing. The bit assignment was wrong too — service coin,
+tilt and the service DIP were in the wrong order — and is now taken straight
+from the port definition.
+
+The game reads SYSTEM, tests the low byte, gets 0xff where it wants 0x00, and
+jumps to the park loop at 0x000100. That accounts for EVERY observation: the
+CPU at full speed (45,056 bus cycles a frame, a six-byte loop out of the ROM
+cache), no exception vector ever fetched, nothing unmapped, and the address
+pinned below 0x200.
+
+### What actually found it
+
+**Not reading the memory map.** That map was read several times this session
+and looked correct every time, because the check being made was "is the window
+in the right place" and not "is each word inside it the right word". Six
+theories died before this one — sprite bandwidth, the second VU-002 registers,
+the ROM window, the region fill, the video geometry and SDRAM capture timing —
+and every one of them died to a measurement rather than an argument.
+
+**It only surfaced after clearing two earlier divergences.** The 0xe40000
+value and the register banks the boot harness did not have were each stopping
+the comparison short of this point. Both looked like minor correctness fixes;
+their real worth was letting the oracle see further.
+
+**The harness was feeding an idealised value.** `in_system` was tied to 0xffff
+unconditionally, which is exactly how the core shipped the same assumption — a
+harness that hands the CPU a perfect input cannot catch a wrong one. It now
+presents the per-board word.
+
+### And the instrument was measuring itself
+
+The exception-vector latch used `eab[23:8] == 0` to mean "byte address below
+0x100". `eab` is bits 23:1 of the byte address, so that admits addresses up to
+0x1ff — including the park loop at 0x100-0x105, whose own fetches overwrote the
+latch every pass. It reported near-zero and was read as "no exception taken",
+which happened to be the right conclusion for the wrong reason. Now
+`eab[23:7]`. CLAUDE.md already carries the rule: check the instrument could
+have seen it.
+
+Verification, after both fixes:
+
+```
+  blazeonj  c00006 R ff00 == mame, first divergence moved from access 2
+            to access 63152, which is interrupt-timing drift (this core runs
+            264 lines at 59.19 Hz, MAME's screen is a different height at 60)
+  explbrkr  100000 accesses, NO divergence at all
+```
