@@ -5098,3 +5098,36 @@ whether the DEBUG OVERLAY ghosts too — it is drawn directly at exact pixel
 positions and never touches tiles, VRAM or the line buffer. If it ghosts, the
 fault is downstream of everything above, in the HDMI scaler or its filter, and
 this build carries -0.032 ns on `pll_hdmi`.
+
+### The two layers coincide correctly in RTL, and split on hardware
+
+Blaze On draws the same tiles on both layers of VIEW2 chip 0 and lines them up
+exactly. The hardware gives layer 1 a dx two greater; the game writes layer 1's
+scroll two LOWER to cancel it:
+
+```
+  layer 0   dx 51 + (0x7340 >> 6 = 461) = 512   ->  map_x = x
+  layer 1   dx 53 + (0x72c0 >> 6 = 459) = 512   ->  map_x = x
+```
+
+That is why some elements of the picture ghost and others do not: the stars sit
+on one layer and stay crisp, the large artwork sits on both and is drawn twice
+two pixels apart. It shows on static screens, which rules out anything to do
+with clearing or trails.
+
+`tb_kaneko_tmap_line` now asserts it directly — identical tile data on every
+layer, the game's real dx and scroll values, and the two layers must emit the
+same pixel in all 320 columns. **It passes.** 519 checks, 0 fails.
+
+So the arithmetic, the register routing, the per-layer indexing and the line
+buffer are all correct, and the hardware still splits them. The remaining
+possibility is that the scroll registers hold different values on the board
+from the ones simulation reads back, so rows 4 and 5 of the overlay now display
+`c0r2` and `c0r0` as the top level sees them. Expect 7340 and 72c0; 0000 would
+mean the register writes are not landing on hardware at all.
+
+Recording the shape of this hunt, because it has been the pattern all day: the
+frame gate proves the renderer, the boot harness proves the CPU, and every
+video fault has lived in the seam between them. Three of those seams are now
+closed with tests that fail on the real defect — the line buffer's placement at
+320, the two-layer coincidence, and the SDRAM bases against the ROM layout.

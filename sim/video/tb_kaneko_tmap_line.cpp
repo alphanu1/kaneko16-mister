@@ -31,6 +31,12 @@ std::mt19937 rng(0x7A31C0DEu);
 
 // Deterministic memories: every read is a hash of its address, so a given
 // line always yields the same pixels.
+// When set, the memories ignore the layer index so every layer sees identical
+// contents. Blaze On puts the same tiles on both layers of chip 0 and lines
+// them up exactly; that only works if two layers given coincident parameters
+// produce the same pixels, which is what this lets a test assert.
+bool same_for_all_layers = false;
+
 uint32_t mix(uint32_t v) {
     v ^= v >> 16; v *= 0x7feb352d; v ^= v >> 15; v *= 0x846ca68b; v ^= v >> 16;
     return v;
@@ -54,15 +60,15 @@ uint32_t held_scr[4] = {0}, held_vram[4] = {0}, held_rom[4] = {0};
 void feed() {
     uint64_t scr = 0;
     for (int g = 0; g < 4; g++)
-        scr |= (uint64_t)(mix(held_scr[g] * 4 + g) & 0xffff) << (g * 16);
+        scr |= (uint64_t)(mix(held_scr[g] * 4 + (same_for_all_layers ? 0 : g)) & 0xffff) << (g * 16);
     dut->scr_data_f = scr;
 
     for (int g = 0; g < 4; g++)
-        dut->vram_data_f[g] = mix(held_vram[g] * 8 + g + 0x1000);
+        dut->vram_data_f[g] = mix(held_vram[g] * 8 + (same_for_all_layers ? 0 : g) + 0x1000);
 
     uint32_t rd = 0;
     for (int g = 0; g < 4; g++)
-        rd |= (mix(held_rom[g] + g * 0x555) & 0xff) << (g * 8);
+        rd |= (mix(held_rom[g] + (same_for_all_layers ? 0 : g) * 0x555) & 0xff) << (g * 8);
     dut->rom_data_f = rd;
 
     // Four bits now, one per layer, stalled independently. That independence
@@ -211,6 +217,41 @@ int main(int argc, char** argv) {
     int wide_stall_diff = 0;
     for (int x = 0; x < 320; x++) if (s320.px[x] != n320.px[x]) wide_stall_diff++;
     ck("a stalled 320-wide line matches the unstalled one", wide_stall_diff, 0);
+
+    // ------------------------------- TWO LAYERS THAT SHOULD COINCIDE, DO
+    //
+    // Blaze On draws the same tiles on both layers of VIEW2 chip 0 and lines
+    // them up exactly: the hardware gives layer 1 a dx two greater, and the
+    // game writes layer 1's scroll two LOWER to cancel it.
+    //
+    //   layer 0   dx 51 + (0x7340 >> 6 = 461) = 512
+    //   layer 1   dx 53 + (0x72c0 >> 6 = 459) = 512
+    //
+    // With identical tile data the two layers must therefore emit identical
+    // pixels. If they do not, every edge in the picture is drawn twice two
+    // pixels apart — which is what the board shows, on static backgrounds and
+    // on text alike.
+    same_for_all_layers = true;
+    dut->layer_en = 0xf;
+    dut->linescroll_en = 0;
+    // dx: 4 x signed 11, layer 0 = 51, layer 1 = 53
+    dut->dx_f = ((uint64_t)53 << 11) | (uint64_t)51;
+    dut->dy_f = 0;
+    // scroll x: 4 x 16, layer 0 = 0x7340, layer 1 = 0x72c0
+    dut->scroll_x_f = ((uint64_t)0x72c0 << 16) | (uint64_t)0x7340;
+    dut->scroll_y_f = 0;
+
+    Line co = run_line(40, false, 320);
+    int coincide_diff = 0, first_bad = -1;
+    for (int x = 0; x < 320; x++) {
+        unsigned l0 = (unsigned)( co.px[x]        & 0xf);
+        unsigned l1 = (unsigned)((co.px[x] >> 4)  & 0xf);
+        if (l0 != l1) { coincide_diff++; if (first_bad < 0) first_bad = x; }
+    }
+    if (coincide_diff)
+        std::printf("  layers disagree at %d of 320 columns, first at x=%d\n",
+                    coincide_diff, first_bad);
+    ck("layer 1 with dx+2 and scroll-2 coincides with layer 0", coincide_diff, 0);
 
     std::printf("kaneko_tmap_line: checks=%ld fails=%ld\n", checks, fails);
     delete dut;
