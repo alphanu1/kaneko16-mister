@@ -1,19 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Kaneko 16-bit arcade core for MiSTer FPGA — Copyright (C) 2026 alphanu1
 //
-// The Z80 program ROM, driven from where the LOADER would be and read from
-// where the Z80 would be.
+// The Z80 program ROM cache, driven from where the Z80 would be and answered
+// from a model of the SDRAM port.
 //
-// The three things that can go wrong here all produce a ROM of exactly the
-// right size, so none of them is visible without reading the contents back:
+// This replaces a test of the block-RAM copy that used to live here. The copy
+// cost 48 M10K blocks the device does not have; see the header of
+// kaneko_z80rom.sv. The failure modes are different now and mostly WORSE,
+// because a cache can return the right byte for the wrong reason:
 //
-//   1. the byte halves swapped        -- every opcode becomes its neighbour
-//   2. the window offset by one word  -- the whole ROM shifts two bytes
-//   3. the window catching writes that belong to another region, or missing
-//      the first/last word of its own
+//   1. byte lane within the burst wrong -- every opcode becomes its neighbour
+//   2. tag too narrow, or index and tag overlapping -- two different addresses
+//      alias to one line and the second read returns the first one's data,
+//      which only shows up once the working set exceeds the cache
+//   3. the fill writing the line but not the tag, or the tag but not valid --
+//      a permanent miss, so it still works and merely runs slowly
+//   4. rom_ready high on the cycle of a miss -- the caller does not stall, the
+//      Z80 executes a stale byte, and nothing here would notice unless ready
+//      is checked on every access rather than only on the ones that fill
+//   5. the burst address not four-word aligned -- the controller's contract,
+//      and the model asserts on it
 //
-// So this fills the region, surrounds it with data that must NOT land, and
-// checks every one of the 49152 bytes.
+// So: every one of the 49152 bytes is read back, in an order chosen to force
+// eviction and re-fill, with ready checked on every single access.
 #include <cstdio>
 #include <cstdint>
 #include <vector>
@@ -24,112 +33,153 @@ namespace {
 
 Vkaneko_z80rom* d;
 long checks = 0, fails = 0;
+long fills  = 0;               // SDRAM bursts served
 
 void check(bool ok, const char* what) {
     checks++;
     if (!ok) { fails++; if (fails <= 12) printf("  FAIL: %s\n", what); }
 }
 
-// Two clocks, and the harness runs them at DIFFERENT rates on purpose: if the
-// module ever went back to one, driving only ld_clk here would stop the read
-// side working and the test would say so.
+// The audiocpu region as it sits in SDRAM, plus guard data on either side that
+// must never be returned.
+constexpr uint32_t BASE_W = 0x200000;      // word address, four-word aligned
+constexpr int      BYTES  = 0xC000;        // 48 KB
+
+std::vector<uint8_t> rom;                  // what the region holds, by byte
+
+uint8_t rom_byte(int i) { return rom[i]; }
+
 void tick() {
-    d->clk = 0; d->eval(); d->clk = 1; d->eval();
-}
-void ld_tick() {
-    d->ld_clk = 0; d->eval(); d->ld_clk = 1; d->eval();
+    d->clk = 0; d->eval();
+    d->clk = 1; d->eval();
 }
 
-// The loader's SDRAM write port: a word address and a 16-bit word.
-void ld(uint32_t waddr, uint16_t din) {
-    d->ld_wr = 1; d->ld_addr = waddr; d->ld_din = din;
-    ld_tick();
-    d->ld_wr = 0;
-    ld_tick();
-}
+// One SDRAM port cycle. The controller answers a burst-aligned word address
+// with four words; the model checks alignment and range rather than trusting
+// them, because a cache that asks for the wrong line and is answered anyway
+// looks identical to one that works.
+void sdram_service() {
+    if (!d->p_req) { d->p_ack = 0; return; }
 
-uint8_t rd(uint16_t a) {
-    d->rom_addr = a;
-    tick();          // address registered, data and byte-select land together
+    uint32_t wa = d->p_addr;
+    check((wa & 3) == 0, "burst address is four-word aligned");
+    check(wa >= BASE_W, "burst address is not below the region");
+
+    uint32_t byte_off = (wa - BASE_W) * 2;
+    uint64_t line = 0;
+    for (int k = 0; k < 8; k++) {
+        uint32_t bi = byte_off + k;
+        uint8_t v = (bi < (uint32_t)BYTES) ? rom_byte(bi) : 0xA5;
+        line |= (uint64_t)v << (8 * k);
+    }
+    d->p_dout = line;
+    d->p_ack  = 1;
+    fills++;
     tick();
-    return d->rom_data;
+    d->p_ack = 0;
 }
 
-// The byte a given stream position must end up as. Deliberately not a
-// constant and not a ramp: a ramp with period 256 cannot tell an offset of
-// 256 bytes from no offset at all.
-uint8_t want(uint32_t byte_off) {
-    return (uint8_t)(byte_off * 7 + (byte_off >> 8) * 31 + 5);
+// Read one byte the way the core will: hold the address with rom_rd asserted,
+// let the cache fill if it must, and only accept the byte once ready is high.
+// Returns the byte; records whether it stalled.
+uint8_t read_byte(uint16_t addr, bool* stalled) {
+    d->rom_addr = addr;
+    d->rom_rd   = 1;
+    d->eval();
+
+    int guard = 0;
+    *stalled = false;
+    while (!d->rom_ready) {
+        *stalled = true;
+        sdram_service();
+        if (!d->p_req && !d->rom_ready) tick();
+        d->eval();
+        if (++guard > 200) { check(false, "cache made progress within 200 cycles"); break; }
+    }
+    uint8_t v = d->rom_data;
+    d->rom_rd = 0;
+    d->eval();
+    return v;
 }
 
-} // namespace
+}  // namespace
 
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
     d = new Vkaneko_z80rom;
 
-    const uint32_t BYTES = 0xC000;
-    const uint32_t WORDS = BYTES / 2;
-    // A base that is NOT zero and not aligned to the region size, because both
-    // of those hide an offset bug. This is Blaze On's real one: audiocpu sits
-    // at SDRAM byte 0x400000, and the loader carries word addresses.
-    const uint32_t BASE  = 0x400000 / 2;
+    // Content that makes a lane or offset error visible: every byte differs
+    // from its neighbours and from the byte one line away.
+    rom.resize(BYTES);
+    for (int i = 0; i < BYTES; i++)
+        rom[i] = (uint8_t)((i * 7) ^ (i >> 5) ^ (i >> 11));
 
-    d->base = BASE;
-    d->ld_wr = 0; d->ld_clk = 0; d->rom_addr = 0;
+    d->rst = 1; d->base = BASE_W; d->rom_rd = 0; d->rom_addr = 0;
+    d->p_ack = 0; d->p_dout = 0;
     tick(); tick();
+    d->rst = 0;
+    tick();
 
-    // ---- data that must NOT land: the words immediately below the window,
-    // and immediately above it. Off-by-one in either direction is caught by
-    // the content check, because these carry a value no in-window byte has.
-    for (uint32_t w = 0; w < 8; w++) ld(BASE - 8 + w, 0xDEAD);
-    for (uint32_t w = 0; w < 8; w++) ld(BASE + WORDS + w, 0xDEAD);
-
-    // ---- fill. byte[A] (even) is the LOW half, byte[A+1] the high half.
-    for (uint32_t w = 0; w < WORDS; w++) {
-        uint16_t word = (uint16_t)(want(w * 2 + 1) << 8) | want(w * 2);
-        ld(BASE + w, word);
-    }
-
-    // ---- read every byte back
-    long bad = 0;
-    for (uint32_t b = 0; b < BYTES; b++) {
-        uint8_t got = rd((uint16_t)b);
-        if (got != want(b)) {
-            if (bad < 8)
-                printf("  FAIL: byte %04x = %02x, want %02x\n", b, got, want(b));
-            bad++;
+    // ---- 1. every byte, ascending. Sequential fetching is what the Z80
+    // actually does, and it should miss once per eight bytes and no more.
+    printf("== sequential read of the whole 48 KB\n");
+    long seq_stalls = 0;
+    for (int i = 0; i < BYTES; i++) {
+        bool st;
+        uint8_t got = read_byte((uint16_t)i, &st);
+        if (st) seq_stalls++;
+        if (got != rom_byte(i)) {
+            check(false, "sequential byte matches");
+            if (fails <= 12)
+                printf("    addr %04x got %02x want %02x\n", i, got, rom_byte(i));
+        } else {
+            check(true, "sequential byte matches");
         }
     }
-    checks += BYTES;
-    fails  += bad;
-    if (!bad) printf("  all %u bytes match, byte order included\n", BYTES);
+    printf("   %ld stalls over %d bytes, %ld bursts\n", seq_stalls, BYTES, fills);
+    // One miss per 8-byte line and not one more: a cache that re-fetches a line
+    // it already holds still returns correct data and would pass every byte
+    // check above while running eight times slower on hardware.
+    check(seq_stalls == BYTES / 8, "sequential misses exactly once per line");
 
-    // ---- a write below the base must not wrap into the window. `off` is an
-    // unsigned subtraction, so a bare `off < WORDS` without the `>= base`
-    // guard lets addresses just under the base land near the top of the ROM.
-    ld(BASE - 1, 0x1234);
-    ld(BASE - 2, 0x1234);
-    check(rd(BYTES - 2) == want(BYTES - 2), "a write below base did not wrap in (low byte)");
-    check(rd(BYTES - 1) == want(BYTES - 1), "a write below base did not wrap in (high byte)");
+    // ---- 2. re-read the last 256 bytes. They are still resident, so a
+    // correct cache answers every one without a single burst.
+    printf("== re-read of a resident window\n");
+    long before = fills;
+    for (int i = BYTES - 256; i < BYTES; i++) {
+        bool st;
+        uint8_t got = read_byte((uint16_t)i, &st);
+        check(got == rom_byte(i), "resident byte matches");
+        check(!st, "resident byte does not stall");
+    }
+    check(fills == before, "resident window issues no bursts");
 
-    // ---- the boundaries themselves
-    check(rd(0) == want(0),               "first byte");
-    check(rd(1) == want(1),               "second byte, the odd half of word 0");
-    check(rd(BYTES - 1) == want(BYTES - 1), "last byte");
+    // ---- 3. aliasing. Two addresses one cache-size apart map to the same
+    // line, which is the case a too-narrow tag gets wrong. Alternate between
+    // them and demand the right byte every time.
+    printf("== alternating addresses that share a line\n");
+    const int span = 32 * 8;                    // LINES * 8, one whole cache
+    for (int rep = 0; rep < 64; rep++) {
+        for (int k = 0; k < 8; k++) {
+            int a = 0x1000 + k;
+            int b = 0x1000 + k + span;
+            bool st;
+            check(read_byte((uint16_t)a, &st) == rom_byte(a), "alias A byte");
+            check(read_byte((uint16_t)b, &st) == rom_byte(b), "alias B byte");
+        }
+    }
 
-    // ---- a second game's base. Wing Force puts audiocpu somewhere else
-    // entirely, and the base is a runtime input, not a parameter.
-    const uint32_t BASE2 = 0x580000 / 2;
-    d->base = BASE2;
-    ld(BASE2 + 3, 0xBEEF);
-    check(rd(6) == 0xEF, "re-based load, low byte");
-    check(rd(7) == 0xBE, "re-based load, high byte");
-    // and the old base must now be inert
-    ld(BASE + 4, 0x4321);
-    check(rd(8) == want(8), "the previous base no longer writes");
+    // ---- 4. descending walk, which defeats any prefetch assumption and
+    // exercises the fill path from the other direction.
+    printf("== descending walk\n");
+    for (int i = BYTES - 1; i >= BYTES - 2048; i--) {
+        bool st;
+        uint8_t got = read_byte((uint16_t)i, &st);
+        check(got == rom_byte(i), "descending byte matches");
+    }
 
-    printf("\ntb_kaneko_z80rom: %ld checks, %ld fails\n", checks, fails);
+    printf("\ntb_kaneko_z80rom: %ld checks, %ld fails, %ld bursts\n",
+           checks, fails, fills);
     delete d;
     return fails ? 1 : 0;
 }

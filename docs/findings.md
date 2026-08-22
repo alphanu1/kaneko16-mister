@@ -5578,3 +5578,80 @@ Next instrument, and the only one that can work: repoint
 `sim/video/kaneko_frame_top.sv` at `kaneko_tmap_line` and `kaneko_tmap_fetch`
 so the fault reproduces off-hardware and diffs against MAME per scanline,
 instead of one twenty-minute Quartus build per guess.
+
+### The Z80 would not fit, and the reason was a cliff
+
+Three builds failed to fit before the cause was clear, and none of them failed
+for the reason the numbers first suggested.
+
+```
+Z80 as written              7606 LABs / 4191   (65,557 flip-flops of work RAM)
+work RAM -> block RAM       6673 LABs          (attribute fixed that)
+line buffers -> memory      6639 LABs          (18,362 ALMs recovered)
+Z80 ROM -> SDRAM cache      FITS
+```
+
+The first two fixes were real and both barely moved the total, which is what
+made the shape of the problem visible: M10K was the binding resource at 546 of
+553, and every block recovered anywhere was immediately absorbed by
+`kaneko_vmem` growing. Between two of those fits vmem went 26,934 -> 44,898
+ALMs while `kaneko_tmap_line` went to zero. It was the absorber, not the cause.
+
+**Why it absorbed.** vmem's sprite and palette RAM are ONE WRITE, TWO READS --
+the 68000 on `ca` and the sprite engine on `spr_addr`:
+
+```
+qsh <= sp_hi[ca[11:0]];      // the CPU
+rsh <= sp_hi[spr_addr];      // the sprite engine
+```
+
+An M10K has two ports, so three accesses cannot share one. Quartus's answer is
+to DUPLICATE the memory into two blocks, and it does that silently -- but only
+while blocks are spare. The Z80 took 56 (48 KB of ROM plus 8 KB of work RAM),
+the spare went, and 98,304 bits fell back into registers with the read
+multiplexers to match. The fitter's placed list showed it plainly once looked
+at: `2 pa_hi, 2 pa_lo, 1 sp_lo`, and no `sp_hi` at all.
+
+So the ALM cost of those 56 blocks was a CLIFF. That is why the design looked
+comfortable at 33% and then wanted 157%, and why "there was headroom before the
+Z80" and "the Z80 is only 2,000 ALMs" were both true at once.
+
+**The fix.** `kaneko_z80rom` no longer holds a 48 KB copy. It is a 32-line,
+8-byte direct-mapped cache in registers -- 2,048 bits -- over a new SDRAM port,
+the same bargain kaneko_bus already makes for the 68000. The Z80 has twelve
+clk cycles per Z80 cycle at 4 MHz and about four Z80 cycles per opcode fetch,
+against a round trip of roughly twenty clk cycles, so a miss costs under two
+Z80 cycles and sequential code misses once every eight bytes. Stalling is done
+by holding T80s's CEN low, not by driving WAIT_n: the CPU simply does not
+advance, and there is no second timing contract to get right.
+
+Synthesis after: **17,038 ALMs estimated, down from 73,334**, and 21,705
+registers down from 132,139. Removing 48 KB of ROM removed roughly 56,000 ALMs,
+which is the cliff measured from the other side.
+
+### A three-bit port tag, and the ninth port that aliased onto the first
+
+Adding that SDRAM port took the controller from eight masters to nine and broke
+it, in the quietest way available:
+
+```
+logic [RD_LAT-1:0][2:0] tag_p;        // port index
+tag_p[cap_depth-1] <= grant[2:0];     // truncated
+```
+
+The tag that travels with a CAS and says which port the data belongs to was
+hard-coded to three bits. That is exactly wide enough for eight ports. Port 8
+became port 0: its burst was written into `p_dout[0]` and it raised `p_ack[0]`,
+so the tile feeder was handed the Z80's program bytes and the Z80 waited for an
+acknowledge that had already been spent on somebody else.
+
+In simulation it read as `FAIL p0 addr=400900 got=ea9a want=89db` plus a hang,
+which is a good outcome. On hardware it would have been a black screen and a
+silent sound CPU with nothing pointing at the memory controller, and the last
+thing anybody would have suspected is the port they did not change.
+
+`PW` is `$clog2(NP)` now and every use derives from it. Worth noting the
+guard that forced this into the open: `make quartus` refuses to build when a
+harness declares a different NP from `Kaneko16.sv`, because "a port the harness
+does not drive is a port nothing tests". Without it the tag bug would have
+reached the board.

@@ -14,7 +14,7 @@
 
 module kaneko_sdram_x2_harness #(
     parameter int unsigned COL_BITS = 9,
-    parameter int unsigned NP       = 8
+    parameter int unsigned NP       = 9
 ) (
     input  logic clk,              // FAST: the controller clock
     input  logic rst_n,
@@ -32,9 +32,9 @@ module kaneko_sdram_x2_harness #(
     // as a pragma. That is recorded against kaneko_mixer.sv and was walked
     // into again writing this one.)
     input  logic [NP-1:0] p_req,
-    input  logic [COL_BITS+15:1] a0, a1, a2, a3, a4, a5, a6, a7,
+    input  logic [COL_BITS+15:1] a0, a1, a2, a3, a4, a5, a6, a7, a8,
     output logic [NP-1:0] p_ack,
-    output logic [63:0] d0, d1, d2, d3, d4, d5, d6, d7,
+    output logic [63:0] d0, d1, d2, d3, d4, d5, d6, d7, d8,
 
     input  logic        wr_req,
     input  logic [COL_BITS+15:1] wr_addr,
@@ -90,8 +90,8 @@ module kaneko_sdram_x2_harness #(
 
     kaneko_sdram_x2 #(.NP(NP), .AW(AW)) u_x2 (
         .clk_fast(clk),
-        .s_req(p_req), .s_addr({a7, a6, a5, a4, a3, a2, a1, a0}),
-        .s_ack(p_ack), .s_dout({d7, d6, d5, d4, d3, d2, d1, d0}),
+        .s_req(p_req), .s_addr({a8, a7, a6, a5, a4, a3, a2, a1, a0}),
+        .s_ack(p_ack), .s_dout({d8, d7, d6, d5, d4, d3, d2, d1, d0}),
         .s_wr_req(wr_req), .s_wr_addr(wr_addr), .s_wr_din(wr_din),
         .s_wr_be(wr_be), .s_wr_ack(wr_ack),
         .f_req(f_req), .f_addr(f_addr), .f_ack(f_ack), .f_dout(f_dout),

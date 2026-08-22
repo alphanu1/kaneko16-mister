@@ -234,8 +234,18 @@ module kaneko_tmap_line #(
             //
             // Padding to 512 costs 21,504 bits that are never addressed and
             // buys the inference.
-            (* ramstyle = "MLAB" *) logic [W-1:0] lb0 [0:(1<<XW)-1];
-            (* ramstyle = "MLAB" *) logic [W-1:0] lb1 [0:(1<<XW)-1];
+            //
+            // THE ATTRIBUTE ITSELF IS INERT. It is kept as a statement of
+            // intent, but it never took: the inferred megafunction carries no
+            // RAM_BLOCK_TYPE parameter, so it is being dropped -- most likely
+            // because this declaration is inside a generate block -- and
+            // "MLAB, no_rw_check" behaved no differently from "MLAB". Even
+            // applied it would not have helped, because an MLAB is 32 words
+            // deep and these are 512. The M10K these ended up in is the right
+            // answer anyway; 8 blocks is a far better price than the 18,362
+            // ALMs they cost as flip-flops.
+            (* ramstyle = "MLAB, no_rw_check" *) logic [W-1:0] lb0 [0:(1<<XW)-1];
+            (* ramstyle = "MLAB, no_rw_check" *) logic [W-1:0] lb1 [0:(1<<XW)-1];
             logic [W-1:0] q0, q1;
 
             wire [XW-1:0] wa = x_wr[gi][XW-1:0];

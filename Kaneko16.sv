@@ -321,7 +321,7 @@ localparam int unsigned SDR_AW  = 2 + 13 + SDR_COL;   // 25
 // elaborate. Five is also the configuration its testbench covers, so this build
 // runs the arrangement that is actually verified. Port 0 is the tile fetch;
 // 1..4 are tied idle and cost nothing but arbiter slots.
-localparam int unsigned NPORTS  = 8;
+localparam int unsigned NPORTS  = 9;
 
 wire              mem_ready;
 wire              ldr_wr_req, ldr_wr_ack;
@@ -337,6 +337,12 @@ wire              p2_req, p3_req, p4_req;   // tile feeder, one per layer
 wire [SDR_AW:1]   p2_addr, p3_addr, p4_addr;
 wire              p5_req;                   // OKI M6295 sample fetch
 wire [SDR_AW:1]   p5_addr;
+// The Z80's program fetch. It used to be 48 KB of block RAM filled by snooping
+// the loader, which cost 48 of the device's 553 M10K blocks and did not fit --
+// see the header of kaneko_z80rom.sv for why those 48 were a cliff rather than
+// a slope. It reads through a 256-byte cache now, like the 68000 does.
+wire              p8_req;
+wire [SDR_AW:1]   p8_addr;
 // Two ports for the sprite ROM, not one: a sprite row needs a block from each
 // half of its address space and they are fetched CONCURRENTLY. See the header
 // of kaneko_sprrom for the derivation of that pattern.
@@ -392,7 +398,11 @@ wire rom_loaded, ldr_overflow;
 // 8'b0011_1111: tiles, the CPU and the OKI first; only the sprite engine, which
 // has a whole frame to fill its bitmap, waits.
 kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300),
-               .URGENT(8'b0011_1111)) u_sdram
+               // Bit 8 is the Z80's program fetch. Urgent, despite being a
+               // tiny share of the bandwidth -- one eight-byte line per eight
+               // opcode bytes at 4 MHz -- because everything behind it is the
+               // sound CPU stalled with its clock enable held low.
+               .URGENT(9'b1_0011_1111)) u_sdram
 (
 	.clk(clk_sdram), .rst_n(pll_locked), .ready(mem_ready),
 	.rd_lat_sel(status[5:4]),
@@ -423,12 +433,12 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300),
 	//
 	// The boot harness has carried a `video_idle` input for exactly this since
 	// it was written. The core never had the equivalent.
-	.p_req  (rom_loaded ? {p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}
-	                    : 8'b0),
-	.p_addr ({p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
-	.p_din  ({8{16'd0}}),
-	.p_be   ({8{2'b11}}),
-	.p_we   (8'b0),
+	.p_req  (rom_loaded ? {p8_req, p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}
+	                    : 9'b0),
+	.p_addr ({p8_addr, p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
+	.p_din  ({9{16'd0}}),
+	.p_be   ({9{2'b11}}),
+	.p_we   (9'b0),
 	.p_ack  (p_ack_bus),
 	.p_dout (p_dout_bus)
 );
@@ -754,7 +764,22 @@ wire [7:0]  z80_ym_din, z80_ym_dout;
 // so no fractional divider and no phase error.
 reg [3:0] z80_cediv;
 always @(posedge clk_sys) z80_cediv <= (z80_cediv == 4'd11) ? 4'd0 : z80_cediv + 4'd1;
-wire z80_ce = (z80_cediv == 4'd0);
+
+// STALLED BY WITHHOLDING THE CLOCK ENABLE, NOT BY WAIT_n.
+//
+// The program ROM is a cache over SDRAM now, so a fetch can miss. Holding CEN
+// low is the unambiguous way to say "not yet" to T80s: the CPU does not
+// advance, its address and control lines hold, the line arrives, and it
+// resumes. Driving WAIT_n correctly alongside CEN and IOWait would be a second
+// timing contract to get right for no benefit.
+//
+// The divider keeps counting through a stall, so the cost of a miss is rounded
+// up to the next 4 MHz tick. That is the right way round: it can only ever
+// make the Z80 slower than 4 MHz, never faster.
+wire        z80_rom_ready;
+wire        z80_rom_rd = ~z80_mreq_n && ~z80_rd_n && (z80_a < 16'hc000);
+wire        z80_stall  = z80_rom_rd && !z80_rom_ready;
+wire z80_ce = (z80_cediv == 4'd0) && !z80_stall;
 
 // Held in reset when the board has no Z80. Not merely idle: a Z80 free-running
 // over whatever the block RAM powered up with would drive the YM2151 with
@@ -778,11 +803,11 @@ T80s #(.Mode(0), .T2Write(1), .IOWait(1)) u_z80
 
 kaneko_z80rom #(.SDR_AW(SDR_AW)) u_z80rom
 (
-	// Filled by snooping the loader's SDRAM write port during download, which
-	// is already the final address and the final data.
-	.ld_clk(clk_sdram), .ld_wr(ldr_wr_req && ldr_wr_ack),
-	.ld_addr(ldr_wr_addr), .ld_din(ldr_wr_din), .base(BASE_Z80),
-	.clk(clk_sys), .rom_addr(z80_rom_addr), .rom_data(z80_rom_data)
+	.clk(clk_sys), .rst(~z80_rst_n), .base(BASE_Z80),
+	.rom_addr(z80_rom_addr), .rom_rd(z80_rom_rd),
+	.rom_data(z80_rom_data), .rom_ready(z80_rom_ready),
+	.p_req(p8_req), .p_addr(p8_addr),
+	.p_ack(p_ack_bus[8]), .p_dout(p_dout_bus[8])
 );
 
 kaneko_z80snd u_z80snd

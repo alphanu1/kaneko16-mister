@@ -26,7 +26,7 @@
 
 namespace {
 
-constexpr int NP = 8;
+constexpr int NP = 9;
 Vkaneko_sdram_x2_harness* d;
 long checks = 0, fails = 0;
 
@@ -38,6 +38,7 @@ void set_addr(int p, uint32_t a) {
       case 2: d->a2 = a; break; case 3: d->a3 = a; break;
       case 4: d->a4 = a; break; case 5: d->a5 = a; break;
       case 6: d->a6 = a; break; case 7: d->a7 = a; break;
+      case 8: d->a8 = a; break;
       default: printf("  FATAL: port %d out of range\n", p); std::abort();
     }
 }
@@ -46,6 +47,7 @@ uint64_t get_dout(int p) {
       case 0: return d->d0; case 1: return d->d1; case 2: return d->d2;
       case 3: return d->d3; case 4: return d->d4; case 5: return d->d5;
       case 6: return d->d6; case 7: return d->d7;
+      case 8: return d->d8;
       default: printf("  FATAL: port %d out of range\n", p); std::abort();
     }
     return 0;

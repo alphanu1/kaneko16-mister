@@ -20,7 +20,7 @@
 module kaneko_cpumem_harness #(
     parameter int unsigned SDR_AW  = 25,
     parameter int unsigned SDR_COL = 10,
-    parameter int unsigned NPORTS  = 8
+    parameter int unsigned NPORTS  = 9
 ) (
     input  wire        clk,
     input  wire        rst,
@@ -166,8 +166,11 @@ module kaneko_cpumem_harness #(
         .wr_req(ldr_wr_req), .wr_addr(ldr_wr_addr), .wr_din(ldr_wr_din),
         .wr_be(ldr_wr_be), .wr_ack(ldr_wr_ack),
 
-        .p_req  ({p67_req, p5_req, 3'b0, p1_req, p0_req}),
-        .p_addr ({p67_addr, p5_addr, {3{{SDR_AW{1'b0}}}}, p1_addr, p0_addr}),
+        // Port 8 is the Z80's program fetch. This harness has no Z80, so it is
+        // tied off -- but it must still BE here: kaneko_sdram takes NP ports and
+        // a short bundle would silently shift every port down by one.
+        .p_req  ({1'b0, p67_req, p5_req, 3'b0, p1_req, p0_req}),
+        .p_addr ({{SDR_AW{1'b0}}, p67_addr, p5_addr, {3{{SDR_AW{1'b0}}}}, p1_addr, p0_addr}),
         .p_din  ({8{16'd0}}),
         .p_be   ({8{2'b11}}),
         .p_we   (8'b0),

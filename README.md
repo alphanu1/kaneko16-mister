@@ -33,6 +33,7 @@ Miles Rally 1/2.
 | SDRAM controller, ROM loader | running on hardware |
 | 68000 (fx68k) + bus decode | running on hardware; matches MAME exactly over 100k bus accesses |
 | ROM line cache | 16 lines x 4 words, 0.1% miss; CPU back to MAME's bus rate |
+| SDRAM masters | nine: four tile layers, the 68000, the OKI, two sprite ports and the Z80's program fetch. Served in two tiers by deadline, not equal share |
 | Scanline interrupts | IRQ5/4/3 autovectored; the game takes all three, once per frame |
 | VIEW2 / sprite register files | `kaneko_regs16`, byte-enabled, read back correctly |
 | YM2149 x2 (jt49) | wired and mixed to the audio output; the game keeps their volumes at zero |
@@ -40,7 +41,7 @@ Miles Rally 1/2.
 | EEPROM (93C46) | working; 20,910 reads replayed against MAME, zero mismatches |
 | Inputs | two players, 2 buttons each, start/coin/service, and the board's DIPs — assembled per board, because the two boards wire the words differently, not just relocate them |
 | Game configuration table | `rtl/io/kaneko_gamecfg.sv` — one bitstream, four games; memory-map pages, ROM bases, video geometry, layer count, sprite list size and input wiring all selected by the MRA's game-id byte |
-| Z80 + YM2151 sound (Blaze On board) | **built, not yet confirmed on hardware** — T80 at 4 MHz, banked program ROM out of SDRAM, jt51, and Wing Force's OKI on the Z80's I/O ports |
+| Z80 + YM2151 sound (Blaze On board) | **built and fits, not yet confirmed on hardware** — T80 at 4 MHz, jt51, Wing Force's OKI on the Z80's I/O ports, and a 256-byte cache over SDRAM for the program ROM. A 48 KB copy in block RAM did not fit; see `docs/findings.md` |
 | Screen rotation | **not implemented** — Explosive Breaker is ROT90 and Wing Force ROT270, and both currently output unrotated |
 
 Explosive Breaker is playable on hardware with sound. The 68000 completes its

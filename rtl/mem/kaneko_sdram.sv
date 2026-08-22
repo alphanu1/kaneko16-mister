@@ -429,6 +429,16 @@ module kaneko_sdram #(
   // storm — cannot hold the bus. The write port sits above the rotation and
   // only matters during ROM download.
   logic [$clog2(NP)-1:0] rr_next;
+  // PORT-TAG WIDTH. Derived from NP, and it must be: the read-return tag was
+  // a hard-coded [2:0] and `grant[2:0]`, which is exactly wide enough for
+  // eight ports and silently wrong for nine. Adding the Z80's fetch as port 8
+  // aliased it onto port 0 -- its burst was written into p_dout[0] and it
+  // acknowledged port 0 -- so the tile feeder received the Z80's code and the
+  // Z80 waited forever. In simulation that surfaced as "p0 got the wrong
+  // data"; on hardware it would have been a black screen with a dead sound
+  // CPU and nothing pointing at the memory controller.
+  localparam int unsigned PW = $clog2(NP);
+
   logic [$clog2(NP)-1:0] rr_grant;
   logic                  rr_valid;
 
@@ -524,7 +534,7 @@ module kaneko_sdram #(
   // buffers are what make that safe — a shared one would interleave two
   // masters' words into the same array.
   logic [RD_LAT-1:0]        tag_v;
-  logic [RD_LAT-1:0][2:0]   tag_p;      // port index
+  logic [RD_LAT-1:0][PW-1:0] tag_p;     // port index, PW bits -- see above
   logic [RD_LAT-1:0][1:0]   tag_w;      // word index within the burst
   logic [RD_LAT-1:0]        tag_last;
   logic [NP-1:0][3:0][15:0] cap;
@@ -661,7 +671,7 @@ module kaneko_sdram #(
 
         // Read capture, driven entirely by the tag that travelled with the CAS.
         tag_v    <= {1'b0, tag_v[RD_LAT-1:1]};
-        tag_p    <= {3'd0, tag_p[RD_LAT-1:1]};
+        tag_p    <= {PW'(0), tag_p[RD_LAT-1:1]};
         tag_w    <= {2'd0, tag_w[RD_LAT-1:1]};
         tag_last <= {1'b0, tag_last[RD_LAT-1:1]};
         if (tag_v[0]) begin
@@ -831,7 +841,7 @@ module kaneko_sdram #(
             // pipeline: the tag reaches slot 0 after cap_depth cycles, which
             // is what decides which bus word is called word 0.
             tag_v[cap_depth-1]    <= 1'b1;
-            tag_p[cap_depth-1]    <= grant[2:0];
+            tag_p[cap_depth-1]    <= grant[PW-1:0];
             tag_w[cap_depth-1]    <= rd_issued[1:0];
             tag_last[cap_depth-1] <= (rd_issued + 1'b1 == rd_total);
             rd_bank_cnt[tbank]    <= cap_depth;
