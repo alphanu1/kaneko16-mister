@@ -5261,8 +5261,9 @@ Hardware observations, with the +2 toggled on three games:
 
 ```
   the +2 IS applied          layer 1 visibly moves in all three games
-  the doubled TEXT is not    layer 1 is not involved in it
-    a two-layer artefact
+  the doubled TEXT on Wing   IS a two-layer artefact, and layer 1 IS involved
+    Force                      (corrected — an earlier reading of this said the
+                               opposite and was wrong)
   Explosive Breaker          does not stack layers for one image, which is why
                              it never showed this
   Wing Force                 copyright screen and Atlas logo ARE two layers,
