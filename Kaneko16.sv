@@ -1462,14 +1462,11 @@ wire       oki_set = oki_row_val[oki_bit];
 wire in_joy_row = (screen_y >= 9'd82) && (screen_y < 9'(82 + 6))
                && (screen_x < 9'(16 * ALV_BIT_W));
 wire [3:0] joy_bit = 4'd15 - 4'(screen_x[6:3]);
-// COMMANDEERED: the address of the last unmapped access, a[23:8], instead of
-// the joystick word. Rows added at scanlines 92 and 100 did not render on
-// hardware while the row at 82 did, and that is unexplained — see findings.
-// Rather than spend another twenty-five minute build finding out, the two
-// diagnostics move into the two rows that demonstrably DO render and that
-// carry nothing: this one and the sprite-overrun row above it, both of which
-// read zero. 0x980000 shows as 9800.
-wire       joy_set = unmapped_addr_lat[{1'b0, joy_bit} + 5'd8];
+// RESTORED to the live joystick word. The unmapped-access diagnostic that
+// borrowed this row did its job: the memory map is now verified from three
+// directions — the MAME bus trace, the per-game page table, and the register
+// readout — and nothing is unmapped that should not be.
+wire       joy_set = joystick_0[joy_bit];
 
 // Row 8, white: sprite passes that did not finish before the next frame
 // started. Zero is correct. Non-zero means the renderer ran out of frame —
@@ -1478,8 +1475,14 @@ wire       joy_set = unmapped_addr_lat[{1'b0, joy_bit} + 5'd8];
 wire in_spr_row = (screen_y >= 9'd72) && (screen_y < 9'(72 + 6))
                && (screen_x < 9'(16 * ALV_BIT_W));
 wire [3:0] spr_bit = 4'd15 - 4'(screen_x[6:3]);
-// COMMANDEERED: unmapped accesses this frame. See the note on the row below.
-wire       spr_set = unmapped_cnt_lat[spr_bit];
+// RESTORED. This row is sprite passes that did not finish before the next
+// frame started, and it is the measurement that answers a real open question:
+// the Blaze On board carries TWO VU-002 sprite chips reading one shared sprite
+// list, for "double sprite bitmap size". This core renders that list with ONE
+// engine into a 320-wide bitmap, which covers the same area — but unlike MAME
+// it has a real per-frame time budget. If this row goes non-zero in a busy
+// scene, one engine is not keeping up where two chips did.
+wire       spr_set = spr_overrun_lat[spr_bit];
 
 // Rows 10 and 11: the unmapped access. Added for the Blaze On black screen,
 // where every other row read zero and there was nothing left to look at.

@@ -40,7 +40,8 @@ Miles Rally 1/2.
 | EEPROM (93C46) | working; 20,910 reads replayed against MAME, zero mismatches |
 | Inputs | two players, 2 buttons each, start/coin/service, and the board's DIPs — assembled per board, because the two boards wire the words differently, not just relocate them |
 | Game configuration table | `rtl/io/kaneko_gamecfg.sv` — one bitstream, four games; memory-map pages, ROM bases, video geometry, layer count, sprite list size and input wiring all selected by the MRA's game-id byte |
-| Z80 + YM2151 sound (Blaze On board) | **not started** — both Blaze On and Wing Force run silent |
+| Z80 + YM2151 sound (Blaze On board) | **not started** — Blaze On and Wing Force run silent |
+| Screen rotation | **not implemented** — Explosive Breaker is ROT90 and Wing Force ROT270, and both currently output unrotated |
 
 Explosive Breaker is playable on hardware with sound. The 68000 completes its
 self-test, formats a blank EEPROM, enables interrupts and runs its main loop;
@@ -56,8 +57,8 @@ in a way a player cannot diagnose.
 | Game | State |
 |---|---|
 | Explosive Breaker | playable on hardware, with sound |
-| Blaze On (Japan) | frame-exact in simulation, **silent** — needs Z80 + YM2151 |
-| Wing Force (prototype) | frame-exact in simulation, **silent** — needs Z80 + YM2151 |
+| Blaze On (Japan) | **runs on hardware** — renders and takes input; **silent**, needs Z80 + YM2151 |
+| Wing Force (prototype) | **runs on hardware** — renders and takes input; **silent**, needs Z80 + YM2151 |
 | Magical Crystals | held back — an unexplained 298-pixel line-scroll difference |
 
 The debug overlay (OSD: Debug) puts seven rows of per-frame telemetry over the
