@@ -4358,3 +4358,70 @@ unmapped: a stuck 68000 loops over a handful of addresses, so one photograph
 lands inside the loop and names the routine. Without it, "no unmapped
 accesses" would have cost a whole build to learn nothing. The rows at 92 and
 100 are left in place, because whether they come back is itself a datum.
+
+### The MAME oracle clears the CPU and kills the best theory
+
+`make bustrace SET=blazeonj` — 100,000 bus accesses, ours against MAME's, same
+four-column format, diffed. `blazeonj` verifies good against MAME (it is a
+clone of `blazeon`, so the ROMs are found in the parent zip even though the
+parent itself is missing its PLD dumps), so the oracle genuinely runs for the
+title being debugged — the check hard rule 6 exists to force.
+
+```
+  region                    ours     mame
+  work RAM  300000         32643    32643
+  palette   500000          4096     4096
+  VIEW2 v   600000          1954     1956
+  spriteram 700000          4096     4096
+  sprite r  900000            32       32
+  view2 r   800000             7        7
+  rom                      57157    57155
+```
+
+The VIEW2 register writes match value for value. The palette is written 2048
+times with 0x0000 in BOTH — the game is clearing it, so a black screen at this
+point in boot is what MAME shows too.
+
+**The 68000, the memory map and the register decode are correct.** Whatever
+breaks Blaze On is not in the part this session spent its time rewriting.
+
+Two results worth having:
+
+- **0x980000 is written and never read.** All ten accesses are writes, in both.
+  The second VU-002 register block not being decoded is harmless, and the
+  standing theory that a read-back there was hanging the game is dead. It would
+  have cost a build to learn that on hardware.
+- **Neither `rom_1mb` nor the ERASEFF fill was the black screen.** Neither our
+  CPU nor MAME's reads above 0x080000 at all in 100k accesses. Both changes are
+  correct against MAME and both are irrelevant to this fault. They stay because
+  they are right, not because they did anything.
+
+One genuine defect found: reads of 0xe40000 return 0xFFFF from us and 0x0000
+from MAME, whose `nopr()` returns zero. It is the first and only value
+divergence in 100k accesses and it caused no change of path, but it is wrong,
+and it is an IRQ-acknowledge address on a machine whose symptom is zero
+interrupts. Fixed separately from the instrument build — one kind of change at
+a time.
+
+Beyond ~100k accesses the two drift (sprite RAM 9568 against 11996 at 500k),
+which is expected and not evidence: this core runs 264 lines at 59.19 Hz and
+MAME's screen is a different height at 60 Hz, so the two reach scanline 224 a
+different number of instructions apart. The Makefile already documents 100k as
+the meaningful window.
+
+### The missing overlay rows are probably the same fault, seen from the video side
+
+Rows at scanlines 16 through 87 render. Rows at 92 and 100 do not. That is the
+signature of an ACTIVE AREA about 90 lines tall instead of 232 — not a
+coincidence and not an overlay bug. It is independent evidence pointing at the
+video geometry, which is exactly where the CPU trace cannot see.
+
+The frame gate renders blazeonj at 320x232 pixel-exact, but it drives
+`kaneko_frame_top`, which sets geometry directly rather than through
+`kaneko_gamecfg` and `kaneko_video_timing` the way the core does. So the gate
+does NOT cover the path the hardware uses, and the one number both symptoms
+point at is the one number nothing tests end to end.
+
+Wing Force is the free control: same board, same one-VIEW2 configuration,
+`v_vis` 224 rather than 232. If it truncates the same way the fault is
+board-wide; if it does not, it is specific to 232.
