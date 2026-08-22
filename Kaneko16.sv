@@ -151,6 +151,8 @@ wire [10:0] TILE_COLBASE_CFG, SPR_COLBASE_CFG, SPR_COUNT_CFG;
 wire [8:0]  SPR_MIN_Y;
 wire [9:0]  CFG_H_VIS, CFG_V_VIS, CFG_V_START, CFG_HSYNC;
 wire        INPUTS_BLAZEON;
+wire [7:0]  PG_SND;
+wire        ROM_1MB;
 
 kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 (
@@ -161,6 +163,7 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 
 	.pg_wram(PG_WRAM), .pg_v2w0(PG_V2W0), .pg_v2w1(PG_V2W1),
 	.pg_spr(PG_SPR), .pg_pal(PG_PAL), .pg_wdog(PG_WDOG), .pg_in(PG_IN),
+	.pg_snd(PG_SND), .rom_1mb(ROM_1MB),
 
 	.base_trom0(TROM0_BASE), .base_trom1(TROM1_BASE),
 	.base_spr(SPR_BASE), .base_oki(OKI_BASE),
@@ -177,7 +180,8 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 
 	.h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
 	.v_start(CFG_V_START), .h_sync_start(CFG_HSYNC),
-	.inputs_blazeon(INPUTS_BLAZEON)
+	.inputs_blazeon(INPUTS_BLAZEON),
+	.base_z80(), .has_z80()
 );
 
 // WIDE=1, so ioctl_addr counts bytes and advances by two per word.
@@ -452,6 +456,19 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.v2r0_we(v2r0_we), .v2r1_we(v2r1_we), .sprreg_we(sprreg_we),
 	.reg_addr(reg_addr), .reg_din(reg_din),
 	.v2r0_q(q_v2r0), .v2r1_q(q_v2r1), .sprreg_q(q_sprreg),
+
+	// EVERY window page, from the game table. These were declared on the bus
+	// and connected by nothing for eleven commits: Quartus said so in the
+	// build report every time —
+	//
+	//   pg_wram  Input  Warning  Declared by entity but not connected by
+	//                            instance ... the port will be connected to GND
+	//
+	// — and nobody read it. The game table computed all seven pages and drove
+	// a set of wires that went nowhere.
+	.pg_wram(PG_WRAM), .pg_v2w0(PG_V2W0), .pg_v2w1(PG_V2W1),
+	.pg_spr(PG_SPR), .pg_pal(PG_PAL), .pg_wdog(PG_WDOG), .pg_in(PG_IN),
+	.pg_snd(PG_SND), .rom_1mb(ROM_1MB),
 
 	// Nothing pressed. The EEPROM is not implemented yet, so anything the game
 	// reads from it comes back as an unwritten device.

@@ -4163,3 +4163,82 @@ would have put the sound latch on top of the reset vector.
 still unconnected and should be wired to a real game's map**; that is left as
 its own change because it will move the CPU gate's `unmapped` count and that
 number wants moving deliberately, not as a side effect.
+
+## 2026-08-22 — the Blaze On black screen: a game table connected to nothing
+
+Explosive Breaker good on hardware, Blaze On black, same bitstream. Two
+faults, and the first one is the more alarming.
+
+### The per-game memory map drove nothing for eleven commits
+
+`kaneko_gamecfg` computes seven window pages — work RAM, both VIEW2 windows,
+sprite RAM, palette, watchdog, inputs — and `kaneko_bus` declares an input for
+each. Commit b1d343f, "Wire the per-game configuration module into the top
+level", added the module and its output wires and **left the bus's inputs off
+the instance**. The wires went nowhere. Quartus tied every page to GND, so
+every window decoded at page 0x00, which is where the ROM lives.
+
+Quartus reported it on every build since:
+
+```
+; pg_wram ; Input ; Warning ; Declared by entity but not connected by instance.
+;                             If a default value exists, it will be used.
+;                             Otherwise, the port will be connected to GND.
+```
+
+Seven of those, in `build/quartus/Kaneko16.map.rpt`, in a 2 MB report nobody
+reads. Verilator's `PINMISSING` catches exactly this and says so in one line —
+but the top level is never verilated, because it instantiates VHDL (T80) and
+vendor IP (pll, hps_io), so the only instrument that could see it was the build
+report.
+
+`make quartus` now greps for that warning and fails the build. It is the only
+place this class of fault can be caught in this design.
+
+**Unresolved, and recorded rather than glossed:** by this reading Explosive
+Breaker should not work either, and it demonstrably does — loaded repeatedly on
+hardware. The boot harness with the pages forced to zero shows EB running a
+tight loop rather than the game, which agrees with the theory and disagrees
+with the board. That contradiction is not explained. The hardware test of the
+fix is the experiment that settles it: if EB survives, the sim's model of the
+broken case was simply wrong; if EB breaks, it was depending on the page-0
+decode and that needs understanding before anything else ships.
+
+### The program ROM window is a per-game SIZE
+
+```
+  bakubrkr_map  map(0x000000, 0x07ffff).rom()    512 KB
+  mgcrystl_map  map(0x000000, 0x07ffff).rom()    512 KB
+  blazeon_map   map(0x000000, 0x0fffff).rom()      1 MB   (Wing Force too)
+```
+
+It was 512 KB for every game. Blaze On carries a full megabyte of 68000 code,
+so every fetch above 0x07ffff fell through to the unmapped path, was
+acknowledged, and returned nothing.
+
+Widening it for all games was tried once and blacked out Explosive Breaker,
+because that game's SDRAM layout puts view2_0 at byte 0x080000 — a read there
+returns tile graphics, not the zero-fill the reasoning assumed. The comment
+left behind at the time said it "becomes a per-game page when the Blaze On
+board actually lands, not before". It has landed.
+
+### The boot harness could not have caught either one
+
+`sim/top/kaneko_cpumem_harness.sv` connected NONE of the pg_* pages, so it ran
+every game with the same broken decode the bitstream had — a harness that
+agrees with whatever it is handed reports success either way. It now
+instantiates `kaneko_gamecfg` and feeds it the MRA's config byte through the
+same ioctl stream the real core uses, and `make boot SET=<game>` passes the
+game id from the set name.
+
+With that in place all three supported titles reach their main loop:
+
+```
+  explbrkr   105277 DTACKs   4 unmapped
+  blazeonj   114555 DTACKs  13 unmapped
+  wingforc   114546 DTACKs  26 unmapped
+```
+
+The unmapped accesses are all at 0xe40000 and above, which MAME has as
+`nopr()` IRQ acknowledges on this board. They are acknowledged and harmless;
+decoding them explicitly is a separate change.

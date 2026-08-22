@@ -126,6 +126,7 @@ module kaneko_bus #(
     // Per-game window pages, from the game table in the top level.
     input  wire [7:0]   pg_wram, pg_v2w0, pg_v2w1, pg_spr, pg_pal,
     input  wire [7:0]   pg_wdog, pg_in, pg_snd,
+    input  wire         rom_1mb,
 
     // Observability. An unmapped access is acknowledged so the CPU cannot hang
     // on it, but it must not pass silently.
@@ -159,12 +160,23 @@ module kaneko_bus #(
     // the coin lockout and the EEPROM — is at the same address in both, so it
     // stays a literal. A page that is wired to a constant is a per-game fact
     // hiding in shared code, which is what hard rule 9 is about.
-    // 512 KB. It was widened to 1 MB for the Blaze On board on the reasoning
-    // that a smaller ROM would read zero-fill above its end — which is FALSE:
-    // explbrkr's layout puts view2_0 at byte 0x080000, so a read there returns
-    // tile graphics, not zeroes. It becomes a per-game page when the Blaze On
-    // board actually lands, not before.
-    wire sel_rom   = (a[23:19] == 5'b00000);                    // 000000-07ffff
+    // The program ROM window is a PER-GAME size, and it was the Blaze On black
+    // screen. From MAME:
+    //
+    //   bakubrkr_map  map(0x000000, 0x07ffff).rom()    512 KB
+    //   mgcrystl_map  map(0x000000, 0x07ffff).rom()    512 KB
+    //   blazeon_map   map(0x000000, 0x0fffff).rom()      1 MB   (Wing Force too)
+    //
+    // It was 512 KB for everything. Blaze On carries a full megabyte of 68000
+    // code, so every fetch above 0x07ffff fell through to the unmapped path,
+    // was acknowledged, and returned nothing.
+    //
+    // Widening it for ALL games was tried once and produced a black screen on
+    // Explosive Breaker, because that game's SDRAM layout puts view2_0 at byte
+    // 0x080000 — a read there returns tile graphics, not the zero-fill the
+    // reasoning assumed. Per-game is the only correct answer; see hard rule 9.
+    wire sel_rom   = rom_1mb ? (a[23:20] == 4'b0000)            // 000000-0fffff
+                             : (a[23:19] == 5'b00000);          // 000000-07ffff
     wire sel_wram  = (a[23:16] == pg_wram);
     wire sel_ym0   = (a[23:8]  == 16'h4000) && (a[7:5] == 3'd0);
     wire sel_ym1   = (a[23:8]  == 16'h4002) && (a[7:5] == 3'd0);

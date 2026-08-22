@@ -28,6 +28,10 @@ static uint64_t tick_count = 0;
 // the tail can say.
 static std::vector<std::string> tail_buf;
 static size_t   tail_cap  = 0;
+// Which game the config byte selects. 0 is Explosive Breaker and is also the
+// hardware's reset value, so it is the honest default; every caller meaning
+// another game must say so, and `make boot` passes it from the set name.
+static uint8_t  game_id   = 0;
 static bool     data_only = false;   // skip the ROM window, as the Lua can
 static size_t   tail_next = 0;
 static FILE*    trace_fp    = nullptr;
@@ -79,6 +83,16 @@ static bool boot_dut(const std::vector<uint8_t>& rom, bool swap, bool video_idle
     // and doing it eight times to answer a four-way question is waste.
     size_t bytes = limit_bytes && limit_bytes < rom.size() ? limit_bytes : rom.size();
     const size_t words = bytes / 2;
+
+    // The MRA's <rom index="1"> config byte, exactly as hps_io delivers it.
+    // Booting a title is not just its ROM: kaneko_bus decodes a DIFFERENT
+    // memory map per game, and the ROM window is a different SIZE.
+    dut->ioctl_download = 1;
+    dut->ioctl_index = 1;
+    dut->ioctl_addr  = 0;
+    dut->ioctl_dout  = game_id;
+    dut->ioctl_wr = 1; tick();
+    dut->ioctl_wr = 0; tick();
 
     dut->ioctl_download = 1;
     dut->ioctl_index = 0;
@@ -253,6 +267,8 @@ int main(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--trace") && i + 1 < argc) trace_path = argv[++i];
         else if (!std::strcmp(argv[i], "--count") && i + 1 < argc)
             trace_count = std::strtoull(argv[++i], nullptr, 0);
+        else if (!std::strcmp(argv[i], "--game") && i + 1 < argc)
+            game_id = (uint8_t)std::strtoul(argv[++i], nullptr, 0);
         else if (!std::strcmp(argv[i], "--data-only")) data_only = true;
         else if (!std::strcmp(argv[i], "--tail") && i + 1 < argc)
             tail_cap = (size_t)std::strtoull(argv[++i], nullptr, 0);

@@ -47,6 +47,11 @@ module kaneko_gamecfg #(
     output wire [7:0]  pg_wdog,
     output wire [7:0]  pg_snd, pg_in,
 
+    // The 68000 program ROM window: 1 MB on the Blaze On board, 512 KB on the
+    // rest. blazeon_map is map(0x000000, 0x0fffff).rom(); bakubrkr_map and
+    // mgcrystl_map both stop at 0x07ffff.
+    output wire        rom_1mb,
+
     // ---- SDRAM region bases, WORD addresses (half the byte offset)
     output wire [SDR_AW:1] base_trom0, base_trom1, base_spr, base_oki,
 
@@ -112,6 +117,7 @@ module kaneko_gamecfg #(
     // The sound latch to the Z80 exists on the Blaze On board only. 0xff is
     // "no such window" — the same sentinel pg_wdog and pg_v2w1 use.
     assign pg_snd  = blazeon_board ? 8'he0 : 8'hff;
+    assign rom_1mb = blazeon_board;
 
     // --------------------------------------------------- SDRAM bases
     // explbrkr's are a FIXED CONTRACT: its shipped MRA already uses them.

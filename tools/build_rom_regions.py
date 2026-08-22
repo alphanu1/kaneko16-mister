@@ -220,6 +220,17 @@ SDRAM_MAPS = {
     ],
 }
 
+def print_game_id(setname):
+    """The config byte for a set, for callers that need it outside an MRA.
+
+    Raises rather than defaulting: a set with no id has no correct answer, and
+    substituting 0 silently configures the core as Explosive Breaker.
+    """
+    if setname not in GAME_ID:
+        sys.exit(f"{setname}: no entry in GAME_ID")
+    print(GAME_ID[setname])
+
+
 def sdram_map(setname):
     if setname not in SDRAM_MAPS:
         sys.exit(f"no SDRAM layout for '{setname}'")
@@ -480,6 +491,15 @@ def build_mra(setname, rompath, outdir):
 
 
 if __name__ == "__main__":
+    # A query that answers one question and exits, so a Makefile can ask for a
+    # game's config byte without assembling anything.
+    if "--game-id" in sys.argv:
+        q = [a for a in sys.argv[1:] if not a.startswith("--")]
+        if len(q) != 1:
+            sys.exit("--game-id takes exactly one set name")
+        print_game_id(q[0])
+        sys.exit(0)
+
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if len(args) != 3:
         sys.exit(__doc__)

@@ -305,6 +305,28 @@ module kaneko_cpumem_harness #(
     wire [12:0] vmem_addr;
     wire [15:0] vmem_din;
 
+    // The game table, fed from the same ioctl stream as the real core: the
+    // MRA's <rom index="1"> config byte selects the memory map. Booting a
+    // title is not just its ROM — kaneko_bus decodes a DIFFERENT map per game.
+    wire [7:0] PG_WRAM, PG_V2W0, PG_V2W1, PG_SPR, PG_PAL, PG_WDOG, PG_IN, PG_SND;
+    wire       ROM_1MB;
+
+    kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg (
+        .clk(clk), .rst(rst),
+        .ioctl_wr(ioctl_wr),
+        .ioctl_index(ioctl_index[7:0]), .ioctl_dout(ioctl_dout[7:0]),
+        .game_id(),
+        .pg_wram(PG_WRAM), .pg_v2w0(PG_V2W0), .pg_v2w1(PG_V2W1),
+        .pg_spr(PG_SPR), .pg_pal(PG_PAL), .pg_wdog(PG_WDOG),
+        .pg_snd(PG_SND), .pg_in(PG_IN),
+        .rom_1mb(ROM_1MB),
+        .base_trom0(), .base_trom1(), .base_spr(), .base_oki(),
+        .v2_dx(), .v2_dy(), .view2_2_pri(), .spr_pri_f(),
+        .two_chips(), .spr_count(), .spr_xoffs(), .visarea_min_y(),
+        .wide_screen(), .h_vis(), .v_vis(), .v_start(), .h_sync_start(),
+        .inputs_blazeon(), .base_z80(), .has_z80()
+    );
+
     kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
     (
         .clk(clk), .rst(cpu_rst),
@@ -329,10 +351,16 @@ module kaneko_cpumem_harness #(
         .v2r0_q(16'h0000), .v2r1_q(16'h0000), .sprreg_q(16'h0000),
 
         .in_p1(16'hffff), .in_p2(16'hffff),
-        // Explicit, not left unconnected. An unconnected input ties to 0, and
-        // page 0x00 is where the ROM lives — the sound latch would decode on
-        // top of the reset vector. 0xff is the "no such window" sentinel.
-        .pg_snd(8'hff),
+        // EVERY window page comes from the game table, exactly as the top
+        // level wires them. They used to be left unconnected, which ties them
+        // to 0 — so every window decoded at page 0x00, where the ROM lives,
+        // and the CPU in this harness had no working WRAM at all. It ran
+        // anyway, which is precisely why it went unnoticed: a harness that
+        // agrees with whatever it is handed reports success either way.
+        .pg_wram(PG_WRAM), .pg_v2w0(PG_V2W0), .pg_v2w1(PG_V2W1),
+        .pg_spr(PG_SPR),  .pg_pal(PG_PAL),
+        .pg_wdog(PG_WDOG), .pg_in(PG_IN), .pg_snd(PG_SND),
+        .rom_1mb(ROM_1MB),
         .in_system(16'hffff), .in_unk(16'hffff),
 
         .unmapped_hit(unmapped_hit), .unmapped_addr(unmapped_addr)
