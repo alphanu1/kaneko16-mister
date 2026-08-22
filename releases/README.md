@@ -65,21 +65,32 @@ a count of 3**, which is correct and what you want to see. One lit block on its
 own would be a count of 1, and would mean two of the three interrupts are
 missing.
 
-| Row | Colour | Counts, per frame |
-|---|---|---|
-| 1 | green | 68000 bus cycles. This is the CPU's pulse — if it is dark the CPU is not running, and if it dips the CPU is being starved of memory bandwidth. 20 bits. |
-| 2 | amber | Interrupts acknowledged. Should be a steady **3** per frame — IRQ5, IRQ4 and IRQ3 — which draws as two adjacent lit blocks at the right-hand end. 8 bits. |
-| 3 | cyan | Tile line fetches that overran — the fetch for a scanline was still running when the next one started. Zero is correct. Non-zero means the video path is short of SDRAM bandwidth, and the count says by how much. 16 bits. |
-| 4 | yellow | CPU writes reaching the OKI M6295 at `400401`. 16 bits. |
-| 5 | yellow | OKI sample-ROM fetches answered. |
-| 6 | yellow | Clocks with an OKI channel flagged busy — the chip accepted a play command. |
-| 7 | yellow | Clocks where the OKI produced a non-zero sample. |
-| 8 | white | *(set apart below the yellow block)* Sprite passes that did not finish before the next frame started. Zero is correct. A pass clears the coverage mask, parses 1024 records and draws them at a pixel per clock, and every pixel can miss a 2.25 MB ROM — about 92,000 clocks of a frame's 811,000, so there is room, but this is the one part of the video path with no fixed upper bound. 16 bits. |
-| 9 | magenta | **Live** pad-1 button word, not a per-frame count. Bit 0 is at the RIGHT: `0` right, `1` left, `2` down, `3` up, `4` A, `5` B, `6` X, `7` Y, `8` L, `9` R, `10` select, `11` start. Press a button and see which block lights — this is what the core actually receives, as opposed to what the pad is labelled. |
+Identify a row by its **width and colour**, not by counting down the screen.
+The tall yellow block is a scratch area that gets borrowed for whatever is
+under investigation, so the ordinal numbering moves.
 
-Rows 4-7 are a **chain**, in order. Each one rules out everything above it, so
-the first dark row is where the sound path breaks. All four lit and no audio
-means the fault is past the chip, in the mixing or output stage.
+| Position | Width | Colour | Counts, per frame |
+|---|---|---|---|
+| 1st | 20, widest | green | 68000 bus cycles. This is the CPU's pulse — if it is dark the CPU is not running, and if it dips the CPU is being starved of memory bandwidth. 20 bits. |
+| 2nd | 8, narrowest | amber | Interrupts acknowledged. Should be a steady **3** per frame — IRQ5, IRQ4 and IRQ3 — which draws as two adjacent lit blocks at the right-hand end. 8 bits. |
+| 3rd | 16 | cyan | Tile line fetches that overran — the fetch for a scanline was still running when the next one started. Zero is correct. Non-zero means the video path is short of SDRAM bandwidth, and the count says by how much. 16 bits. |
+| 4th | 16, tall | yellow | CPU writes reaching the OKI M6295 at `400401`. 16 bits. |
+| ↳ | | yellow | OKI sample-ROM fetches answered. |
+| ↳ | | yellow | Clocks with an OKI channel flagged busy — the chip accepted a play command. |
+| ↳ | | yellow | Clocks where the OKI produced a non-zero sample. |
+| 5th | 16 | white | *(set apart below the yellow block)* Sprite passes that did not finish before the next frame started. Zero is correct. A pass clears the coverage mask, parses 1024 records and draws them at a pixel per clock, and every pixel can miss a 2.25 MB ROM — about 92,000 clocks of a frame's 811,000, so there is room, but this is the one part of the video path with no fixed upper bound. 16 bits. |
+| 6th | 16 | magenta | **Live** pad-1 button word, not a per-frame count. Bit 0 is at the RIGHT: `0` right, `1` left, `2` down, `3` up, `4` A, `5` B, `6` X, `7` Y, `8` L, `9` R, `10` select, `11` start. Press a button and see which block lights — this is what the core actually receives, as opposed to what the pad is labelled. |
+
+The four yellow rows are a **chain**, in order. Each one rules out everything
+above it, so the first dark row is where the sound path breaks. All four lit
+and no audio means the fault is past the chip, in the mixing or output stage.
+
+**That block is currently borrowed** for the VIEW2 scroll probe on the Blaze On
+board, and shows, top to bottom: `lay_sx` layer 0 (the latched copy the tilemap
+engine reads), `lay_sx` layer 1, then the raw registers `c0r2` and `c0r0`. It
+returns to the OKI chain when that investigation closes. Whenever it is
+repurposed, this table and the one in the top-level `README.md` are updated in
+the same commit.
 
 These rows were added *during* the silent-sound investigation and the bug was
 actually found by reading the RTL, not by reading them — so treat the chain as

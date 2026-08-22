@@ -64,17 +64,35 @@ in a way a player cannot diagnose.
 The debug overlay (OSD: Debug) puts seven rows of per-frame telemetry over the
 picture, each a binary count with the MSB at the left:
 
-| Row | Colour | Count |
-|---|---|---|
-| 1 | green | bus cycles |
-| 2 | amber | interrupts acknowledged (3 per frame = two lit blocks) |
-| 3 | cyan | line fetches that overran |
-| 4 | yellow | CPU writes reaching the OKI |
-| 5 | yellow | OKI sample-ROM fetches answered |
-| 6 | yellow | clocks with an OKI channel busy |
-| 7 | yellow | clocks with a non-zero OKI sample |
-| 8 | white | sprite passes that did not finish before the next frame *(separated from the yellow sound block)* |
-| 9 | magenta | live joystick 1 word — bit 0 at the right |
+Identify a row by its **width and colour**, not by counting down the screen —
+the rows in the tall block are borrowed for whatever is under investigation and
+the ordinal numbering has moved more than once.
+
+| Position | Width | Colour | Count |
+|---|---|---|---|
+| 1st | 20 — widest | green | bus cycles |
+| 2nd | 8 — narrowest | amber | interrupts acknowledged (3 per frame = two lit blocks) |
+| 3rd | 16 | cyan | **tilemap** line fetches that overran |
+| 4th | 16, tall (4 rows fused) | yellow | **borrowed — see below** |
+| *(gap)* | | | |
+| 5th | 16 | white | **sprite** passes that did not finish before the next frame |
+| 6th | 16 | magenta | live joystick 1 word — bit 0 at the right |
+
+**The tall block is a scratch area.** By default it is the OKI sound chain —
+CPU writes to the chip, sample-ROM fetches answered, clocks with a channel
+busy, clocks with a non-zero sample — in that order, so the first dark row is
+where the sound path breaks. It is currently carrying the VIEW2 scroll probe
+instead, top to bottom:
+
+| Sub-row | Shows |
+|---|---|
+| 1st | `lay_sx` layer 0 — the latched copy the tilemap engine reads |
+| 2nd | `lay_sx` layer 1 — same |
+| 3rd | `c0r2` — layer 0's scroll register, raw |
+| 4th | `c0r0` — layer 1's scroll register, raw |
+
+Whenever that block is repurposed, this table and `releases/README.md` are
+updated in the same commit.
 
 Each row is a binary number with the MSB at the left, one block per bit; a
 clear bit is dark red rather than black, so "the count is zero" is
