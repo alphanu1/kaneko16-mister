@@ -151,14 +151,12 @@ module kaneko_bus #(
     // the coin lockout and the EEPROM — is at the same address in both, so it
     // stays a literal. A page that is wired to a constant is a per-game fact
     // hiding in shared code, which is what hard rule 9 is about.
-    // 1 MB, not 512 KB. Explosive Breaker and Magical Crystals carry 512 KB
-    // and the Blaze On board carries a full megabyte, and the slot in SDRAM is
-    // sized for the larger. Widening the window for every game rather than
-    // making it another per-game page is safe because nothing is mapped
-    // between 0x080000 and 0x100000 on any of them: a game with the smaller
-    // ROM simply never reads up there, and if it did it would read the
-    // zero-fill rather than somebody else's region.
-    wire sel_rom   = (a[23:20] == 4'b0000);                     // 000000-0fffff
+    // 512 KB. It was widened to 1 MB for the Blaze On board on the reasoning
+    // that a smaller ROM would read zero-fill above its end — which is FALSE:
+    // explbrkr's layout puts view2_0 at byte 0x080000, so a read there returns
+    // tile graphics, not zeroes. It becomes a per-game page when the Blaze On
+    // board actually lands, not before.
+    wire sel_rom   = (a[23:19] == 5'b00000);                    // 000000-07ffff
     wire sel_wram  = (a[23:16] == pg_wram);
     wire sel_ym0   = (a[23:8]  == 16'h4000) && (a[7:5] == 3'd0);
     wire sel_ym1   = (a[23:8]  == 16'h4002) && (a[7:5] == 3'd0);

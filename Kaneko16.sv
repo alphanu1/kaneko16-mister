@@ -151,7 +151,10 @@ end
 // table, which is pixel-exact on both.
 //
 //   id 0  explbrkr    id 1  mgcrystl
-wire mg = (game_id == 8'd1);
+// FORCED to Explosive Breaker while the black screen is unexplained. game_id
+// arrives over ioctl and nothing in simulation exercises that path, so it is
+// taken out of the decode entirely rather than trusted.
+wire mg = 1'b0;
 
 wire [7:0] PG_WRAM = mg ? 8'h30 : 8'h10;
 wire [7:0] PG_V2W0 = mg ? 8'h60 : 8'h50;
