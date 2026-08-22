@@ -49,6 +49,12 @@ qdb/
 # is enforced here instead.
 /c5_pin_model_dump.txt
 /jtag.cdf
+# A CRASH REPORT, not an artefact. Quartus 17.0's quartus_map segfaulted in
+# synth_sgn on 2026-08-22 and dropped this here; the same build re-run
+# unchanged completed fine. Ignored because it must never be committed, and
+# noted because its absence is meaningful: if one appears, the build did not
+# merely fail, it died, and the .log will be truncated mid-line with no error.
+/cr_ie_info.json
 *.summary
 *.smsg
 *.pin
