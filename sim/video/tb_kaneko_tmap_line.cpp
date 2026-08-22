@@ -37,6 +37,12 @@ std::mt19937 rng(0x7A31C0DEu);
 // produce the same pixels, which is what this lets a test assert.
 bool same_for_all_layers = false;
 
+// When set, every tile ROM byte reads 0x21 — low nibble 1, high nibble 2. A
+// 4bpp tile packs two horizontally adjacent pixels per byte, so a correct
+// fetch must emit 1,2,1,2,... across x. Anything else means the nibble select
+// and the ROM data are not describing the same pixel.
+bool rom_nibble_ramp = false;
+
 uint32_t mix(uint32_t v) {
     v ^= v >> 16; v *= 0x7feb352d; v ^= v >> 15; v *= 0x846ca68b; v ^= v >> 16;
     return v;
@@ -64,11 +70,21 @@ void feed() {
     dut->scr_data_f = scr;
 
     for (int g = 0; g < 4; g++)
-        dut->vram_data_f[g] = mix(held_vram[g] * 8 + (same_for_all_layers ? 0 : g) + 0x1000);
+        // With the nibble ramp the tile CODE is irrelevant (every ROM byte
+        // reads the same), but the ATTRIBUTE is not: a tile with flip_x set
+        // reads right to left, which legitimately inverts the nibble parity.
+        // Hashed attributes flip about half the tiles, so a flat expectation
+        // of 1,2,1,2 would be wrong for those — which is exactly how this test
+        // first "found" a bug that was not there.
+        dut->vram_data_f[g] = rom_nibble_ramp
+            ? 0u
+            : mix(held_vram[g] * 8 + (same_for_all_layers ? 0 : g) + 0x1000);
 
     uint32_t rd = 0;
     for (int g = 0; g < 4; g++)
-        rd |= (mix(held_rom[g] + (same_for_all_layers ? 0 : g) * 0x555) & 0xff) << (g * 8);
+        rd |= (rom_nibble_ramp ? 0x21u
+                               : (mix(held_rom[g] + (same_for_all_layers ? 0 : g) * 0x555) & 0xff))
+              << (g * 8);
     dut->rom_data_f = rd;
 
     // Four bits now, one per layer, stalled independently. That independence
@@ -252,6 +268,41 @@ int main(int argc, char** argv) {
         std::printf("  layers disagree at %d of 320 columns, first at x=%d\n",
                     coincide_diff, first_bad);
     ck("layer 1 with dx+2 and scroll-2 coincides with layer 0", coincide_diff, 0);
+
+    // ------------------------------- THE NIBBLE MUST MATCH ITS OWN BYTE
+    //
+    // Tiles are 4bpp: two horizontally adjacent pixels share a ROM byte, and
+    // px[0] chooses the half. With every byte reading 0x21 a correct fetch
+    // emits 1,2,1,2,... across x — low nibble on even pixels, high on odd.
+    //
+    // Nothing tested this before. The frame gate does the nibble selection in
+    // C++ and never runs kaneko_tmap_fetch's pipeline, and every other check in
+    // this file compares the module against itself, which a uniformly wrong
+    // nibble satisfies. On hardware it showed as one-pixel features doubling —
+    // "in" rendering as "iin" — and as large artwork smearing.
+    same_for_all_layers = true;
+    rom_nibble_ramp     = true;
+    dut->layer_en = 0xf; dut->linescroll_en = 0;
+    dut->dx_f = 0; dut->dy_f = 0; dut->scroll_x_f = 0; dut->scroll_y_f = 0;
+
+    Line nb = run_line(40, false, 320);
+    int wrong = 0, first = -1;
+    for (int x = 0; x < 320; x++) {
+        unsigned got  = (unsigned)(nb.px[x] & 0xf);
+        unsigned want = (x & 1) ? 2u : 1u;
+        if (got != want) { wrong++; if (first < 0) first = x; }
+    }
+    if (wrong) {
+        std::printf("  nibble select wrong at %d of 320 pixels, first at x=%d\n",
+                    wrong, first);
+        std::printf("  want:");
+        for (int x = 0; x < 40; x++) std::printf("%u", (x & 1) ? 2u : 1u);
+        std::printf("\n  got :");
+        for (int x = 0; x < 40; x++) std::printf("%u", (unsigned)(nb.px[x] & 0xf));
+        std::printf("\n");
+    }
+    ck("even pixels take the low nibble and odd the high", wrong, 0);
+    rom_nibble_ramp = false;
 
     std::printf("kaneko_tmap_line: checks=%ld fails=%ld\n", checks, fails);
     delete dut;

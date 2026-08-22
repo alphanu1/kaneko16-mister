@@ -88,7 +88,20 @@ module kaneko_gamecfg #(
 
     // Z80 sound ROM, word address, and whether the board has a Z80 at all.
     output wire [SDR_AW-1:0] base_z80,
-    output wire        has_z80
+    output wire        has_z80,
+
+    // The OKI's banking limit, (region - 0x20000) / 0x20000, and WHERE its
+    // control comes from. Blaze On has no OKI; Wing Force has one on the Z80's
+    // I/O ports rather than the 68000's bus, which is the only sound
+    // difference between two games that share a PCB.
+    output wire [2:0]  oki_max_bank,
+    output wire        oki_on_z80,
+
+    // The OKI's input clock, which is also per-game: 12MHz/6 = 2 MHz on the
+    // bakubrkr and mgcrystl boards, 16MHz/16 = 1 MHz on Wing Force. PIN7 is
+    // high on all three so the internal divider is 132 either way, and the
+    // entire difference is this bit.
+    output wire        oki_cen_half
 );
 
     localparam [7:0] CFG_INDEX = 8'd1;
@@ -193,6 +206,12 @@ module kaneko_gamecfg #(
     // 0x400000 and 0x580000 respectively; these are word addresses, so half.
     assign base_z80 = is_wf ? SDR_AW'(25'h2c0000) : SDR_AW'(25'h200000);
     assign has_z80  = blazeon_board;
+
+    //   explbrkr  oki1 0x100000 -> 7      mgcrystl  oki1 0x040000 -> 1
+    //   wingforc  oki1 0x080000 -> 3      blazeonj  no OKI at all
+    assign oki_max_bank = is_wf ? 3'd3 : is_mg ? 3'd1 : 3'd7;
+    assign oki_on_z80   = is_wf;
+    assign oki_cen_half = is_wf;
 endmodule
 
 `default_nettype wire

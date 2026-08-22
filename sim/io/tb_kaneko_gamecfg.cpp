@@ -47,6 +47,8 @@ struct Cfg {
     uint16_t pri, count, xoffs;
     uint16_t min_y;
     uint16_t h_vis, v_vis, v_start, hsync;   // set_visarea()
+    uint8_t  okimb;                          // OKI max_bank, per region size
+    bool     okiz80;                         // OKI hangs off the Z80's ports
     uint8_t  snd;                            // sound-latch page, 0xff = none
     bool     rom1mb;                         // 68000 program window size
     bool     z80;
@@ -54,11 +56,11 @@ struct Cfg {
 };
 
 const Cfg GAMES[] = {
-  // name        id  wram v2w0 v2w1 spr  pal wdog  in    dx   dy  2pri 2chip wide   pri  count  xoffs min_y   geometry     snd  1mb  z80  z80base
-  { "explbrkr",  0, 0x10,0x50,0x58,0x60,0x70,0xa8,0xe0,  91,  -8, true , true , false,0x8888,1024,0x0000, 16, 256,224,16,296, 0xff,false,false,0x200000 },
-  { "mgcrystl",  1, 0x30,0x60,0x68,0x70,0x50,0xa0,0xc0,  91,  -8, false, true , false,0x7532,1024,0x0000, 16, 256,224,16,296, 0xff,false,false,0x200000 },
-  { "blazeonj",  2, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   8, false, false, true ,0x8821, 512,0xf980,  0, 320,232, 0,336, 0xe0,true ,true ,0x200000 },
-  { "wingforc",  3, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   9, false, false, true ,0x8821, 512,0xf980,  0, 320,224, 0,336, 0xe0,true ,true ,0x2c0000 },
+  // name        id  wram v2w0 v2w1 spr  pal wdog  in    dx   dy  2pri 2chip wide   pri  count  xoffs min_y   geometry     okimb okiz80  snd  1mb  z80  z80base
+  { "explbrkr",  0, 0x10,0x50,0x58,0x60,0x70,0xa8,0xe0,  91,  -8, true , true , false,0x8888,1024,0x0000, 16, 256,224,16,296, 7,false,0xff,false,false,0x200000 },
+  { "mgcrystl",  1, 0x30,0x60,0x68,0x70,0x50,0xa0,0xc0,  91,  -8, false, true , false,0x7532,1024,0x0000, 16, 256,224,16,296, 1,false,0xff,false,false,0x200000 },
+  { "blazeonj",  2, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   8, false, false, true ,0x8821, 512,0xf980,  0, 320,232, 0,336, 7,false,0xe0,true ,true ,0x200000 },
+  { "wingforc",  3, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   9, false, false, true ,0x8821, 512,0xf980,  0, 320,224, 0,336, 3,true ,0xe0,true ,true ,0x2c0000 },
 };
 
 void verify(const Cfg& g) {
@@ -100,6 +102,14 @@ void verify(const Cfg& g) {
     CK(d->h_sync_start + 32 <= 384,   "sync ends inside the horizontal total");
     CK(d->v_start + d->v_vis <= 264,  "the window fits the vertical total");
     CK(d->pg_snd  == g.snd,           "pg_snd");
+    // The OKI's bank limit is (region - 0x20000) / 0x20000 and differs per
+    // game. A bank above the limit aliases the last block, so a wrong limit
+    // plays the wrong sample rather than failing — the quietest way to be
+    // wrong, and why it is checked here rather than trusted.
+    CK(d->oki_max_bank == g.okimb,    "oki_max_bank");
+    CK(d->oki_on_z80   == g.okiz80,   "oki_on_z80");
+    // Same board, same OKI, different crystal — 2 MHz vs Wing Force's 1 MHz.
+    CK(d->oki_cen_half == g.okiz80,   "oki_cen_half");
     // The 68000 program window is a per-game SIZE, and getting it wrong is
     // what blacked out Blaze On: blazeon_map is 1 MB, bakubrkr_map and
     // mgcrystl_map are 512 KB. Widening it for everyone blacks out Explosive

@@ -5459,3 +5459,78 @@ silent. The next instrument when it is picked up again should be the structural
 one this list keeps pointing at: render the frame gate through the REAL
 `kaneko_vmem` and `kaneko_tmap_line` instead of C++ arrays, so the picture can
 be reproduced off-hardware instead of one build at a time.
+
+### A nibble test that found a bug that was not there
+
+The zoomed photograph of Blaze On's warning text showed every one-pixel
+vertical stroke drawn as two — "in" rendering as "iin". Two pixels share a 4bpp
+ROM byte and `nibble_hi = px[0]` picks the half, so a misaligned select was the
+obvious candidate, and the pipeline looked like it: `s3_nibble_hi` is a
+REGISTER while `rom_data` arrives combinationally.
+
+A directed test — every ROM byte reading 0x21, so a correct fetch emits
+1,2,1,2 across x — duly reported 144 of 320 pixels wrong.
+
+**The test was wrong.** A tile with `flip_x` set reads right to left:
+
+```
+  wire [3:0] px = flip_x ? ~fine_x : fine_x;
+  assign nibble_hi = px[0];
+```
+
+which inverts the nibble parity, correctly. The harness hashes its VRAM, so
+about half the tiles came out flipped — 144 of 320 is that half. Forcing the
+attributes flat under the ramp, the test passes.
+
+The "fix" attempted before checking made things worse: 5 failures instead of 1,
+including the stall-invariance check that had been passing all along. Reverted.
+
+Two things worth keeping from it. The test is now real and in the suite — the
+nibble ordering had never been checked, because the frame gate does that
+selection in C++ and never runs `kaneko_tmap_fetch`'s pipeline. And the
+sequence is a reminder that a NEW test failing is not evidence of a bug in the
+thing under test; it is evidence of a disagreement, and the test is the newer
+and less trusted of the two.
+
+### The Z80 sound path, and the OKI that moved
+
+Blaze On and Wing Force share a PCB that replaces the two YM2149s and the
+68000's direct OKI port with a Z80 subsystem: a Z80 at 4 MHz running from a
+banked program ROM, a YM2151, and — on Wing Force only — the OKI M6295 moved
+onto the Z80's I/O ports. MAME's `kaneko16_berlwall` lineage covers this in
+`kaneko16.cpp`'s `bakubrkr_sound_map` and the `wingforc` machine config.
+
+Three per-game facts came out of it, and all three are the shape rule 9
+warns about — wrong in a way that plays a *plausible* sound rather than
+failing:
+
+| | explbrkr | mgcrystl | blazeonj | wingforc |
+|---|---|---|---|---|
+| OKI region | 0x100000 | 0x040000 | — | 0x080000 |
+| `oki_max_bank` | 7 | 1 | — | 3 |
+| OKI driven by | 68000 | 68000 | none | **Z80 port 0x0a** |
+| OKI bank from | YM2149 #0 port B | same | — | **Z80 port 0x0c** |
+| OKI clock | 12M/6 = 2 MHz | 12M/6 = 2 MHz | — | **16M/16 = 1 MHz** |
+
+The clock is the same shape of mistake. PIN7 is high on all three, so the
+internal divider is 132 either way and the whole difference is the crystal;
+sharing the YM2149s' 2 MHz enable would have played Wing Force's samples an
+octave high, which sounds like a bad dump. The OKI has its own enable now,
+counted to 48 so both taps stay evenly spaced.
+
+`oki_max_bank` had been a Verilog parameter fixed at 7. A bank request above
+the region's limit aliases the last block, so Magical Crystals — whose limit is
+1 — would have played whatever sat at the seventh 128 KB block of a 256 KB
+region: real audio, wrong audio, no error anywhere. It is an input from
+`kaneko_gamecfg` now, checked per game in `tb_kaneko_gamecfg` and exercised in
+`tb_kaneko_oki`, where the expected address is `min(bank+1, max_bank) * 0x20000`
+— Wing Force's top block is 0x60000, not 0x80000.
+
+The banked program ROM (`kaneko_z80rom.sv`) is dual-clock: the Z80 runs at
+4 MHz against a cache filled from SDRAM on the 48 MHz side. Its testbench
+crosses the domains under randomised stall — 49,160 checks.
+
+**Not yet confirmed on hardware.** T80 is VHDL, so Verilator cannot build it
+and there is no simulation of the Z80 executing real sound code; everything
+around it is tested, the CPU itself is not. That gap is the reason this is
+recorded as built rather than working.

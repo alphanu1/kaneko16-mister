@@ -36,11 +36,11 @@ Miles Rally 1/2.
 | Scanline interrupts | IRQ5/4/3 autovectored; the game takes all three, once per frame |
 | VIEW2 / sprite register files | `kaneko_regs16`, byte-enabled, read back correctly |
 | YM2149 x2 (jt49) | wired and mixed to the audio output; the game keeps their volumes at zero |
-| OKI M6295 (jt6295) | **working on hardware** — sound effects play. Bank map is a per-game parameter |
+| OKI M6295 (jt6295) | **working on hardware** — sound effects play. Bank limit and control port are both per-game: the 68000 drives it on most boards, the Z80 on Wing Force |
 | EEPROM (93C46) | working; 20,910 reads replayed against MAME, zero mismatches |
 | Inputs | two players, 2 buttons each, start/coin/service, and the board's DIPs — assembled per board, because the two boards wire the words differently, not just relocate them |
 | Game configuration table | `rtl/io/kaneko_gamecfg.sv` — one bitstream, four games; memory-map pages, ROM bases, video geometry, layer count, sprite list size and input wiring all selected by the MRA's game-id byte |
-| Z80 + YM2151 sound (Blaze On board) | **not started** — Blaze On and Wing Force run silent |
+| Z80 + YM2151 sound (Blaze On board) | **built, not yet confirmed on hardware** — T80 at 4 MHz, banked program ROM out of SDRAM, jt51, and Wing Force's OKI on the Z80's I/O ports |
 | Screen rotation | **not implemented** — Explosive Breaker is ROT90 and Wing Force ROT270, and both currently output unrotated |
 
 Explosive Breaker is playable on hardware with sound. The 68000 completes its
@@ -57,8 +57,8 @@ in a way a player cannot diagnose.
 | Game | State |
 |---|---|
 | Explosive Breaker | playable on hardware, with sound |
-| Blaze On (Japan) | **runs on hardware** — renders and takes input; **silent**, needs Z80 + YM2151 |
-| Wing Force (prototype) | **runs on hardware** — renders and takes input; **silent**, needs Z80 + YM2151 |
+| Blaze On (Japan) | **runs on hardware** — renders and takes input. Sound path built, unconfirmed. A tilemap layer draws wrong |
+| Wing Force (prototype) | **runs on hardware** — renders and takes input. Sound path built, unconfirmed. Same tilemap fault |
 | Magical Crystals | held back — an unexplained 298-pixel line-scroll difference |
 
 The debug overlay (OSD: Debug) puts seven rows of per-frame telemetry over the

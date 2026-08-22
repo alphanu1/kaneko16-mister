@@ -26,7 +26,7 @@
 // repeats bank 6. The register is three bits wide (MAME masks the port write
 // with 7), so bank 7 is reachable and games do select it.
 //
-// MAX_BANK IS PER GAME — HARD RULE 9
+// max_bank IS PER GAME — HARD RULE 9
 //
 // It follows from the region length, and the region length differs across the
 // driver, so it is a parameter and the game table sets it:
@@ -41,16 +41,19 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-module kaneko_oki_bank #(
-    // (region length - 0x20000) / 0x20000, i.e. MAME's max_bank.
-    parameter int unsigned MAX_BANK = 7
-) (
+module kaneko_oki_bank (
+    // (region length - 0x20000) / 0x20000, i.e. MAME's max_bank, AS AN INPUT.
+    // It was a parameter fixed at Explosive Breaker's 7, and it is a per-game
+    // fact: mgcrystl's sample region is 0x40000 and wingforc's 0x80000, giving
+    // 1 and 3. A bank above the maximum aliases to the last block, so getting
+    // this wrong plays the wrong sample rather than failing — hard rule 9.
+    input  wire [2:0]  max_bank,
     input  wire [17:0] chip_addr,   // what jt6295 asks for
-    input  wire [2:0]  bank,        // YM2149 chip 0 port B, masked to 3 bits
+    input  wire [2:0]  bank,        // banking register, masked to 3 bits
     output wire [23:0] region_addr  // byte offset within the oki1 region
 );
     // Banks at or above max_bank all resolve to the last banked block.
-    wire [2:0] max_b = 3'(MAX_BANK);
+    wire [2:0] max_b = 3'(max_bank);
     wire [2:0] bank_c = (bank >= max_b) ? (max_b - 3'd1) : bank;
 
     assign region_addr = chip_addr[17]

@@ -30,14 +30,22 @@ void check(bool ok, const char* what) {
     if (!ok) { fails++; if (fails <= 12) printf("  FAIL: %s\n", what); }
 }
 
-void tick() { d->clk = 0; d->eval(); d->clk = 1; d->eval(); }
+// Two clocks, and the harness runs them at DIFFERENT rates on purpose: if the
+// module ever went back to one, driving only ld_clk here would stop the read
+// side working and the test would say so.
+void tick() {
+    d->clk = 0; d->eval(); d->clk = 1; d->eval();
+}
+void ld_tick() {
+    d->ld_clk = 0; d->eval(); d->ld_clk = 1; d->eval();
+}
 
 // The loader's SDRAM write port: a word address and a 16-bit word.
 void ld(uint32_t waddr, uint16_t din) {
     d->ld_wr = 1; d->ld_addr = waddr; d->ld_din = din;
-    tick();
+    ld_tick();
     d->ld_wr = 0;
-    tick();
+    ld_tick();
 }
 
 uint8_t rd(uint16_t a) {
@@ -68,7 +76,7 @@ int main(int argc, char** argv) {
     const uint32_t BASE  = 0x400000 / 2;
 
     d->base = BASE;
-    d->ld_wr = 0; d->rom_addr = 0;
+    d->ld_wr = 0; d->ld_clk = 0; d->rom_addr = 0;
     tick(); tick();
 
     // ---- data that must NOT land: the words immediately below the window,

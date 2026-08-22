@@ -61,6 +61,24 @@ module kaneko_z80snd (
     output wire [15:0] rom_addr,
     input  wire [7:0]  rom_data,
 
+    // ---- OKI M6295, on WING FORCE ONLY.
+    //
+    // Blaze On has no OKI at all; Wing Force puts one on the Z80's I/O ports
+    // rather than the 68000's bus, which is the one sound difference between
+    // two games that share a PCB:
+    //
+    //   wingforc_soundport   map(0x0a, 0x0a) OKI data, read and write
+    //                        map(0x0c, 0x0c) OKI bank, write
+    //
+    // `has_oki` gates the decode so Blaze On does not answer at those ports —
+    // a decoded address that returns a value where the board returns nothing
+    // is the shape of fault that has cost this core three sessions.
+    input  wire        has_oki,
+    output wire        oki_we,
+    output wire  [7:0] oki_din,
+    input  wire  [7:0] oki_dout,
+    output logic [2:0] oki_bank,
+
     // ---- YM2151, instantiated by the top level
     output wire        ym_cen,
     output wire        ym_cen_p1,
@@ -79,6 +97,8 @@ module kaneko_z80snd (
     wire [7:0] port   = cpu_addr[7:0];
     wire sel_ym       = ~iorq_n && (port[7:1] == 7'h01);   // 0x02, 0x03
     wire sel_latch    = ~iorq_n && (port == 8'h06);
+    wire sel_oki      = ~iorq_n && has_oki && (port == 8'h0a);
+    wire sel_okibank  = ~iorq_n && has_oki && (port == 8'h0c);
 
     assign rom_addr = cpu_addr;
 
@@ -119,6 +139,18 @@ module kaneko_z80snd (
 
     assign nmi_n = ~pending;
 
+    // ------------------------------------------------------- OKI on the Z80
+    // The bank register is three bits, as kaneko_oki_bank takes it. MAME's
+    // oki_bank0_w<0x3> masks the write to the low two bits plus the enable, so
+    // the same three bits reach the banker either way.
+    assign oki_we  = sel_oki && ~wr_n;
+    assign oki_din = cpu_dout;
+
+    always_ff @(posedge clk) begin
+        if (rst) oki_bank <= 3'd0;
+        else if (sel_okibank && ~wr_n) oki_bank <= cpu_dout[2:0];
+    end
+
     // -------------------------------------------------- YM2151 interface
     // cen_p1 is documented as half of cen.
     logic ce_d;
@@ -140,6 +172,7 @@ module kaneko_z80snd (
         else if (sel_ram)   cpu_din = ram_q;
         else if (sel_latch) cpu_din = latch_q;
         else if (sel_ym)    cpu_din = ym_dout;
+        else if (sel_oki)   cpu_din = oki_dout;
     end
 endmodule
 

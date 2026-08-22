@@ -130,6 +130,7 @@ int main(int argc, char** argv) {
         {0x31234, 2, 0x71234},
         {0x3ffff, 6, 0xfffff},   // last byte of the last block = end of 1 MB
     };
+    dut->probe_max_bank = 7;          // Explosive Breaker's 1 MB region
     for (auto& t : bt) {
         dut->probe_addr = t.addr;
         dut->probe_bank = t.bank;
@@ -142,6 +143,36 @@ int main(int argc, char** argv) {
         check(got == t.want, "bank map");
     }
     printf("  bank map matches MAME at %zu points\n", sizeof(bt)/sizeof(bt[0]));
+
+    // max_bank IS PER GAME, so the aliasing must be checked at each game's
+    // value and not only Explosive Breaker's. MAME fills every entry from
+    // max_bank up to the end with the LAST banked block, so a bank above the
+    // limit plays the wrong sample rather than failing — the quietest possible
+    // way to get this wrong.
+    struct MB { uint8_t max_bank; uint8_t bank; uint32_t want; } mbt[] = {
+        // The map is min(bank+1, max_bank) * 0x20000: bank 0 is the FIRST
+        // banked block, not the fixed one at the bottom, and everything at or
+        // above max_bank aliases the last block.
+        //
+        // wingforc: 0x80000 region -> max_bank 3, three banked blocks ending
+        // at 0x60000. 0x80000 would be past the end of the region.
+        {3, 0, 0x20000}, {3, 1, 0x40000}, {3, 2, 0x60000},
+        {3, 3, 0x60000}, {3, 7, 0x60000},
+        // mgcrystl: 0x40000 region -> max_bank 1, ONE banked block at 0x20000.
+        {1, 0, 0x20000}, {1, 1, 0x20000}, {1, 7, 0x20000},
+    };
+    for (auto& t : mbt) {
+        dut->probe_addr     = 0x20000;
+        dut->probe_max_bank = t.max_bank;
+        dut->probe_bank     = t.bank;
+        dut->eval();
+        uint32_t got = dut->probe_region;
+        if (got != t.want)
+            printf("  max_bank %d bank %d -> %06x, want %06x\n",
+                   t.max_bank, t.bank, got, t.want);
+        check(got == t.want, "per-game bank limit");
+    }
+    printf("  per-game bank limits check out for wingforc (3) and mgcrystl (1)\n");
 
     printf("\ntb_kaneko_oki: %ld checks, %ld fails\n", checks, fails);
     delete dut;

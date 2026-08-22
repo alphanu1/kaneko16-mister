@@ -39,6 +39,9 @@ module kaneko_oki_harness #(
     // Bank-map probe: drives a second kaneko_oki_bank directly.
     input  wire [17:0] probe_addr,
     input  wire [2:0]  probe_bank,
+    // Swept by the testbench, so the per-game bank limits are all covered
+    // rather than only Explosive Breaker's.
+    input  wire [2:0]  probe_max_bank,
     output wire [23:0] probe_region,
     output wire        sdr_req,
     output wire [SDR_AW:1] sdr_addr
@@ -47,7 +50,12 @@ module kaneko_oki_harness #(
 
     // The same module Kaneko16.sv instantiates, so the bank map under test is
     // the one that ships rather than a restatement of it.
-    kaneko_oki_bank #(.MAX_BANK(7)) u_bank (
+    // max_bank is an INPUT now, not a parameter: it is (region - 0x20000) /
+    // 0x20000 and differs per game — 7 for Explosive Breaker, 3 for Wing
+    // Force, 1 for Magical Crystals. The harness keeps Explosive Breaker's so
+    // the existing expectations stand, and the probe below can sweep it.
+    kaneko_oki_bank u_bank (
+        .max_bank(3'd7),
         .chip_addr(rom_addr),
         .bank(ym0_iob_out[2:0]),
         .region_addr(region_addr)
@@ -56,7 +64,8 @@ module kaneko_oki_harness #(
     // A second copy driven straight from the testbench, so the bank map can be
     // checked at chosen addresses instead of only wherever jt6295 happens to
     // be reading.
-    kaneko_oki_bank #(.MAX_BANK(7)) u_bank_probe (
+    kaneko_oki_bank u_bank_probe (
+        .max_bank(probe_max_bank),
         .chip_addr(probe_addr),
         .bank(probe_bank),
         .region_addr(probe_region)
