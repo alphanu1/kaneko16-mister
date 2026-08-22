@@ -4541,3 +4541,31 @@ If it does, the immediate move is to change the default and both games run
 while the real phase-shift work is done properly. If it does not, no single
 capture point suits both and the fault is in the burst or arbiter logic rather
 than the pad timing — a different fix entirely.
+
+### CORRECTION: CL+0 is not a fix, and the SDRAM is not the fault
+
+Explosive Breaker at CL+0 renders garbage and plays dodgy audio — it breaks.
+That settles the direction the other way:
+
+```
+              CL+1 (default)        CL+0
+  explbrkr    perfect               garbage, still running
+  blazeonj    black, parked 0x100   runs, garbage
+```
+
+**Explosive Breaker working at CL+1 and breaking at CL+0 means CL+1 is the
+correct capture point.** So Blaze On surviving longer at CL+0 is it running on
+corrupt data, not it being fixed — a coincidence of which wrong bytes happen
+not to trap. The previous entry read the first half of this experiment as
+evidence of a marginal capture race; the second half disproves it.
+
+**Blaze On's crash at CL+1 is therefore a real logic bug**, on hardware that is
+demonstrably returning correct data to another game at the same setting. The
+SDRAM phase-shift work in `rtl/pll/pll.v` remains worth doing on its own
+merits, and is NOT this fault.
+
+Recorded because the correction matters more than the original guess: one
+experiment's half is not a result, and the leading theory has now been wrong
+four times on this bug — sprite bandwidth, the second VU-002 registers, the ROM
+window and fill, and now SDRAM capture timing. Every one of them died to a
+measurement, and none of them died to an argument.
