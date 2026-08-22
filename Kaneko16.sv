@@ -773,6 +773,14 @@ end
 // The address is LATCHED AND HELD, not sampled per frame: a stuck CPU asks
 // for the same thing every time, and a value that survives to the next frame
 // is one a photograph can read.
+// One sample per frame of wherever the CPU happens to be. A stuck 68000 is
+// looping over a handful of addresses, so a photograph lands somewhere inside
+// the loop — which names the routine even though it does not name the
+// instruction. Sampled at vblank_rise rather than continuously, because a
+// value that changes every bus cycle is not photographable.
+reg [23:1] bus_addr_lat;
+always @(posedge clk_sys) if (vbl_rise) bus_addr_lat <= eab;
+
 reg [23:1] unmapped_addr_lat;
 reg [15:0] unmapped_cnt, unmapped_cnt_lat;
 always @(posedge clk_sys) begin
@@ -1303,7 +1311,12 @@ wire       irq_set = irq_cnt_lat[irq_bit];
 wire in_oki_row = (screen_y >= 9'd40) && (screen_y < 9'(40 + 24))
                && (screen_x < 9'(16 * ALV_BIT_W));
 wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? oki_wr_lat
+// COMMANDEERED for the Blaze On hunt: the first of the four OKI rows carries
+// the CPU's last bus address, a[23:8], instead of the OKI write count. This
+// board has no OKI wired at all, so all four rows read zero and the top one
+// was costing a build to display nothing. Restore it when the sound path
+// lands. Reads as e.g. 0002 for a loop down in low ROM.
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? {bus_addr_lat[23:9], 1'b0}
                         : (screen_y < 9'd52) ? oki_ok_lat
                         : (screen_y < 9'd58) ? oki_busy_lat
                                              : oki_snd_lat;
@@ -1326,7 +1339,14 @@ wire       oki_set = oki_row_val[oki_bit];
 wire in_joy_row = (screen_y >= 9'd82) && (screen_y < 9'(82 + 6))
                && (screen_x < 9'(16 * ALV_BIT_W));
 wire [3:0] joy_bit = 4'd15 - 4'(screen_x[6:3]);
-wire       joy_set = joystick_0[joy_bit];
+// COMMANDEERED: the address of the last unmapped access, a[23:8], instead of
+// the joystick word. Rows added at scanlines 92 and 100 did not render on
+// hardware while the row at 82 did, and that is unexplained — see findings.
+// Rather than spend another twenty-five minute build finding out, the two
+// diagnostics move into the two rows that demonstrably DO render and that
+// carry nothing: this one and the sprite-overrun row above it, both of which
+// read zero. 0x980000 shows as 9800.
+wire       joy_set = unmapped_addr_lat[{1'b0, joy_bit} + 5'd8];
 
 // Row 8, white: sprite passes that did not finish before the next frame
 // started. Zero is correct. Non-zero means the renderer ran out of frame —
@@ -1335,7 +1355,8 @@ wire       joy_set = joystick_0[joy_bit];
 wire in_spr_row = (screen_y >= 9'd72) && (screen_y < 9'(72 + 6))
                && (screen_x < 9'(16 * ALV_BIT_W));
 wire [3:0] spr_bit = 4'd15 - 4'(screen_x[6:3]);
-wire       spr_set = spr_overrun_lat[spr_bit];
+// COMMANDEERED: unmapped accesses this frame. See the note on the row below.
+wire       spr_set = unmapped_cnt_lat[spr_bit];
 
 // Rows 10 and 11: the unmapped access. Added for the Blaze On black screen,
 // where every other row read zero and there was nothing left to look at.
@@ -1400,7 +1421,12 @@ wire [7:0] src_b = pal_b;
 
 wire [7:0] out_r = in_dbg ? dbg_r : src_r;
 wire [7:0] out_g = in_dbg ? dbg_g : src_g;
-wire [7:0] out_b = in_dbg ? 8'h00 : src_b;
+// dbg_b, not 8'h00. The blue channel was hardcoded off whenever the overlay
+// was on, so the cyan overrun row rendered green, the white sprite row
+// rendered yellow and the magenta joystick row rendered red — three rows
+// documented by colour and none of them that colour. It never mattered while
+// every one of them read zero, because a clear bit is dark red regardless.
+wire [7:0] out_b = in_dbg ? dbg_b : src_b;
 
 // TWO CLOCKS OF READ LATENCY, AND THE SYNCS MOVE WITH IT
 //

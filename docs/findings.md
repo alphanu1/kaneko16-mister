@@ -4316,3 +4316,45 @@ with hardware about the thing being debugged cannot be used to reason about it.
 Verilator's PINMISSING would have caught this too; the harness build passes
 `-Wno-fatal`, so it was a warning in a wall of warnings. Unlike the Quartus
 case there is no guard for it yet.
+
+### The overlay's blue channel was hardcoded off
+
+```
+  wire [7:0] out_b = in_dbg ? 8'h00 : src_b;
+```
+
+Every blue component of every debug row was discarded. The cyan overrun row
+rendered green, the white sprite row yellow, the magenta joystick row red —
+three rows documented by colour and none of them that colour. It never showed
+because all three read zero and a CLEAR bit is dark red whatever the row's
+colour is, so the fault only becomes visible the moment a bit is set. Found
+while checking why two new rows did not draw, which is the only reason it was
+found at all.
+
+### Two rows that should have drawn, did not
+
+Rows added at scanlines 92 and 100 do not appear on hardware, while the row at
+82 does. The RBF on the board was checksum-verified as the one built, the rows
+are in the source at that commit, and they survive synthesis — they are in the
+netlist and not reported stuck or synthesized away. The visible area is 232
+lines for this board and the frame gate renders all 232 pixel-exact, so
+scanlines 92 and 100 are inside it.
+
+**Unexplained.** Recorded rather than guessed at, because three separate
+theories about this core's video path have already been wrong this session and
+each one cost a build.
+
+Rather than spend another twenty-five minute build finding out, the diagnostics
+moved into rows that demonstrably render and that carry nothing on this board:
+
+```
+  row 4  first of the four OKI rows   CPU's last bus address, a[23:8]
+  row 8  was sprite overruns          unmapped accesses this frame
+  row 9  was the joystick word        address of the last unmapped access
+```
+
+The row-4 commandeering is what makes the build informative when NOTHING is
+unmapped: a stuck 68000 loops over a handful of addresses, so one photograph
+lands inside the loop and names the routine. Without it, "no unmapped
+accesses" would have cost a whole build to learn nothing. The rows at 92 and
+100 are left in place, because whether they come back is itself a datum.
