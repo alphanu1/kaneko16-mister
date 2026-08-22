@@ -5534,3 +5534,47 @@ crosses the domains under randomised stall — 49,160 checks.
 and there is no simulation of the Z80 executing real sound code; everything
 around it is tested, the CPU itself is not. That gap is the reason this is
 recorded as built rather than working.
+
+### The frame gate and the hardware run different tilemap code
+
+Blaze On's warning text draws every one-pixel vertical stroke as two — "in" as
+"iin" — and Wing Force's background layer is displaced the same way. Every
+stage upstream of the drawing was checked and came back clean: VRAM matches
+MAME on all 1024 tiles in both layers, the scroll registers read back correct,
+and the 4bpp nibble select turned out to be right (the test that said otherwise
+was wrong, recorded above). Meanwhile `make gate` reported:
+
+```
+GAME          FRAME     DIFF     MATCH
+blazeonj        600        0  100.0000%
+wingforc        600        0  100.0000%
+```
+
+**Both statements are true, because they are about different modules.**
+
+| | module | file |
+|---|---|---|
+| `make gate` builds | `kaneko_tmap_layer` | `rtl/video/kaneko_tmap.sv` |
+| the bitstream runs | `kaneko_tmap_line` + `kaneko_tmap_fetch` | `Kaneko16.sv` |
+
+`sim/video/kaneko_frame_top.sv` instantiates `kaneko_tmap_layer`. The core has
+not used that module since the line-buffered path replaced it. So the gate has
+been scoring a tilemap implementation that is **not in the bitstream**, at
+100.0000%, while the one that is has never been compared against MAME at all.
+
+This is CLAUDE.md's own rule — check the instrument could have seen it —
+failing in its most expensive form, because the instrument did not return zero
+or an error. It returned a perfect score. A gate that cannot see the fault is
+worse than no gate: it was cited repeatedly as evidence the video path was
+sound, which is what kept the search upstream of the only stage nothing tested.
+
+It also explains the shape of the evidence. Every INPUT to the drawing is
+provably correct; the fault is in the stage between them. `kaneko_tmap_line` is
+where the 35,840 flip-flops of line buffer live and where a write-address or
+double-write fault would sit, and 4 layers x 2 buffers x 320 x 14 bits is
+exactly the kind of indexing that draws a stroke twice.
+
+Next instrument, and the only one that can work: repoint
+`sim/video/kaneko_frame_top.sv` at `kaneko_tmap_line` and `kaneko_tmap_fetch`
+so the fault reproduces off-hardware and diffs against MAME per scanline,
+instead of one twenty-minute Quartus build per guess.
