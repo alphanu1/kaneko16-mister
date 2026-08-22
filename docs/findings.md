@@ -4425,3 +4425,73 @@ point at is the one number nothing tests end to end.
 Wing Force is the free control: same board, same one-VIEW2 configuration,
 `v_vis` 224 rather than 232. If it truncates the same way the fault is
 board-wide; if it does not, it is specific to 232.
+
+## 2026-08-22 — Blaze On has CRASHED, not stalled: it parks in its exception handler
+
+The overlay diagnostics landed and every row except bus cycles read zero. That
+is not a dead instrument, and the proof is that `bus_cycles_lat` is latched on
+`vbl_rise` exactly like every other row — so a non-zero bus-cycle count means
+the latch fires and the zeros are real.
+
+Decoding row 0 from the photograph: 20 bits, MSB left, blocks 4, 6 and 7 lit =
+bits 15, 13, 12 = **45,056 bus cycles per frame**. A 12 MHz 68000 gets ~202,700
+clocks per frame at 59.19 Hz, so at ~4.5 clocks per bus cycle that is a CPU
+running absolutely flat out.
+
+So the measurement was:
+
+```
+  bus cycles          45056 per frame, full speed
+  interrupts              0
+  unmapped accesses       0
+  last bus address        a[23:9] == 0, i.e. below 0x200
+```
+
+### The ROM says exactly where it is
+
+```
+  vec  0 @ 0x0000 -> 0x0030fd80      (SSP)
+  vec  1 @ 0x0004 -> 0x0000024a      (reset PC)
+  vec  2 @ 0x0008 -> 0x00000100
+  vec  3 @ 0x000c -> 0x00000100
+  ...                                 58 vectors, all 0x00000100
+
+  0x000100:  4e71 NOP    4e71 NOP    60fa BRA.S -6
+```
+
+A three-instruction park-forever loop, and fifty-eight exception vectors point
+at it. Every reading fits: a six-byte loop runs entirely out of the ROM cache,
+which is why the CPU is at full speed; the loop lives at 0x100-0x105, which is
+why a[23:9] is zero; it touches only ROM, which is why nothing is unmapped.
+
+**Blaze On is not stuck in initialisation. It has taken an exception and
+crashed.** Every hypothesis before this — the memory map, the ROM window, the
+region fill, the second VU-002 registers, the video geometry — was aimed at the
+wrong failure.
+
+### The oracle now matches over the whole window
+
+With the 0xe40000/0xec0000 acknowledge windows decoded and the register banks
+added to the boot harness:
+
+```
+  ours 100000 accesses, 42843 after dropping instruction fetches
+  mame 100000 accesses, 42845 after dropping instruction fetches
+```
+
+No divergence at all, where before there were two. So the fault happens LATER
+than 100k accesses, or comes from something only the hardware has. The CPU and
+the memory map are cleared for the third time and by a stronger instrument.
+
+### What names the culprit
+
+The loop address cannot say which exception fired, because all 58 vectors land
+there. The vector FETCH can: the 68000 reads its vector from 0x000008-0x0000ff
+immediately before jumping, and once parked it never reads below 0x100 again,
+so the last such read stays latched. Vector number is the byte address over
+four, and `eab` is bits 23:1 of the byte address, so it is `eab[7:2]`.
+
+Bus error, vector 2, is impossible in this core — BERR is never asserted — so
+anything else distinguishes "jumped into garbage" (4 illegal, 10/11 line-A/F)
+from "genuine arithmetic trap" (5 divide by zero, 6 CHK) from "odd word
+address" (3).

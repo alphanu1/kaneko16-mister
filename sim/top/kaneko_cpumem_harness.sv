@@ -311,7 +311,7 @@ module kaneko_cpumem_harness #(
     // MRA's <rom index="1"> config byte selects the memory map. Booting a
     // title is not just its ROM — kaneko_bus decodes a DIFFERENT map per game.
     wire [7:0] PG_WRAM, PG_V2W0, PG_V2W1, PG_SPR, PG_PAL, PG_WDOG, PG_IN, PG_SND;
-    wire       ROM_1MB;
+    wire       ROM_1MB, BLAZEON_IO;
     // Geometry too. Left unconnected these tie to 0, which gives a visible
     // area of zero height and a vblank_rise that never fires — the harness
     // then disagrees with hardware about the one thing being debugged.
@@ -325,7 +325,7 @@ module kaneko_cpumem_harness #(
         .pg_wram(PG_WRAM), .pg_v2w0(PG_V2W0), .pg_v2w1(PG_V2W1),
         .pg_spr(PG_SPR), .pg_pal(PG_PAL), .pg_wdog(PG_WDOG),
         .pg_snd(PG_SND), .pg_in(PG_IN),
-        .rom_1mb(ROM_1MB),
+        .rom_1mb(ROM_1MB), .blazeon_io(BLAZEON_IO),
         .base_trom0(), .base_trom1(), .base_spr(), .base_oki(),
         .v2_dx(), .v2_dy(), .view2_2_pri(), .spr_pri_f(),
         .two_chips(), .spr_count(), .spr_xoffs(), .visarea_min_y(),
@@ -333,6 +333,38 @@ module kaneko_cpumem_harness #(
         .h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
         .v_start(CFG_V_START), .h_sync_start(CFG_HSYNC),
         .inputs_blazeon(), .base_z80(), .has_z80()
+    );
+
+    // THE REGISTER BANKS, WHICH THIS HARNESS DID NOT HAVE.
+    //
+    // v2r0_q/v2r1_q/sprreg_q were tied to zero, so every register read-back
+    // returned 0 and the harness disagreed with the real core on the one thing
+    // the bus-trace diff exists to check. The oracle caught it immediately once
+    // the e40000 divergence was out of the way:
+    //
+    //     ours   900006 R 0000        mame   900006 R 0150
+    //
+    // The game writes 0x0150 to the sprite register at 0x900006 and reads it
+    // straight back. MAME returns it. This harness returned zero — not because
+    // the core is wrong, but because the harness had no register file at all.
+    wire        h_v2r0_we, h_v2r1_we, h_sprreg_we;
+    wire [3:0]  h_reg_addr;
+    wire [15:0] h_reg_din, h_v2r0_q, h_v2r1_q, h_sprreg_q;
+
+    kaneko_regs16 u_h_v2r0 (
+        .clk(clk), .we(h_v2r0_we), .addr(h_reg_addr), .din(h_reg_din),
+        .uds(~UDSn), .lds(~LDSn),
+        .rd_addr(h_reg_addr), .rd_q(h_v2r0_q), .regs_flat()
+    );
+    kaneko_regs16 u_h_v2r1 (
+        .clk(clk), .we(h_v2r1_we), .addr(h_reg_addr), .din(h_reg_din),
+        .uds(~UDSn), .lds(~LDSn),
+        .rd_addr(h_reg_addr), .rd_q(h_v2r1_q), .regs_flat()
+    );
+    kaneko_regs16 u_h_sprreg (
+        .clk(clk), .we(h_sprreg_we), .addr(h_reg_addr), .din(h_reg_din),
+        .uds(~UDSn), .lds(~LDSn),
+        .rd_addr(h_reg_addr), .rd_q(h_sprreg_q), .regs_flat()
     );
 
     kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
@@ -354,9 +386,9 @@ module kaneko_cpumem_harness #(
         .eeprom_we(eeprom_we), .eeprom_din(eeprom_din),
         .oki_we(oki_we), .oki_din(oki_din), .oki_dout(oki_dout),
 
-        .v2r0_we(), .v2r1_we(), .sprreg_we(),
-        .reg_addr(), .reg_din(),
-        .v2r0_q(16'h0000), .v2r1_q(16'h0000), .sprreg_q(16'h0000),
+        .v2r0_we(h_v2r0_we), .v2r1_we(h_v2r1_we), .sprreg_we(h_sprreg_we),
+        .reg_addr(h_reg_addr), .reg_din(h_reg_din),
+        .v2r0_q(h_v2r0_q), .v2r1_q(h_v2r1_q), .sprreg_q(h_sprreg_q),
 
         .in_p1(16'hffff), .in_p2(16'hffff),
         // EVERY window page comes from the game table, exactly as the top
@@ -368,7 +400,7 @@ module kaneko_cpumem_harness #(
         .pg_wram(PG_WRAM), .pg_v2w0(PG_V2W0), .pg_v2w1(PG_V2W1),
         .pg_spr(PG_SPR),  .pg_pal(PG_PAL),
         .pg_wdog(PG_WDOG), .pg_in(PG_IN), .pg_snd(PG_SND),
-        .rom_1mb(ROM_1MB),
+        .rom_1mb(ROM_1MB), .blazeon_io(BLAZEON_IO),
         .in_system(16'hffff), .in_unk(16'hffff),
 
         .unmapped_hit(unmapped_hit), .unmapped_addr(unmapped_addr)

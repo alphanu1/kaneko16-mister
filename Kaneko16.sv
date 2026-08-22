@@ -153,6 +153,7 @@ wire [9:0]  CFG_H_VIS, CFG_V_VIS, CFG_V_START, CFG_HSYNC;
 wire        INPUTS_BLAZEON;
 wire [7:0]  PG_SND;
 wire        ROM_1MB;
+wire        BLAZEON_IO;
 
 kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 (
@@ -163,7 +164,7 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 
 	.pg_wram(PG_WRAM), .pg_v2w0(PG_V2W0), .pg_v2w1(PG_V2W1),
 	.pg_spr(PG_SPR), .pg_pal(PG_PAL), .pg_wdog(PG_WDOG), .pg_in(PG_IN),
-	.pg_snd(PG_SND), .rom_1mb(ROM_1MB),
+	.pg_snd(PG_SND), .rom_1mb(ROM_1MB), .blazeon_io(BLAZEON_IO),
 
 	.base_trom0(TROM0_BASE), .base_trom1(TROM1_BASE),
 	.base_spr(SPR_BASE), .base_oki(OKI_BASE),
@@ -469,7 +470,7 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	// a set of wires that went nowhere.
 	.pg_wram(PG_WRAM), .pg_v2w0(PG_V2W0), .pg_v2w1(PG_V2W1),
 	.pg_spr(PG_SPR), .pg_pal(PG_PAL), .pg_wdog(PG_WDOG), .pg_in(PG_IN),
-	.pg_snd(PG_SND), .rom_1mb(ROM_1MB),
+	.pg_snd(PG_SND), .rom_1mb(ROM_1MB), .blazeon_io(BLAZEON_IO),
 
 	// Nothing pressed. The EEPROM is not implemented yet, so anything the game
 	// reads from it comes back as an unwritten device.
@@ -780,6 +781,37 @@ end
 // value that changes every bus cycle is not photographable.
 reg [23:1] bus_addr_lat;
 always @(posedge clk_sys) if (vbl_rise) bus_addr_lat <= eab;
+
+// WHICH EXCEPTION THE 68000 TOOK.
+//
+// Blaze On parks in a three-instruction loop at 0x000100:
+//
+//     4e71  NOP     4e71  NOP     60fa  BRA.S -6
+//
+// and FIFTY-EIGHT of its exception vectors point at it. That was proved from
+// the ROM image, and it matches every reading on screen: full-speed execution
+// (a six-byte loop runs entirely out of the ROM cache), a[23:9] always zero,
+// no unmapped accesses, no interrupts. The game has not stalled in init — it
+// has crashed.
+//
+// The loop address cannot say WHICH exception, because they all land there.
+// The vector FETCH can: the 68000 reads the vector from 0x000008-0x0000ff
+// immediately before jumping, and once it is in the loop it never reads there
+// again, so the last such read stays latched. vector = byte address / 4, and
+// eab is bits 23:1 of the byte address, so the number is eab[7:2].
+//
+//   2 bus error (impossible here, BERR is never asserted)   3 address error
+//   4 illegal instruction   5 divide by zero   6 CHK   7 TRAPV
+//   8 privilege violation   9 trace   10 line-A   11 line-F
+reg [5:0] vec_lat;
+always @(posedge clk_sys) begin
+	if (cpu_rst) vec_lat <= 6'd0;
+	// On the DTACK edge, so one completed access latches once. eab[23:8]==0
+	// is a byte address below 0x100, which is the vector table and nothing
+	// else — the loop itself sits at 0x100 and is excluded deliberately.
+	else if (~DTACKn && !dtack_d && eRWn && (eab[23:8] == 16'd0))
+		vec_lat <= eab[7:2];
+end
 
 reg [23:1] unmapped_addr_lat;
 reg [15:0] unmapped_cnt, unmapped_cnt_lat;
@@ -1316,8 +1348,12 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 // board has no OKI wired at all, so all four rows read zero and the top one
 // was costing a build to display nothing. Restore it when the sound path
 // lands. Reads as e.g. 0002 for a loop down in low ROM.
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? {bus_addr_lat[23:9], 1'b0}
-                        : (screen_y < 9'd52) ? oki_ok_lat
+// Row 4 carried a[23:9], which is zero every time because the loop is at
+// 0x100 — a row spending a whole build to display nothing. It now carries the
+// exception vector number, and row 5 the low half of the last bus address as a
+// cross-check that should read 0080..0082 for a loop at 0x100-0x105.
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? {10'd0, vec_lat}
+                        : (screen_y < 9'd52) ? {9'd0, bus_addr_lat[7:1]}
                         : (screen_y < 9'd58) ? oki_busy_lat
                                              : oki_snd_lat;
 wire       oki_set = oki_row_val[oki_bit];

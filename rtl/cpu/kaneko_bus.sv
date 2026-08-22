@@ -127,6 +127,10 @@ module kaneko_bus #(
     input  wire [7:0]   pg_wram, pg_v2w0, pg_v2w1, pg_spr, pg_pal,
     input  wire [7:0]   pg_wdog, pg_in, pg_snd,
     input  wire         rom_1mb,
+    // Gates the Blaze On board's extra IRQ-ack windows. Per-game, because
+    // 0xe40000 is not an acknowledge on the other boards and decoding it there
+    // would answer an address their code may use for something else.
+    input  wire         blazeon_io,
 
     // Observability. An unmapped access is acknowledged so the CPU cannot hang
     // on it, but it must not pass silently.
@@ -193,9 +197,32 @@ module kaneko_bus #(
     wire sel_in    = (a[23:16] == pg_in)   && (a[15:3] == 13'd0);
     wire sel_snd   = (a[23:16] == pg_snd)  && (a[15:1] == 15'd0);
 
+    // The Blaze On board's other three interrupt-acknowledge reads. From
+    // blazeon_map:
+    //
+    //   map(0xe00000, 0xe00001).nopr();   // "Read = IRQ Ack ?"   -- sel_snd
+    //   map(0xe40000, 0xe40001).nopr();   // "IRQ Ack ?"
+    //   map(0xec0000, 0xec0001).nopr();   // "Lev 4 IRQ Ack ?"
+    //
+    // A MAME nopr() returns ZERO. This core left them undecoded, and its
+    // unmapped default is 0xffff — which the bus-trace diff against MAME
+    // caught as the first and only value divergence in 100,000 accesses:
+    //
+    //   ours   e40000 R ffff        mame   e40000 R 0000
+    //
+    // It changed no branch in that window, so it is not known to be a bug the
+    // game notices. Corrected because the oracle says so, and because guessing
+    // which wrong value a game tolerates is how the OKI stayed silent.
+    // 0xe80000 is commented out in the driver and only ever written here, so
+    // it is deliberately NOT decoded — decoding an address MAME does not is
+    // the opposite mistake.
+    wire sel_iack2 = blazeon_io && (a[23:16] == 8'he4) && (a[15:1] == 15'd0);
+    wire sel_iack3 = blazeon_io && (a[23:16] == 8'hec) && (a[15:1] == 15'd0);
+
     wire decoded = sel_rom | sel_wram | sel_ym0 | sel_ym1 | sel_oki | sel_v2w0
                  | sel_v2w1 | sel_spr | sel_pal | sel_v2r0 | sel_sprr | sel_wdog
-                 | sel_v2r1 | sel_ctrl | sel_in  | sel_snd;
+                 | sel_v2r1 | sel_ctrl | sel_in  | sel_snd
+                 | sel_iack2 | sel_iack3;
 
     // ---------------------------------------------------------- work RAM
     // 64 KB as 32k x 16, held as TWO BYTE-WIDE ARRAYS rather than one 16-bit
@@ -458,6 +485,7 @@ module kaneko_bus #(
         // MAME has it as nopr(). It needs a VALUE, though — a decoded address
         // that returns nothing has cost this core three sessions already.
         else if (sel_snd)  iEdb = 16'h0000;
+        else if (sel_iack2 || sel_iack3) iEdb = 16'h0000;
         else if (sel_in)   iEdb = (a[2:1] == 2'd0) ? in_p1
                                 : (a[2:1] == 2'd1) ? in_p2
                                 : (a[2:1] == 2'd2) ? in_system : in_unk;
