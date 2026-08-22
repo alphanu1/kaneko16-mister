@@ -132,44 +132,47 @@ wire        nv_sel = (ioctl_index[7:0] == NVRAM_INDEX);
 // constants from this byte. It arrives before the ROM stream, so it is settled
 // long before the 68000 leaves reset. Held through a core reset and cleared
 // only by power-on, because the OSD reset must not lose which game is loaded.
-localparam [7:0] CFG_INDEX = 8'd1;
-reg [7:0] game_id;
-always @(posedge clk_sys) begin
-	if (rst_por)
-		game_id <= 8'd0;
-	else if (ioctl_wr && (ioctl_index[7:0] == CFG_INDEX))
-		game_id <= ioctl_dout[7:0];
-end
-
 // ------------------------------------------------------- the game table
-// Hard rule 9: a per-game fact belongs here, not wired into shared code. Every
-// entry below differs between the two games and every one of them, wrong,
-// renders a plausible picture rather than failing.
+// Every per-game fact lives in kaneko_gamecfg, which has a testbench: 113
+// checks covering the ioctl path that delivers the id, the fallback for an
+// unknown id, and the whole configuration each id selects. That path decides
+// the MEMORY MAP, and when it lived here — untestable — a wrong byte would
+// have been a black screen with no way to tell why.
 //
-// Pages are a[23:16] of each window that moves; sizes do not move and stay in
-// kaneko_bus. Read from bakubrkr_map / mgcrystl_map and from the frame gate's
-// table, which is pixel-exact on both.
-//
-//   id 0  explbrkr    id 1  mgcrystl
-// FORCED to Explosive Breaker while the black screen is unexplained. game_id
-// arrives over ioctl and nothing in simulation exercises that path, so it is
-// taken out of the decode entirely rather than trusted.
-wire mg = 1'b0;
+// Explosive Breaker is id 0 and id 0 is the reset value, so a game whose MRA
+// carries no config byte gets its configuration, unchanged.
+wire [7:0]  game_id;
+wire [7:0]  PG_WRAM, PG_V2W0, PG_V2W1, PG_SPR, PG_PAL, PG_WDOG, PG_IN;
+wire [SDR_AW:1] TROM0_BASE, TROM1_BASE, SPR_BASE, OKI_BASE;
+wire signed [10:0] V2_DX_CFG, V2_DY_CFG;
+wire        VIEW2_2_PRI, TWO_CHIPS, SPR_WIDE, SPR_FLIPTYPE;
+wire [15:0] SPR_PRI_SEL, SPR_XOFFS_CFG, SPR_YOFFS_CFG;
+wire [10:0] TILE_COLBASE_CFG, SPR_COLBASE_CFG, SPR_COUNT_CFG;
+wire [8:0]  SPR_MIN_Y;
 
-wire [7:0] PG_WRAM = mg ? 8'h30 : 8'h10;
-wire [7:0] PG_V2W0 = mg ? 8'h60 : 8'h50;
-wire [7:0] PG_V2W1 = mg ? 8'h68 : 8'h58;
-wire [7:0] PG_SPR  = mg ? 8'h70 : 8'h60;
-wire [7:0] PG_PAL  = mg ? 8'h50 : 8'h70;
-wire [7:0] PG_WDOG = mg ? 8'ha0 : 8'ha8;
-wire [7:0] PG_IN   = mg ? 8'hc0 : 8'he0;
+kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
+(
+	.clk(clk_sys), .rst(rst_por),
+	.ioctl_wr(ioctl_wr), .ioctl_index(ioctl_index[7:0]),
+	.ioctl_dout(ioctl_dout[7:0]),
+	.game_id(game_id),
 
-// m_view2_2_pri: chip 1 writes its category, or zero. 1 for explbrkr, 0 for
-// mgcrystl — the single most load-bearing per-game bit in the mixer.
-wire VIEW2_2_PRI = ~mg;
-// set_priorities(): {8,8,8,8} above everything on explbrkr, {2,3,5,7}
-// interleaved with the tile layers on mgcrystl.
-wire [15:0] SPR_PRI_SEL = mg ? 16'h7532 : 16'h8888;
+	.pg_wram(PG_WRAM), .pg_v2w0(PG_V2W0), .pg_v2w1(PG_V2W1),
+	.pg_spr(PG_SPR), .pg_pal(PG_PAL), .pg_wdog(PG_WDOG), .pg_in(PG_IN),
+
+	.base_trom0(TROM0_BASE), .base_trom1(TROM1_BASE),
+	.base_spr(SPR_BASE), .base_oki(OKI_BASE),
+
+	.v2_dx(V2_DX_CFG), .v2_dy(V2_DY_CFG),
+	.view2_2_pri(VIEW2_2_PRI), .spr_pri_f(SPR_PRI_SEL),
+	.tile_colbase(TILE_COLBASE_CFG), .spr_colbase(SPR_COLBASE_CFG),
+	.two_chips(TWO_CHIPS),
+
+	.spr_count(SPR_COUNT_CFG),
+	.spr_xoffs(SPR_XOFFS_CFG), .spr_yoffs(SPR_YOFFS_CFG),
+	.visarea_min_y(SPR_MIN_Y), .wide_screen(SPR_WIDE),
+	.fliptype(SPR_FLIPTYPE)
+);
 
 // WIDE=1, so ioctl_addr counts bytes and advances by two per word.
 wire [5:0]  bk_addr = ioctl_addr[6:1];
@@ -498,7 +501,6 @@ wire ym_cen = (ym_div == 5'd0);        // 48 MHz / 24 = 2 MHz
 
 // oki1: byte 0x4c0000 on explbrkr, 0x500000 on mgcrystl (its kan_spr is
 // larger). Word addresses.
-wire [SDR_AW:1] OKI_BASE = mg ? SDR_AW'(25'h280000) : SDR_AW'(25'h260000);
 
 wire [7:0] ym0_q, ym1_q;
 wire [7:0] ym0_iob_out;
@@ -772,9 +774,6 @@ kaneko_video_timing u_timing
 // PER-GAME, and this belongs in a configuration table before a second game
 // runs (rule 9). explbrkr: set_offset(0x5b, -0x8, 256, 240), m_view2_2_pri set,
 // sprite priorities {8,8,8,8}, tile colour base 0x400.
-localparam signed [10:0] V2_DX = 11'sd91;      // 0x5b
-localparam signed [10:0] V2_DY = -11'sd8;
-localparam [10:0] TILE_COLBASE = 11'h400;
 
 
 // Sprites, per game (hard rule 9). These are explbrkr's, read from
@@ -788,15 +787,7 @@ localparam [10:0] TILE_COLBASE = 11'h400;
 //
 // Blaze On's board parses 512 records and carries a large X offset; Wing Force
 // is 320 wide. Both move here when the game table lands.
-localparam [10:0] SPR_COUNT     = 11'd1024;
-localparam [15:0] SPR_XOFFS     = 16'd0;
-localparam [15:0] SPR_YOFFS     = 16'd0;
-localparam [8:0]  SPR_VIS_MIN_Y = 9'd16;
-localparam        SPR_WIDE      = 1'b0;      // screen width is 0x100, not > 0x100
-localparam        SPR_FLIPTYPE  = 1'b0;
-localparam [10:0] SPR_COLBASE   = 11'd0;
 // kan_spr @ byte 0x280000 on both, so word 0x140000.
-wire [SDR_AW:1] SPR_BASE  = SDR_AW'(25'h140000);
 
 // Tile ROM regions, as word addresses in SDRAM (D6, SDRAM_MAP):
 //   view2_0 at byte 0x080000, view2_1 at byte 0x180000.
@@ -816,8 +807,6 @@ wire [SDR_AW:1] SPR_BASE  = SDR_AW'(25'h140000);
 //   view2_1           0x180000    0x180000
 //   kan_spr           0x280000    0x280000
 //   oki1              0x4c0000    0x500000
-wire [SDR_AW:1] TROM0_BASE = SDR_AW'(25'h040000);
-wire [SDR_AW:1] TROM1_BASE = SDR_AW'(25'h0c0000);
 
 wire [15:0] c0r0 = v2r0_flat[ 0*16 +: 16];
 wire [15:0] c0r1 = v2r0_flat[ 1*16 +: 16];
@@ -867,9 +856,9 @@ end
 
 // Layer 1's dx is two further along than layer 0's: MAME sets scrolldx to
 // -(m_dx + 2) for tmap[1].
-wire [43:0] lay_dx = { 11'(V2_DX + 11'sd2), 11'(V2_DX),
-                       11'(V2_DX + 11'sd2), 11'(V2_DX) };
-wire [43:0] lay_dy = { 11'(V2_DY), 11'(V2_DY), 11'(V2_DY), 11'(V2_DY) };
+wire [43:0] lay_dx = { 11'(V2_DX_CFG + 11'sd2), 11'(V2_DX_CFG),
+                       11'(V2_DX_CFG + 11'sd2), 11'(V2_DX_CFG) };
+wire [43:0] lay_dy = { 11'(V2_DY_CFG), 11'(V2_DY_CFG), 11'(V2_DY_CFG), 11'(V2_DY_CFG) };
 
 // ------------------------------------------------------- tile ROM feeder
 wire [95:0] trom_addr_f;
@@ -1033,9 +1022,9 @@ kaneko_spr_sys #(
 	.keep_sprites(keep_sprites),
 	.skip_en(~status[15]),
 
-	.sprite_count(SPR_COUNT),
-	.sprite_xoffs(SPR_XOFFS), .sprite_yoffs(SPR_YOFFS),
-	.visarea_min_y(SPR_VIS_MIN_Y),
+	.sprite_count(SPR_COUNT_CFG),
+	.sprite_xoffs(SPR_XOFFS_CFG), .sprite_yoffs(SPR_YOFFS_CFG),
+	.visarea_min_y(SPR_MIN_Y),
 	.wide_screen(SPR_WIDE), .fliptype(SPR_FLIPTYPE),
 	// MAME clips sprite drawing to the visible area.
 	.clip_x0(10'd0), .clip_x1(10'd255),
@@ -1069,8 +1058,8 @@ kaneko_mixer u_mix
 
 	.view2_2_pri(VIEW2_2_PRI),
 	.spr_pri_f(SPR_PRI_SEL),
-	.tile_colbase(TILE_COLBASE),
-	.spr_colbase(SPR_COLBASE),
+	.tile_colbase(TILE_COLBASE_CFG),
+	.spr_colbase(SPR_COLBASE_CFG),
 
 	.pen(mix_pen), .prio_out(), .sprite_won()
 );
