@@ -4,9 +4,15 @@
 #
 # Copy the built core and its MRAs to a MiSTer, and verify what landed.
 #
-#   tools/deploy.sh                  core + every mra/*.mra
+#   tools/deploy.sh                  core + every releases/*.mra
 #   tools/deploy.sh --core-only      just the .rbf
+#   tools/deploy.sh --core-only --test-mra 'build/mra/Blaze On (Japan).mra'
 #   MISTER=192.168.1.42 tools/deploy.sh
+#
+# --test-mra exists because nothing enters releases/ until it has passed on
+# hardware, and an MRA cannot pass on hardware until it is on the hardware.
+# It takes a path to any MRA and copies it without going through releases/,
+# so a game under test can be tried without staging it as shipped.
 #
 # WHY THIS IS A SCRIPT AND NOT A LINE OF SSH
 #
@@ -32,12 +38,16 @@ CORE_DIR="/media/fat/_Arcade/cores"
 MRA_DIR="/media/fat/_Arcade"
 
 CORE_ONLY=0
-for a in "$@"; do
-  case "$a" in
+TEST_MRAS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
     --core-only) CORE_ONLY=1 ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
-    *) echo "unknown option: $a" >&2; exit 1 ;;
+    --test-mra)  shift; [ $# -gt 0 ] || { echo "--test-mra needs a path" >&2; exit 1; }
+                 TEST_MRAS+=("$1") ;;
+    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
+  shift
 done
 
 say()  { printf '\033[1m%s\033[0m\n' "$*"; }
@@ -100,6 +110,22 @@ if [ "$CORE_ONLY" = 0 ]; then
       echo "  $(basename "$m")"
     done
   fi
+fi
+
+# Test MRAs go on regardless of --core-only: the point of --core-only is to
+# keep the SHIPPED set unchanged while debugging, and a test MRA is not in it.
+if [ ${#TEST_MRAS[@]} -gt 0 ]; then
+  say "== mra (TEST — not from releases/, not shipped)"
+  for m in "${TEST_MRAS[@]}"; do
+    [ -f "$m" ] || die "no such MRA: $m"
+    scp "${SSHOPTS[@]}" -q "$m" "$MUSER@$MISTER:$MRA_DIR/"
+    # Verified like the bitstream. An MRA that lands short is an MRA that
+    # loads a truncated ROM stream, which looks exactly like an RTL bug.
+    w="$(md5sum "$m" | cut -d' ' -f1)"
+    g="$(ssh "${SSHOPTS[@]}" "$MUSER@$MISTER" "md5sum '$MRA_DIR/$(basename "$m")'" | cut -d' ' -f1)"
+    [ "$w" = "$g" ] || die "checksum mismatch on $(basename "$m"): local $w, remote $g"
+    echo "  $(basename "$m")  $w  ok"
+  done
 fi
 
 say "done"
