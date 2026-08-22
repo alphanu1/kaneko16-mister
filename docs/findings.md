@@ -5287,3 +5287,39 @@ The test that decides it is Explosive Breaker on whichever setting fixes Wing
 Force. Both correct on one value is a genuine correction to MAME. One fixed and
 one broken means the offset is right and something game-specific is wrong,
 which is a narrower hunt.
+
+### MAME's +2 is CONFIRMED on hardware — and it is not the fault
+
+Tested on the board with all four positions of `O[23:21]`:
+
+```
+  +2 (MAME's value)   best — the two layers line up
+   0, -2, +4          all visibly worse
+```
+
+So the offset MAME inferred from Great 1000 Miles Rally's scroll registers is
+correct for this chip, and the doubt raised about its sign and magnitude is
+answered: it stands. That is worth having as a positive result — nobody had
+checked it against hardware, and now someone has.
+
+It also means the remaining artefacts are NOT the layer offset, and several
+builds spent on it were spent on the wrong thing. The switch stays, defaulted
+to +2, because it cost a build to learn this and the next person should be able
+to re-run the experiment in a minute rather than rebuilding.
+
+What the artefact is NOT, for the tilemap path, each established separately:
+
+```
+  the renderer          100% pixel-exact on MAME's Wing Force title screen at
+                        three different frames
+  line scroll           DISABLED on that screen (ls=0), so not involved
+  the layer offset      +2 confirmed best on hardware
+  the scroll registers  correct on the board, raw and latched
+  the tile ROM feeder   base_addr + byte_addr/2, no truncation; Wing Force's
+                        2 MB region fits
+```
+
+The one path neither harness covers is the CPU's writes into `kaneko_vmem` —
+the frame gate loads VRAM from C++ arrays and the boot harness ties the video
+read ports to zero. If our VRAM contents differ from MAME's, everything above
+being correct is exactly what you would see.
