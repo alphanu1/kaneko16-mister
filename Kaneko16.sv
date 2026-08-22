@@ -37,8 +37,12 @@ assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DD
 //
 // The OKI M6295 is not connected yet; when it is, it mixes in here.
 assign AUDIO_S   = 1;
-assign AUDIO_L   = ym_mix;
-assign AUDIO_R   = ym_mix;
+// The Blaze On board's mix is a SEPARATE path, not a term added to the other
+// one. Explosive Breaker's sound works on hardware and its mix stays bit for
+// bit what it was; a board with no YM2149s must also not inherit the -1024 DC
+// offset those chips contribute when they are present but silent.
+assign AUDIO_L   = HAS_Z80 ? z80_mix_l : ym_mix;
+assign AUDIO_R   = HAS_Z80 ? z80_mix_r : ym_mix;
 assign AUDIO_MIX = 0;
 
 assign LED_USER  = ioctl_download;
@@ -151,6 +155,9 @@ wire [10:0] TILE_COLBASE_CFG, SPR_COLBASE_CFG, SPR_COUNT_CFG;
 wire [8:0]  SPR_MIN_Y;
 wire [9:0]  CFG_H_VIS, CFG_V_VIS, CFG_V_START, CFG_HSYNC;
 wire        INPUTS_BLAZEON;
+wire [7:0]  PG_SND;
+wire [SDR_AW-1:0] BASE_Z80;
+wire        HAS_Z80;
 
 kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 (
@@ -177,7 +184,8 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 
 	.h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
 	.v_start(CFG_V_START), .h_sync_start(CFG_HSYNC),
-	.inputs_blazeon(INPUTS_BLAZEON)
+	.inputs_blazeon(INPUTS_BLAZEON),
+	.pg_snd(PG_SND), .base_z80(BASE_Z80), .has_z80(HAS_Z80)
 );
 
 // WIDE=1, so ioctl_addr counts bytes and advances by two per word.
@@ -448,6 +456,7 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.ym0_q(ym0_q), .ym1_q(ym1_q),
 	.eeprom_we(eeprom_we), .eeprom_din(eeprom_din),
 	.oki_we(oki_we), .oki_din(oki_din), .oki_dout(oki_dout),
+	.snd_we(z80_latch_we), .snd_din(z80_latch_din), .pg_snd(PG_SND),
 
 	.v2r0_we(v2r0_we), .v2r1_we(v2r1_we), .sprreg_we(sprreg_we),
 	.reg_addr(reg_addr), .reg_din(reg_din),
@@ -524,6 +533,15 @@ wire signed [11:0] ym_ctr = $signed({1'b0, ym_sum}) - 12'sd1024;
 wire signed [16:0] snd_mix = {{3{ym_ctr[11]}}, ym_ctr, 2'd0}      // YM, scaled
                            + {{3{oki_snd[13]}}, oki_snd};         // OKI
 wire [15:0] ym_mix = snd_mix[16:1];
+
+// Blaze On board: the YM2151 in stereo, plus the OKI on Wing Force, which puts
+// it on the Z80's I/O ports rather than the 68000's bus. Halved, because
+// 32768 + 8192 does not fit a 16-bit sample and a quiet mix is recoverable
+// where a clipped one is not.
+wire signed [16:0] z80_sum_l = {{3{oki_snd[13]}}, oki_snd} + {ym2151_l[15], ym2151_l};
+wire signed [16:0] z80_sum_r = {{3{oki_snd[13]}}, oki_snd} + {ym2151_r[15], ym2151_r};
+wire [15:0] z80_mix_l = z80_sum_l[16:1];
+wire [15:0] z80_mix_r = z80_sum_r[16:1];
 wire [7:0] ym1_ioa_in = {7'h7f, eeprom_do};
 wire [7:0] ym1_iob_out;
 
@@ -616,6 +634,91 @@ kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_okirom
 	.port_ready(oki_rom_ok),
 	.sdr_req(p5_req), .sdr_addr(p5_addr),
 	.sdr_ack(p5_ack), .sdr_dout(p5_dout)
+);
+
+
+// -------------------------------------------------------- Z80 sound CPU
+// The Blaze On board only: Z80 + YM2151, with the 68000 handing it one byte at
+// a time through a latch. Held in reset on every other board, where the sound
+// hardware is the two YM2149s and the OKI on the 68000's own bus.
+//
+// T80 is VHDL. That is why kaneko_z80snd brings the Z80 bus out instead of
+// instantiating it — Verilator cannot build VHDL, and a module that hid the
+// CPU inside itself could not be unit-tested at all. The join happens here,
+// which is also where fx68k, jt49 and jt6295 are joined for the same reason.
+wire        z80_latch_we;
+wire [7:0]  z80_latch_din;
+
+wire [15:0] z80_a;
+wire [7:0]  z80_do, z80_di;
+wire        z80_mreq_n, z80_iorq_n, z80_rd_n, z80_wr_n, z80_nmi_n;
+wire [15:0] z80_rom_addr;
+wire [7:0]  z80_rom_data;
+wire        z80_ym_cen, z80_ym_cen_p1, z80_ym_cs_n, z80_ym_wr_n, z80_ym_a0;
+wire [7:0]  z80_ym_din, z80_ym_dout;
+
+// 4 MHz, from MAME: Z80(config, m_audiocpu, 4000000) on Blaze On and
+// XTAL(16'000'000)/4 on Wing Force, which is the same number. 48/12 is exact,
+// so no fractional divider and no phase error.
+reg [3:0] z80_cediv;
+always @(posedge clk_sys) z80_cediv <= (z80_cediv == 4'd11) ? 4'd0 : z80_cediv + 4'd1;
+wire z80_ce = (z80_cediv == 4'd0);
+
+// Held in reset when the board has no Z80. Not merely idle: a Z80 free-running
+// over whatever the block RAM powered up with would drive the YM2151 with
+// noise, and the OKI board would gain a sound source it does not have.
+wire z80_rst_n = ~(cpu_rst | ~HAS_Z80);
+
+T80s #(.Mode(0), .T2Write(1), .IOWait(1)) u_z80
+(
+	.RESET_n(z80_rst_n), .CLK(clk_sys), .CEN(z80_ce),
+	.WAIT_n(1'b1),
+	// The YM2151's IRQ is not wired on this board — MAME sets no irq_handler,
+	// so the program polls the status register for its timers. NMI is the only
+	// interrupt, and it comes from the latch.
+	.INT_n(1'b1), .NMI_n(z80_nmi_n), .BUSRQ_n(1'b1),
+	.M1_n(), .MREQ_n(z80_mreq_n), .IORQ_n(z80_iorq_n),
+	.RD_n(z80_rd_n), .WR_n(z80_wr_n),
+	.RFSH_n(), .HALT_n(), .BUSAK_n(),
+	.OUT0(1'b0),
+	.A(z80_a), .DI(z80_di), .DO(z80_do)
+);
+
+kaneko_z80rom #(.SDR_AW(SDR_AW)) u_z80rom
+(
+	// Filled by snooping the loader's SDRAM write port during download, which
+	// is already the final address and the final data.
+	.ld_clk(clk_sdram), .ld_wr(ldr_wr_req && ldr_wr_ack),
+	.ld_addr(ldr_wr_addr), .ld_din(ldr_wr_din), .base(BASE_Z80),
+	.clk(clk_sys), .rom_addr(z80_rom_addr), .rom_data(z80_rom_data)
+);
+
+kaneko_z80snd u_z80snd
+(
+	.clk(clk_sys), .rst(~z80_rst_n), .ce(z80_ce),
+	.latch_we(z80_latch_we), .latch_din(z80_latch_din),
+	.cpu_addr(z80_a), .cpu_dout(z80_do), .cpu_din(z80_di),
+	.mreq_n(z80_mreq_n), .iorq_n(z80_iorq_n),
+	.rd_n(z80_rd_n), .wr_n(z80_wr_n), .nmi_n(z80_nmi_n),
+	.rom_addr(z80_rom_addr), .rom_data(z80_rom_data),
+	.ym_cen(z80_ym_cen), .ym_cen_p1(z80_ym_cen_p1),
+	.ym_cs_n(z80_ym_cs_n), .ym_wr_n(z80_ym_wr_n), .ym_a0(z80_ym_a0),
+	.ym_din(z80_ym_din), .ym_dout(z80_ym_dout)
+);
+
+// The YM2151 is stereo on this board — MAME routes channel 0 left and 1 right,
+// unlike every other Kaneko sound chip, which is mono to one speaker.
+wire signed [15:0] ym2151_l, ym2151_r;
+
+jt51 u_ym2151
+(
+	.rst(~z80_rst_n), .clk(clk_sys),
+	.cen(z80_ym_cen), .cen_p1(z80_ym_cen_p1),
+	.cs_n(z80_ym_cs_n), .wr_n(z80_ym_wr_n), .a0(z80_ym_a0),
+	.din(z80_ym_din), .dout(z80_ym_dout),
+	.ct1(), .ct2(), .irq_n(),
+	.sample(), .left(), .right(),
+	.xleft(ym2151_l), .xright(ym2151_r)
 );
 
 jt6295 u_oki

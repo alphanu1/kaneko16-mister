@@ -30,6 +30,14 @@
 // ROM that is the right size, checksums wrong, and hangs the Z80 in a way that
 // looks like a bus fault.
 //
+// TWO CLOCKS, ON PURPOSE
+//
+// The loader runs on clk_sdram and the Z80 on clk_sys. Both are 48 MHz from
+// the same PLL and this design already crosses between them freely, but a
+// simple dual-port RAM with a clock per port costs nothing in an M10K and
+// removes the question entirely. Nothing is written after the download ends
+// and nothing is read before it, so the two ports never contend.
+//
 // SIZE
 //
 // 0x0000-0xBFFF is ROM on this board; MAME maps 0x8000-0xBFFF straight through
@@ -44,15 +52,15 @@ module kaneko_z80rom #(
     parameter int SDR_AW = 25,
     parameter int BYTES  = 'hC000            // 48 KB
 ) (
-    input  wire                clk,
-
     // ---- loader snoop. Word addresses, matching the SDRAM write port.
+    input  wire                ld_clk,
     input  wire                ld_wr,
     input  wire [SDR_AW-1:0]   ld_addr,
     input  wire [15:0]         ld_din,
     input  wire [SDR_AW-1:0]   base,          // word address of audiocpu
 
     // ---- Z80 side, one clock of latency
+    input  wire                clk,
     input  wire [15:0]         rom_addr,
     output logic [7:0]         rom_data
 );
@@ -72,8 +80,10 @@ module kaneko_z80rom #(
     logic [15:0] q;
     logic        odd;
 
-    always_ff @(posedge clk) begin
+    always_ff @(posedge ld_clk)
         if (in_wr) mem[off[AW-1:0]] <= ld_din;
+
+    always_ff @(posedge clk) begin
         q   <= mem[rom_addr[AW:1]];
         odd <= rom_addr[0];
     end
