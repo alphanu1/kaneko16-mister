@@ -5184,8 +5184,31 @@ constraint and the disabled-layer fetch fix — real and worth keeping — did n
 clear it. Sprites are not starving it either, since the sprite engine finishes
 every frame.
 
-That leaves the access pattern. The two boards place their tile and sprite ROM
-at different SDRAM offsets, and if Blaze On's land such that tile and sprite
-fetches keep alternating rows within a bank, every switch costs a row activate
-that Explosive Breaker's layout happens to avoid. Untested, and a separate
-thread from the two-pixel split.
+**Settled by experiment: turning SPRITES off takes the tilemap overruns to
+zero.** So sprite fetching starves the tile feeder, and the earlier reasoning —
+"the sprite engine finishes every frame, so it is not the problem" — was wrong.
+A consumer can finish inside its own budget while monopolising the bus against
+one that cannot.
+
+The two consumers have completely different deadlines:
+
+```
+  tile feeder   must finish a LINE before the next one starts
+  sprite engine has a whole FRAME
+```
+
+and `kaneko_sdram` arbitrates pure round-robin across all eight ports, giving
+them equal share regardless. The sprite ports take their slots on schedule, the
+tile feeder misses its deadline, and the sprite engine comfortably makes its
+own — which is exactly what the two overrun counters show.
+
+That also explains why the board doing LESS work overruns: it is not about
+volume at all. It is that Blaze On's tile feeder has less slack per line to
+absorb the same interference, because a 320-pixel line at the same clock leaves
+fewer spare cycles than a 256-pixel one, while the sprite engine's demand is
+unchanged.
+
+The fix is priority, not bandwidth: the ports with a per-line deadline should
+outrank the ports with a per-frame one. Round-robin within each tier, tier 1
+first. Hard rule 9 applies — this is shared code and Explosive Breaker works
+today, so it needs the gate and a hardware check before it is believed.
