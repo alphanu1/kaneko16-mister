@@ -334,6 +334,26 @@ int main(int argc, char** argv) {
     if (run_ticks_override) run_a = run_ticks_override;
     Stats a = run(rom, false, !trace_path, false, run_a, good_lat, 0);
     report("result", a, run_a);
+
+    // ---- what the 68000 actually wrote into VIEW2 chip 0's registers.
+    // Blaze On locks layer 1's scroll 2 below layer 0's to cancel the
+    // hardware's dx+2 for that layer; MAME shows L0 sx=0x7340 (461) and
+    // L1 sx=0x72c0 (459) from frame 60 onward, unchanged. If these read zero
+    // here the write never happened, and the two layers ghost 2 pixels apart.
+    {
+        auto reg = [&](int i) -> unsigned {
+            return (unsigned)((dut->dbg_v2r0_flat[i / 2] >> ((i % 2) * 16)) & 0xffff);
+        };
+        std::printf("\n    VIEW2 chip0 regs after the run\n");
+        std::printf("      L1 sx=%04x sy=%04x   L0 sx=%04x sy=%04x   ctl=%04x\n",
+                    reg(0), reg(1), reg(2), reg(3), reg(4));
+        int l0 = reg(2) >> 6, l1 = reg(0) >> 6;
+        std::printf("      effective L0=%d L1=%d delta=%+d  (MAME: 461, 459, -2)\n",
+                    l0, l1, l1 - l0);
+        std::printf("      v2r0 write strobes %u, of which had a byte enable %u\n",
+                    (unsigned)dut->dbg_v2r0_we_cnt, (unsigned)dut->dbg_v2r0_be_cnt);
+    }
+
     delete dut;
     if (tail_cap && trace_path) {
         FILE* tf = std::fopen(trace_path, "w");

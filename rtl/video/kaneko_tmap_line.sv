@@ -97,8 +97,22 @@ module kaneko_tmap_line #(
     genvar gi;
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : g_seq
-            assign req_valid[gi]  = running && (x_req[gi] < h_active);
-            assign layer_done[gi] = (x_wr[gi] >= h_active);
+            // A DISABLED LAYER MUST NOT FETCH.
+            //
+            // `layer_enable` reached only `solid` in kaneko_tmap_fetch — it
+            // suppressed the layer's OUTPUT while the layer went on reading
+            // tile ROM every line. On the Blaze On board that is half the tile
+            // bandwidth spent on chip 1, which `two_chips` masks and which can
+            // never be seen, on a line 25% wider than Explosive Breaker's. It
+            // showed on hardware as line-fetch overruns once Wing Force put
+            // heavy sprites and tiles on screen together, and as nothing at all
+            // on a static screen.
+            //
+            // A disabled layer reports done immediately, or `running` would
+            // never clear and the line would never finish.
+            assign req_valid[gi]  = running && layer_en[gi]
+                                 && (x_req[gi] < h_active);
+            assign layer_done[gi] = !layer_en[gi] || (x_wr[gi] >= h_active);
 
             always_ff @(posedge clk) begin
                 if (rst || start) begin
@@ -215,7 +229,10 @@ module kaneko_tmap_line #(
             assign out_pix_f[gi*4 +: 4]    = rq[3:0];
             assign out_colour_f[gi*6 +: 6] = rq[9:4];
             assign out_cat_f[gi*3 +: 3]    = rq[12:10];
-            assign out_solid[gi]           = rq[13];
+            // Gated by the enable, not just by what is in the buffer: a
+            // layer that has stopped fetching keeps whatever its bank held,
+            // and without this that stale opacity would show.
+            assign out_solid[gi]           = rq[13] && layer_en[gi];
         end
     endgenerate
 

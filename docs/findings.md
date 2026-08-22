@@ -5020,3 +5020,81 @@ three is visible to the frame gate: the gate loads VRAM and sprite RAM
 directly, never runs the loader, and composites with its own clip. This is the
 same blind spot recorded above — the gate proves the renderer, not the path
 that feeds it.
+
+### A disabled layer was still fetching tile ROM
+
+`layer_enable` reached only `solid` in `kaneko_tmap_fetch`:
+
+```
+  solid <= s3_valid && layer_enable && (s3_pix != 4'd0);
+```
+
+It suppressed the layer's OUTPUT while the layer went on reading tile ROM every
+line. On the Blaze On board that is half the tile bandwidth spent on chip 1,
+which `two_chips` masks and which can never be drawn, on a line 25% wider than
+Explosive Breaker's.
+
+It showed up on hardware exactly where a thin bandwidth margin shows up:
+nothing on a static screen, and line-fetch overruns once Wing Force had heavy
+sprites and tiles on screen together. Zero overruns on the warning screen said
+nothing; the loaded scene said everything.
+
+A disabled layer now reports done immediately — otherwise `running` never
+clears and the line never finishes — and `out_solid` is gated by the enable so
+the stale contents of a bank that stopped being written cannot show.
+
+### kaneko_tmap_line had no positional test, and is the module nothing runs
+
+```
+                        boot harness   frame gate   real core
+  kaneko_tmap_line           no            no          yes
+```
+
+The frame gate instantiates `kaneko_tmap_layer`, `kaneko_vuspr` and
+`kaneko_mixer` and feeds pixels straight in; the boot harness has no video
+output at all. The line buffer — widened from 256 to 320 this session with a
+runtime `h_active` — existed only in the bitstream.
+
+Its own testbench checked self-consistency and nothing else: the same line
+twice, stalls change nothing, a different y differs, disabled layers blank. **A
+buffer that duplicated every column by two pixels would have passed all of
+it**, and it only ever ran at 256.
+
+Added the invariant that needs no knowledge of the internals: **the visible
+width must not change which pixels land in 0..255.** Same tilemap, same scroll;
+widening only ADDS columns 256..319. Plus the same under random per-layer
+stalls, and a check that the extra columns are genuinely fetched rather than
+left blank.
+
+Result: 518 checks, 0 fails. The line buffer is correct at 320, and the prime
+suspect for the ghost is eliminated rather than assumed.
+
+### What the ghost is NOT
+
+Verified individually, each against MAME or by direct readout:
+
+```
+  CPU writes to the VIEW2 registers   match MAME, address and value
+  the registers land                  L0=461 L1=459 delta=-2, exactly MAME
+                                      747 strobes, all byte-enabled
+  VRAM writes                         land in the right banks
+  kaneko_vmem read mux                c0_t0_q <- chip0 layer0
+  top-level vmem <-> line wiring      correct in both directions
+  config latching                     once per frame at vblank end
+  the renderer                        100% on MAME's own frame-60 dump
+  kaneko_tmap_line at 320             518 checks, 0 fails
+```
+
+And the arithmetic says the two layers should coincide exactly:
+
+```
+  layer 0   dx 51 + scroll 461 = 512
+  layer 1   dx 53 + scroll 459 = 512
+```
+
+which is the whole reason the game writes layer 1's scroll two lower. Nothing
+in the tilemap path explains a two-pixel split, and the next discriminator is
+whether the DEBUG OVERLAY ghosts too — it is drawn directly at exact pixel
+positions and never touches tiles, VRAM or the line buffer. If it ghosts, the
+fault is downstream of everything above, in the HDMI scaler or its filter, and
+this build carries -0.032 ns on `pll_hdmi`.

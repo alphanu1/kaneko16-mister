@@ -106,12 +106,14 @@ void ck(const char* what, uint64_t got, uint64_t want) {
     } else if (got != want) fails++;
 }
 
-struct Line { std::vector<uint64_t> px{std::vector<uint64_t>(256)}; };
+// Sized for the widest screen in the driver, not for the first one tested.
+struct Line { std::vector<uint64_t> px{std::vector<uint64_t>(512)}; };
 
 // Fetch one line and read the buffer back. Returns the 56 bits per pixel,
 // packed as the module presents them.
-Line run_line(int y, bool stalls) {
+Line run_line(int y, bool stalls, int width = 256) {
     stall_enabled = stalls;
+    dut->h_active = width;
     dut->line_y = y;
     dut->start = 1; tick();
     dut->start = 0;
@@ -126,7 +128,7 @@ Line run_line(int y, bool stalls) {
     dut->start = 0;
 
     Line L;
-    for (int x = 0; x < 256; x++) {
+    for (int x = 0; x < width; x++) {
         dut->rd_x = x; tick();
         L.px[x] = ((uint64_t)dut->out_solid << 52) | ((uint64_t)dut->out_cat_f << 40)
                 | ((uint64_t)dut->out_colour_f << 16) | (uint64_t)dut->out_pix_f;
@@ -178,6 +180,37 @@ int main(int argc, char** argv) {
     int solid = 0;
     for (int x = 0; x < 256; x++) solid += (int)((d.px[x] >> 52) & 0xf);
     ck("no layer is solid when all are disabled", solid, 0);
+
+    // ------------------------------------------------ 320 IS NOT A NEW LINE
+    //
+    // The visible width must not change WHICH pixels land in 0..255. Same
+    // tilemap, same scroll; widening the fetch only ADDS pixels 256..319. If
+    // the wide path duplicates a column or shifts by a pixel, the first 256
+    // stop matching the narrow run.
+    //
+    // Everything above this point is self-consistency — same line twice,
+    // stalls change nothing, a different y differs. A buffer that duplicated
+    // every column would satisfy all of it. This is the check that says the
+    // pixels are in the RIGHT PLACE, and it is the one the module never had
+    // while the Blaze On board, which is the only 320-wide screen in the
+    // driver, drew every glyph with a two-pixel ghost.
+    dut->layer_en = 0xf;
+    Line n256 = run_line(40, false, 256);
+    Line n320 = run_line(40, false, 320);
+    int wide_diff = 0;
+    for (int x = 0; x < 256; x++) if (n320.px[x] != n256.px[x]) wide_diff++;
+    ck("320-wide line matches the 256-wide one over 0..255", wide_diff, 0);
+
+    int wide_nonzero = 0;
+    for (int x = 256; x < 320; x++) if (n320.px[x]) wide_nonzero++;
+    ck("the extra columns 256..319 are actually fetched", wide_nonzero > 40, 1);
+
+    // And the same under stalls, which is where a shared clock enable or a
+    // mis-sized counter shows up.
+    Line s320 = run_line(40, true, 320);
+    int wide_stall_diff = 0;
+    for (int x = 0; x < 320; x++) if (s320.px[x] != n320.px[x]) wide_stall_diff++;
+    ck("a stalled 320-wide line matches the unstalled one", wide_stall_diff, 0);
 
     std::printf("kaneko_tmap_line: checks=%ld fails=%ld\n", checks, fails);
     delete dut;

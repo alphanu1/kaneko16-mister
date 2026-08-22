@@ -55,6 +55,17 @@ module kaneko_cpumem_harness #(
     // covers the wiring around it, which no unit test can.
     input  wire [2:0]  ipl_force,
 
+    // The VIEW2 chip-0 register bank, so a test can ask what the 68000
+    // actually wrote. Blaze On sets layer 1's scroll exactly 2 below layer 0's
+    // to cancel the hardware's dx+2, and if that write never lands the two
+    // layers ghost 2 pixels apart — which is what hardware shows.
+    output wire [255:0] dbg_v2r0_flat,
+    // Pulses of v2r0_we, and how many of those had a byte enable asserted.
+    // If they differ, the write strobe is arriving after the 68000 has already
+    // dropped UDS/LDS and the register file sees an enable-less write.
+    output logic [31:0] dbg_v2r0_we_cnt,
+    output logic [31:0] dbg_v2r0_be_cnt,
+
     // Read capture depth. The board wants 0 (CL+1) on hardware evidence; the
     // device model wants 3 (CL+3), which is what the controller resets to. A
     // harness that hard-wired either one would be testing the other machine,
@@ -351,10 +362,20 @@ module kaneko_cpumem_harness #(
     wire [3:0]  h_reg_addr;
     wire [15:0] h_reg_din, h_v2r0_q, h_v2r1_q, h_sprreg_q;
 
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            dbg_v2r0_we_cnt <= 32'd0;
+            dbg_v2r0_be_cnt <= 32'd0;
+        end else if (h_v2r0_we) begin
+            dbg_v2r0_we_cnt <= dbg_v2r0_we_cnt + 1'd1;
+            if (~UDSn || ~LDSn) dbg_v2r0_be_cnt <= dbg_v2r0_be_cnt + 1'd1;
+        end
+    end
+
     kaneko_regs16 u_h_v2r0 (
         .clk(clk), .we(h_v2r0_we), .addr(h_reg_addr), .din(h_reg_din),
         .uds(~UDSn), .lds(~LDSn),
-        .rd_addr(h_reg_addr), .rd_q(h_v2r0_q), .regs_flat()
+        .rd_addr(h_reg_addr), .rd_q(h_v2r0_q), .regs_flat(dbg_v2r0_flat)
     );
     kaneko_regs16 u_h_v2r1 (
         .clk(clk), .we(h_v2r1_we), .addr(h_reg_addr), .din(h_reg_din),
