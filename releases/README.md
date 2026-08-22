@@ -4,7 +4,7 @@ Copy to the SD card:
 
 | from | to |
 |---|---|
-| `Kaneko16_20260821.rbf` | `/media/fat/_Arcade/cores/` |
+| `Kaneko16_20260822.rbf` | `/media/fat/_Arcade/cores/` |
 | `Explosive Breaker (World).mra` | `/media/fat/_Arcade/` |
 
 ROMs are supplied by you and must be in `/media/fat/games/mame/` as the MRA
@@ -22,7 +22,7 @@ Blaze On, Wing Force) are **not** shipped as MRAs, because loading one would
 produce a broken picture rather than a game. They arrive when the per-game
 configuration table does.
 
-## Not finished, as of `Kaneko16_20260821.rbf`
+## Not finished, as of `Kaneko16_20260822.rbf`
 
 This list describes the RBF named above. Every entry is removed in the same
 change as the RBF that fixes it, so if an item is still here it is still true
