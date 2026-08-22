@@ -4970,3 +4970,53 @@ A check that has never been shown to fail is not a check.
 `make mra` already does this for the MRA against the same tables, for the same
 reason: a region misplaced there loads without error and surfaces much later as
 garbage. This is that guard one layer further in.
+
+### The sprite clip was Explosive Breaker's screen, hardcoded
+
+```
+  .clip_x0(10'd0), .clip_x1(10'd255),
+  .clip_y0(10'd16), .clip_y1(10'd239),
+```
+
+MAME clips sprite drawing to the visible area, and the visible area is per
+game. This was Explosive Breaker's, applied to everything. On the Blaze On
+board — 320 wide, starting at line 0 — sprites lost their last 64 columns and
+their top 16 rows.
+
+On hardware that read as sprites about a sixteenth of the screen too low and an
+eighth too early, drawn half-complete at the boundary. 16 of 232 IS a
+sixteenth, which is what identified it: the number was not approximately
+something, it was exactly the difference between the two boards' `v_start`.
+
+Now derived from `CFG_H_VIS`, `CFG_V_START` and `CFG_V_VIS`, so the clip cannot
+drift from the screen it clips to.
+
+### A toggle that fixes something is a reset that came too early
+
+Blaze On showed no sprites at all until the OSD sprite switch was turned off
+and back on. `spr_off` holds `kaneko_spr_sys` in reset, so toggling it re-reset
+the module — after the ROM had finished loading.
+
+The instance used `rst_sys`, which does NOT include `~rom_loaded`; `cpu_rst`
+does. Released on `rst_sys` alone the sprite system began parsing sprite RAM
+and fetching sprite ROM before anything was in SDRAM, latched state from what
+it read, and never recovered. Now `cpu_rst | spr_off`.
+
+Worth keeping as a diagnostic shape: **a switch that makes a broken thing work
+is almost always re-running an initialisation that happened at the wrong
+time.** It was reported as "I have to turn the sprites off and then back on for
+them to appear" and that sentence contains the whole diagnosis.
+
+### Three symptoms, three separate bugs, none reachable from simulation
+
+```
+  no sprites in Wing Force        base_spr pointed into its own tile ROM
+  both games displaced alike      the clip rectangle was another game's
+  toggle to make them appear      the reset came before the ROM load
+```
+
+Each was diagnosed from one sentence of hardware observation, and none of the
+three is visible to the frame gate: the gate loads VRAM and sprite RAM
+directly, never runs the loader, and composites with its own clip. This is the
+same blind spot recorded above — the gate proves the renderer, not the path
+that feeds it.

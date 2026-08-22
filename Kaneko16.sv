@@ -1183,7 +1183,13 @@ kaneko_spr_sys #(
 	.BMP_W(320), .BMP_H(256), .SPRITES(1024), .SDR_AW(SDR_AW)
 ) u_spr
 (
-	.clk(clk_sys), .rst(rst_sys | spr_off),
+	// cpu_rst, NOT rst_sys: cpu_rst adds ~rom_loaded. Released on rst_sys
+	// alone the sprite system starts parsing and fetching before the ROM is in
+	// SDRAM, latches state from whatever it read, and never recovers. The
+	// symptom was Blaze On showing no sprites at all until the OSD sprite
+	// switch was toggled off and on, which re-reset it after the load had
+	// finished. A toggle that fixes something is a reset that came too early.
+	.clk(clk_sys), .rst(cpu_rst | spr_off),
 	.frame_start(vbl_rise),
 	.keep_sprites(keep_sprites),
 	.skip_en(~status[15]),
@@ -1192,9 +1198,19 @@ kaneko_spr_sys #(
 	.sprite_xoffs(SPR_XOFFS_CFG), .sprite_yoffs(SPR_YOFFS_CFG),
 	.visarea_min_y(SPR_MIN_Y),
 	.wide_screen(SPR_WIDE), .fliptype(SPR_FLIPTYPE),
-	// MAME clips sprite drawing to the visible area.
-	.clip_x0(10'd0), .clip_x1(10'd255),
-	.clip_y0(10'd16), .clip_y1(10'd239),
+	// MAME clips sprite drawing to the visible area — and the visible area is
+	// PER GAME. This was hardcoded to Explosive Breaker's 0..255 / 16..239, so
+	// on the Blaze On board, which is 320 wide and starts at line 0, sprites
+	// lost their last 64 columns and their top 16 rows. On hardware that read
+	// as sprites sitting about a sixteenth of the screen too low (16 of 232)
+	// and appearing an eighth too early, drawn half-complete at the boundary —
+	// in Blaze On and Wing Force identically, which is what said it was shared
+	// code and not per-game data.
+	//
+	// Derived from the geometry the game table already publishes, so it cannot
+	// drift from the screen it is clipping to.
+	.clip_x0(10'd0), .clip_x1(CFG_H_VIS - 10'd1),
+	.clip_y0(CFG_V_START), .clip_y1(CFG_V_START + CFG_V_VIS - 10'd1),
 
 	.ram_addr(spr_ram_addr), .ram_data(spr_ram_q),
 	.regs_flat(sprreg_flat),
