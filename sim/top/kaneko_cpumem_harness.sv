@@ -329,6 +329,10 @@ module kaneko_cpumem_harness #(
         .v2r0_q(16'h0000), .v2r1_q(16'h0000), .sprreg_q(16'h0000),
 
         .in_p1(16'hffff), .in_p2(16'hffff),
+        // Explicit, not left unconnected. An unconnected input ties to 0, and
+        // page 0x00 is where the ROM lives — the sound latch would decode on
+        // top of the reset vector. 0xff is the "no such window" sentinel.
+        .pg_snd(8'hff),
         .in_system(16'hffff), .in_unk(16'hffff),
 
         .unmapped_hit(unmapped_hit), .unmapped_addr(unmapped_addr)

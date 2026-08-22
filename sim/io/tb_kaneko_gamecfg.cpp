@@ -47,14 +47,17 @@ struct Cfg {
     uint16_t pri, count, xoffs;
     uint16_t min_y;
     uint16_t h_vis, v_vis, v_start, hsync;   // set_visarea()
+    uint8_t  snd;                            // sound-latch page, 0xff = none
+    bool     z80;
+    uint32_t z80base;                        // word address of audiocpu
 };
 
 const Cfg GAMES[] = {
-  // name        id  wram v2w0 v2w1 spr  pal wdog  in    dx   dy  2pri 2chip wide   pri  count  xoffs min_y
-  { "explbrkr",  0, 0x10,0x50,0x58,0x60,0x70,0xa8,0xe0,  91,  -8, true , true , false,0x8888,1024,0x0000, 16, 256,224,16,296 },
-  { "mgcrystl",  1, 0x30,0x60,0x68,0x70,0x50,0xa0,0xc0,  91,  -8, false, true , false,0x7532,1024,0x0000, 16, 256,224,16,296 },
-  { "blazeonj",  2, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   8, false, false, true ,0x8821, 512,0xf980,  0, 320,232, 0,336 },
-  { "wingforc",  3, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   9, false, false, true ,0x8821, 512,0xf980,  0, 320,224, 0,336 },
+  // name        id  wram v2w0 v2w1 spr  pal wdog  in    dx   dy  2pri 2chip wide   pri  count  xoffs min_y   geometry     snd  z80  z80base
+  { "explbrkr",  0, 0x10,0x50,0x58,0x60,0x70,0xa8,0xe0,  91,  -8, true , true , false,0x8888,1024,0x0000, 16, 256,224,16,296, 0xff,false,0x200000 },
+  { "mgcrystl",  1, 0x30,0x60,0x68,0x70,0x50,0xa0,0xc0,  91,  -8, false, true , false,0x7532,1024,0x0000, 16, 256,224,16,296, 0xff,false,0x200000 },
+  { "blazeonj",  2, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   8, false, false, true ,0x8821, 512,0xf980,  0, 320,232, 0,336, 0xe0,true ,0x200000 },
+  { "wingforc",  3, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   9, false, false, true ,0x8821, 512,0xf980,  0, 320,224, 0,336, 0xe0,true ,0x2c0000 },
 };
 
 void verify(const Cfg& g) {
@@ -95,6 +98,17 @@ void verify(const Cfg& g) {
     CK(d->h_sync_start >= d->h_vis,   "sync starts after the visible width");
     CK(d->h_sync_start + 32 <= 384,   "sync ends inside the horizontal total");
     CK(d->v_start + d->v_vis <= 264,  "the window fits the vertical total");
+    CK(d->pg_snd  == g.snd,           "pg_snd");
+    CK(d->has_z80 == g.z80,           "has_z80");
+    CK(d->base_z80 == g.z80base,      "base_z80");
+    // The sound-latch window must not collide with a real one. On this board
+    // 0xff is the "no such window" sentinel and pg_wdog uses it too, but a
+    // board WITH a latch must place it somewhere nothing else claims.
+    if (g.z80) {
+        CK(d->pg_snd != d->pg_wram && d->pg_snd != d->pg_pal &&
+           d->pg_snd != d->pg_v2w0 && d->pg_snd != d->pg_spr &&
+           d->pg_snd != d->pg_in,     "pg_snd collides with another window");
+    }
     #undef CK
 }
 

@@ -44,7 +44,8 @@ module kaneko_gamecfg #(
 
     // ---- memory map, a[23:16] of each window that moves
     output wire [7:0]  pg_wram, pg_v2w0, pg_v2w1, pg_spr, pg_pal,
-    output wire [7:0]  pg_wdog, pg_in,
+    output wire [7:0]  pg_wdog,
+    output wire [7:0]  pg_snd, pg_in,
 
     // ---- SDRAM region bases, WORD addresses (half the byte offset)
     output wire [SDR_AW:1] base_trom0, base_trom1, base_spr, base_oki,
@@ -70,7 +71,11 @@ module kaneko_gamecfg #(
     // The input words are ASSEMBLED differently, not merely relocated, so this
     // selects a wiring rather than supplying a number. See the note in the top
     // level.
-    output wire        inputs_blazeon
+    output wire        inputs_blazeon,
+
+    // Z80 sound ROM, word address, and whether the board has a Z80 at all.
+    output wire [SDR_AW-1:0] base_z80,
+    output wire        has_z80
 );
 
     localparam [7:0] CFG_INDEX = 8'd1;
@@ -103,6 +108,10 @@ module kaneko_gamecfg #(
     // are parked on a page nothing uses rather than left aliasing a real one.
     assign pg_v2w1 = blazeon_board ? 8'hff : is_mg ? 8'h68 : 8'h58;
     assign pg_wdog = blazeon_board ? 8'hff : is_mg ? 8'ha0 : 8'ha8;
+
+    // The sound latch to the Z80 exists on the Blaze On board only. 0xff is
+    // "no such window" — the same sentinel pg_wdog and pg_v2w1 use.
+    assign pg_snd  = blazeon_board ? 8'he0 : 8'hff;
 
     // --------------------------------------------------- SDRAM bases
     // explbrkr's are a FIXED CONTRACT: its shipped MRA already uses them.
@@ -149,6 +158,11 @@ module kaneko_gamecfg #(
     assign h_sync_start = blazeon_board ? 10'd336 : 10'd296;
 
     assign inputs_blazeon = blazeon_board;
+
+    // audiocpu, from the SDRAM layout in tools/build_rom_regions.py. Byte
+    // 0x400000 and 0x580000 respectively; these are word addresses, so half.
+    assign base_z80 = is_wf ? SDR_AW'(25'h2c0000) : SDR_AW'(25'h200000);
+    assign has_z80  = blazeon_board;
 endmodule
 
 `default_nettype wire

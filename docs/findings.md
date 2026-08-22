@@ -4113,3 +4113,53 @@ wingforc        600        0 100.0000%
 `SUPPORTED` now carries `explbrkr`, `blazeonj` and `wingforc`. Both new titles
 run **silent** — the Blaze On board is Z80 + YM2151 and neither is wired. That
 is a stated limitation, not a bug, and it is the next piece of work.
+
+### The Z80 program ROM goes in block RAM, not on an SDRAM port
+
+`kaneko_z80snd`'s ROM contract is "data one clock after the address". That is
+what a Z80 fetch wants and it is not something SDRAM can offer. Every other ROM
+consumer in this core either bursts ahead with a scanline of slack (the tile
+and sprite fetchers) or stalls its CPU through DTACK (the 68000). The Z80 has
+no wait state wired, so serving it from SDRAM would mean inventing one, adding
+a ninth port and a cache — to deliver 48 KB that fits in 39 M10K blocks.
+
+So `kaneko_z80rom.sv` holds it in block RAM and fills it by **snooping the
+loader's SDRAM write port** during download. The tap is already the final
+address and the final data, so nothing in there has to know what the MRA
+emitted or in what order. Cost is 393,216 bits, about 7% of the device.
+
+Byte order was derived rather than guessed, because all three ways of getting
+it wrong produce a ROM of exactly the right size:
+
+    the loader stores stream byte N at SDRAM byte N and does not swap
+    the 68000 path reads {W[7:0], W[15:8]} to get a big-endian word
+    a big-endian word at even address A is {byte[A], byte[A+1]}
+    => byte[A] = W[7:0]   and   byte[A+1] = W[15:8]
+
+The harness fills all 49152 bytes with a pattern whose period is not 256 — a
+plain ramp cannot distinguish an offset of 256 bytes from no offset at all —
+surrounds the region with words that must not land, and reads every byte back.
+
+### The sound latch is the EVEN byte, and reads of it are an IRQ acknowledge
+
+    map(0xe00000, 0xe00001).nopr();                     // "Read = IRQ Ack ?"
+    map(0xe00000, 0xe00000).w(m_soundlatch, ...);       // EVEN byte only
+
+An even byte on a big-endian 68000 is the UPPER half of the word, so the write
+is qualified by UDS and never by LDS. Taking a word write as two bytes would
+send the low half as a second, spurious command. The read side is decoded and
+given a value of zero, because a decoded address that returns nothing has cost
+this core three separate sessions.
+
+### An unconnected harness input is the same bug as a default
+
+Adding `pg_snd` to `kaneko_bus` surfaced that the CPU harnesses connect NONE of
+the `pg_*` window pages — they tie to 0 and every window decodes at page 0x00,
+which is where the ROM lives. Those harnesses only exercise ROM reads and
+unmapped accesses, so it has never mattered, but a new page defaulting to 0
+would have put the sound latch on top of the reset vector.
+
+`pg_snd` is now driven explicitly in both harnesses. **The remaining pages are
+still unconnected and should be wired to a real game's map**; that is left as
+its own change because it will move the CPU gate's `unmapped` count and that
+number wants moving deliberately, not as a side effect.

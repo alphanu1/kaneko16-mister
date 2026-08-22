@@ -107,6 +107,14 @@ module kaneko_bus #(
     output wire  [7:0]  oki_din,
     input  wire  [7:0]  oki_dout,
 
+    // Sound latch to the Z80, on the Blaze On board only. MAME maps it as
+    // map(0xe00000, 0xe00000).w(soundlatch) — the EVEN byte of the word, so it
+    // is qualified by UDS and never by LDS. The odd byte at 0xe00001 is not the
+    // latch, and taking a word write as two bytes would send the low half as a
+    // second, spurious command.
+    output logic        snd_we,
+    output wire  [7:0]  snd_din,
+
     output logic        v2r0_we, v2r1_we, sprreg_we,
     output logic [3:0]  reg_addr,
     output logic [15:0] reg_din,
@@ -117,7 +125,7 @@ module kaneko_bus #(
 
     // Per-game window pages, from the game table in the top level.
     input  wire [7:0]   pg_wram, pg_v2w0, pg_v2w1, pg_spr, pg_pal,
-    input  wire [7:0]   pg_wdog, pg_in,
+    input  wire [7:0]   pg_wdog, pg_in, pg_snd,
 
     // Observability. An unmapped access is acknowledged so the CPU cannot hang
     // on it, but it must not pass silently.
@@ -171,10 +179,11 @@ module kaneko_bus #(
     wire sel_v2r1  = (a[23:5]  == 19'h58000);                   // b00000-b0001f
     wire sel_ctrl  = (a[23:1]  == 23'h680000);                  // d00000/1
     wire sel_in    = (a[23:16] == pg_in)   && (a[15:3] == 13'd0);
+    wire sel_snd   = (a[23:16] == pg_snd)  && (a[15:1] == 15'd0);
 
     wire decoded = sel_rom | sel_wram | sel_ym0 | sel_ym1 | sel_oki | sel_v2w0
                  | sel_v2w1 | sel_spr | sel_pal | sel_v2r0 | sel_sprr | sel_wdog
-                 | sel_v2r1 | sel_ctrl | sel_in;
+                 | sel_v2r1 | sel_ctrl | sel_in  | sel_snd;
 
     // ---------------------------------------------------------- work RAM
     // 64 KB as 32k x 16, held as TWO BYTE-WIDE ARRAYS rather than one 16-bit
@@ -218,6 +227,8 @@ module kaneko_bus #(
     assign ym_din    = ~LDSn ? oEdb[7:0] : oEdb[15:8];
     assign eeprom_din = oEdb[7:0];
     assign oki_din    = oEdb[7:0];
+    // The EVEN byte of the word, which on a big-endian 68000 is the UPPER half.
+    assign snd_din    = oEdb[15:8];
 
     // ---------------------------------------------------------- sequencing
     typedef enum logic [1:0] { S_IDLE, S_ROM, S_DONE } state_t;
@@ -282,7 +293,7 @@ module kaneko_bus #(
         vram0_we <= 1'b0; vram1_we <= 1'b0; spr_we <= 1'b0; pal_we <= 1'b0;
         v2r0_we  <= 1'b0; v2r1_we  <= 1'b0; sprreg_we <= 1'b0;
         ym0_we   <= 1'b0; ym1_we   <= 1'b0; eeprom_we <= 1'b0;
-        oki_we   <= 1'b0;
+        oki_we   <= 1'b0; snd_we <= 1'b0;
         unmapped_hit <= 1'b0;
 
         if (rst) begin
@@ -330,6 +341,7 @@ module kaneko_bus #(
                                 // EEPROM; the high byte is coin lockout.
                                 eeprom_we <= sel_ctrl && ~LDSn;
                                 oki_we    <= sel_oki  && ~LDSn;
+                                snd_we    <= sel_snd  && ~UDSn;
                             end
                             // Everything else answers in one cycle, INCLUDING
                             // addresses nothing decodes — a 68000 waiting on a
@@ -430,6 +442,10 @@ module kaneko_bus #(
         // silently restarted would be far harder to attribute than one that
         // hangs. Revisit when the game runs.
         else if (sel_wdog) iEdb = 16'h0000;
+        // A read of e00000 is an IRQ acknowledge on this board, not the latch:
+        // MAME has it as nopr(). It needs a VALUE, though — a decoded address
+        // that returns nothing has cost this core three sessions already.
+        else if (sel_snd)  iEdb = 16'h0000;
         else if (sel_in)   iEdb = (a[2:1] == 2'd0) ? in_p1
                                 : (a[2:1] == 2'd1) ? in_p2
                                 : (a[2:1] == 2'd2) ? in_system : in_unk;
