@@ -42,9 +42,10 @@ of the newest build in this directory.
 
 The VIEW2 chip draws its second tilemap layer two pixels further along than the
 first — real hardware behaviour, which the game cancels by writing that layer's
-scroll two lower. `Layer1 dx +2` in the OSD removes the offset, as a diagnostic
-for a two-pixel ghost reported on the Blaze On board. Leave it **On**; Off is
-wrong for every game that behaves.
+scroll two lower. `Layer1 dx` in the OSD selects that offset — `+2` (MAME's value, the default),
+`0`, `-2` or `+4` — as a diagnostic for a two-pixel misalignment reported on
+the Blaze On board. Leave it at **+2**; the others are wrong for every game
+that behaves.
 
 ## The debug overlay
 

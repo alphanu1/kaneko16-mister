@@ -5254,3 +5254,35 @@ the two layers two pixels apart. `O[21] Layer1 dx +2` removes the offset at run
 time so the question can be settled by looking. It is a switch and not an edit
 because the offset is correct per MAME and Explosive Breaker depends on it;
 hard rule 9 forbids quietly tuning it until one game looks right.
+
+### The two-pixel offset is a FOUR-WAY switch now, because the sign is unproven
+
+Hardware observations, with the +2 toggled on three games:
+
+```
+  the +2 IS applied          layer 1 visibly moves in all three games
+  the doubled TEXT is not    layer 1 is not involved in it
+    a two-layer artefact
+  Explosive Breaker          does not stack layers for one image, which is why
+                             it never showed this
+  Wing Force                 copyright screen and Atlas logo ARE two layers,
+                             and they are misaligned; the reported direction is
+                             that layer 1 needs to be two pixels the OTHER way
+```
+
+That last point matters more than it looks. If `-2` is right, **MAME's inferred
+sign is backwards** — the chip offsets layer 1 the opposite way to what the
+author assumed from Great 1000 Miles Rally's scroll registers. The register
+evidence fits either reading: `$72c0` and `$7340` differ by 2 whichever
+direction the hardware shifts, so the observation that produced the inference
+cannot distinguish them.
+
+Nobody has checked it against a PCB. `O[23:21]` now offers `+2` (MAME's value
+and the default), `0`, `-2` and `+4`, so the question is answered by looking
+rather than by me getting a sign right in prose — which I failed at twice in a
+row while the owner, looking at the screen, did not.
+
+The test that decides it is Explosive Breaker on whichever setting fixes Wing
+Force. Both correct on one value is a genuine correction to MAME. One fixed and
+one broken means the offset is right and something game-specific is wrong,
+which is a narrower hunt.

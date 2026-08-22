@@ -78,8 +78,8 @@ the ordinal numbering has moved more than once.
 | 5th | 16 | white | **sprite** passes that did not finish before the next frame |
 | 6th | 16 | magenta | live joystick 1 word — bit 0 at the right |
 
-`Layer1 dx +2` in the OSD removes the two-pixel offset the VIEW2 chip applies
-to its second tilemap layer. The offset is correct — MAME sets
+`Layer1 dx` in the OSD selects the offset the VIEW2 chip applies to its second
+tilemap layer: `+2` (what MAME does and the default), `0`, `-2` or `+4`. The offset is correct — MAME sets
 `set_scrolldx(-(m_dx+2))` for `tmap[1]` and the game cancels it by writing that
 layer's scroll two lower — so this is a diagnostic for a reported two-pixel
 ghost on the Blaze On board, not a setting to leave on.

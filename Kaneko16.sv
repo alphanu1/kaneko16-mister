@@ -73,7 +73,7 @@ localparam CONF_STR = {
 	"O[16],Sprites,On,Off;",
 	"O[17],Tilemaps,On,Off;",
 	"O[20:19],Game override,Off(MRA),1 Magical Crystals,2 Blaze On,3 Wing Force;",
-	"O[21],Layer1 dx +2,On,Off;",
+	"O[23:21],Layer1 dx,+2 (MAME),0,-2,+4;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
@@ -1029,7 +1029,22 @@ end
 // A switch, not an edit: the offset is correct per MAME and Explosive Breaker
 // depends on it, so it must not be quietly removed to make one game look
 // right — hard rule 9.
-wire signed [10:0] l1_dx = status[21] ? V2_DX_CFG : 11'(V2_DX_CFG + 11'sd2);
+// FOUR POSITIONS, so the answer can be found by looking instead of by me
+// getting the sign right in prose — which I have not managed twice running.
+//
+//   +2   what MAME does, and what the code has always done
+//    0   no offset at all
+//   -2   the opposite offset
+//   +4   twice MAME's
+//
+// Larger dx makes the layer sample further right in the tilemap, so the IMAGE
+// moves LEFT. Whichever position makes Blaze On's copyright screen and Atlas
+// logo line up is the measurement; the difference from +2 is the bug.
+wire signed [10:0] l1_dx =
+      (status[23:21] == 3'd1) ? V2_DX_CFG
+    : (status[23:21] == 3'd2) ? 11'(V2_DX_CFG - 11'sd2)
+    : (status[23:21] == 3'd3) ? 11'(V2_DX_CFG + 11'sd4)
+                              : 11'(V2_DX_CFG + 11'sd2);
 wire [43:0] lay_dx = { 11'(l1_dx), 11'(V2_DX_CFG),
                        11'(l1_dx), 11'(V2_DX_CFG) };
 wire [43:0] lay_dy = { 11'(V2_DY_CFG), 11'(V2_DY_CFG), 11'(V2_DY_CFG), 11'(V2_DY_CFG) };
