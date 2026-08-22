@@ -139,7 +139,15 @@ module kaneko_gamecfg #(
     // explbrkr's are a FIXED CONTRACT: its shipped MRA already uses them.
     assign base_trom0 = blazeon_board ? SDR_AW'(25'h080000) : SDR_AW'(25'h040000);
     assign base_trom1 = SDR_AW'(25'h0c0000);          // two-chip games only
-    assign base_spr   = blazeon_board ? SDR_AW'(25'h100000) : SDR_AW'(25'h140000);
+    // PER GAME, NOT PER BOARD. Blaze On and Wing Force share a PCB but not an
+    // SDRAM layout: Wing Force's view2_0 is twice the size, so its kan_spr
+    // starts at byte 0x300000 where Blaze On's starts at 0x200000. Selecting
+    // this on `blazeon_board` pointed Wing Force's sprite fetcher into the
+    // middle of its own tile ROM, and it drew no sprites at all on hardware
+    // while Blaze On drew them. Hard rule 9: the board is not the game.
+    assign base_spr   = is_wf ? SDR_AW'(25'h180000)     // byte 0x300000
+                      : is_bz ? SDR_AW'(25'h100000)     // byte 0x200000
+                              : SDR_AW'(25'h140000);    // byte 0x280000
     assign base_oki   = is_wf ? SDR_AW'(25'h280000)
                       : is_mg ? SDR_AW'(25'h280000) : SDR_AW'(25'h260000);
 

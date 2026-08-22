@@ -4930,3 +4930,43 @@ Sprite displacement of roughly 40px on a 320-wide screen, with half-drawn
 sprites, suggests 256-wide assumptions surviving in the sprite clip or wrap —
 `spr_xoffs` is 0xF980 from MAME's `set_offsets(0x10000 - 0x680, 0)` and is
 applied, so it is not that constant.
+
+### Wing Force's sprite base pointed into its own tile ROM
+
+Two reports, one fault: no sprites when loaded from its MRA, and "completely
+wrong ones" under the OSD override. Both are what reading the wrong SDRAM
+region looks like.
+
+```
+             kan_spr     base_spr said
+  explbrkr   0x280000    0x280000  ok
+  mgcrystl   0x280000    0x280000  ok
+  blazeonj   0x200000    0x200000  ok
+  wingforc   0x300000    0x200000  <- inside view2_0
+```
+
+`base_spr` was selected on `blazeon_board`. Blaze On and Wing Force share a
+PCB and NOT an SDRAM layout — Wing Force's view2_0 is twice the size, which
+pushes kan_spr from 0x200000 to 0x300000. So Wing Force's sprite fetcher read
+the middle of its own tile ROM and drew tile graphics as sprites, while Blaze
+On drew its sprites correctly and the pair looked like two different bugs.
+
+Hard rule 9, again, and in its sharpest form yet: **the board is not the game.**
+Every other Blaze On board fact — one VIEW2 chip, 512 sprites, the input word
+order, the memory-map pages — genuinely is per board. This one is not, and
+being right about the others is what made it invisible.
+
+### tools/check_bases.py
+
+The RTL repeats the ROM tool's SDRAM layout as WORD addresses in
+`kaneko_gamecfg.sv`, and nothing compared the two descriptions. Now `make lint`
+cross-checks `base_trom0`, `base_trom1`, `base_spr` and `base_oki` against
+`SDRAM_MAPS` for every game.
+
+Verified against the bug it was written for — run on the old RTL it prints
+`wingforc: base_spr must include word 0x180000 (byte 0x300000) for kan_spr`.
+A check that has never been shown to fail is not a check.
+
+`make mra` already does this for the MRA against the same tables, for the same
+reason: a region misplaced there loads without error and surfaces much later as
+garbage. This is that guard one layer further in.

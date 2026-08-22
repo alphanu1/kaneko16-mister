@@ -191,6 +191,12 @@ lint:
 	@$(VERILATOR) --lint-only $(VFLAGS) $(RTL) >/dev/null 2>&1 || { \
 	  $(VERILATOR) --lint-only $(VFLAGS) $(RTL); echo "LINT FAILED"; exit 1; }
 	@echo "lint: $(words $(RTL)) file(s) clean"
+	@# The RTL repeats the ROM layout's addresses as word bases. Nothing
+	@# checked they agreed, and they drifted: base_spr was chosen on
+	@# blazeon_board, but Blaze On and Wing Force share a PCB and not a
+	@# layout, so Wing Force's sprite fetcher read its own tile ROM and drew
+	@# the wrong sprites. Same class as the MRA/SDRAM-map check in `make mra`.
+	@tools/check_bases.py
 # Linted as one set rather than file by file. Modules now span files —
 # kaneko_tmap_fetch instantiates the address blocks that live in
 # kaneko_tmap.sv — and a per-file lint cannot resolve those. Verilator still
