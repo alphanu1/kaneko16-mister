@@ -94,8 +94,11 @@ The four yellow rows are a **chain**, in order. Each one rules out everything
 above it, so the first dark row is where the sound path breaks. All four lit
 and no audio means the fault is past the chip, in the mixing or output stage.
 
-**That block is currently the OKI chain**, restored on 2026-08-22 to chase Wing
-Force's missing sound effects. It had been carrying the VIEW2 scroll probe;
+**That block is currently the Z80 sound-port census** — per frame: YM2151
+writes, YM2151 status reads, OKI writes, and 4 MHz ticks lost to a ROM-cache
+stall (saturating at `ffff`). Compare against `tools/mame_z80_ports.lua` run on
+the same title. It carried the OKI chain for one build before this, which
+showed that path to be correct. It had been carrying the VIEW2 scroll probe;
 that probe answered its question — the raw scroll registers read back
 7340/72c0 on hardware, exactly MAME — and the tile fault it was chasing is
 parked, so the rows went back to their default. Whenever it is repurposed, this

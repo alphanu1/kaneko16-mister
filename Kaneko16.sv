@@ -921,6 +921,59 @@ end
 // the chip starts a channel and produces samples. So every link below is
 // known good against an ideal sample ROM, and whichever row goes dark on
 // hardware is the one the model does not capture.
+// Z80 SOUND-PORT CENSUS, to diff against MAME's on the same title.
+//
+// tools/mame_z80_ports.lua counts the same four things in the oracle. For
+// Wing Force it reports, per second: the YM2151 written 232-540 times and its
+// status polled about 7,000, continuously, in menu AND demo; the OKI written
+// only during the demo. Per frame that is roughly:
+//
+//            YM writes   YM status reads   OKI writes
+//   menu         8            120               0
+//   demo        18            107               0-1
+//
+// Numbers far below those mean the Z80 is not getting through its driver
+// loop; near zero means it is not running at all. The fourth row is how many
+// 4 MHz ticks were LOST to a ROM-cache stall, saturating, which says whether
+// the cause is the cache this session introduced.
+wire        z80_io_wr = ~z80_iorq_n && ~z80_wr_n;
+wire        z80_io_rd = ~z80_iorq_n && ~z80_rd_n;
+reg         z80_io_wr_d, z80_io_rd_d;
+always @(posedge clk_sys) begin
+	z80_io_wr_d <= z80_io_wr;
+	z80_io_rd_d <= z80_io_rd;
+end
+// Edges, because the Z80 holds its strobes for a whole 4 MHz bus cycle -- a
+// dozen clk_sys ticks -- and a level would count each access twelve times and
+// be incomparable with MAME's per-access figures.
+wire        z80_io_wr_e = z80_io_wr && !z80_io_wr_d;
+wire        z80_io_rd_e = z80_io_rd && !z80_io_rd_d;
+wire [7:0]  z80_port    = z80_a[7:0];
+
+reg [15:0] z80_ymw_cnt,  z80_ymw_lat;
+reg [15:0] z80_ymr_cnt,  z80_ymr_lat;
+reg [15:0] z80_okiw_cnt, z80_okiw_lat;
+reg [15:0] z80_stl_cnt,  z80_stl_lat;
+always @(posedge clk_sys) begin
+	if (rst_sys) begin
+		z80_ymw_cnt <= 0; z80_ymr_cnt <= 0; z80_okiw_cnt <= 0; z80_stl_cnt <= 0;
+		z80_ymw_lat <= 0; z80_ymr_lat <= 0; z80_okiw_lat <= 0; z80_stl_lat <= 0;
+	end else if (vbl_rise) begin
+		z80_ymw_lat  <= z80_ymw_cnt;  z80_ymw_cnt  <= 0;
+		z80_ymr_lat  <= z80_ymr_cnt;  z80_ymr_cnt  <= 0;
+		z80_okiw_lat <= z80_okiw_cnt; z80_okiw_cnt <= 0;
+		z80_stl_lat  <= z80_stl_cnt;  z80_stl_cnt  <= 0;
+	end else begin
+		if (z80_io_wr_e && (z80_port[7:1] == 7'h01)) z80_ymw_cnt  <= z80_ymw_cnt  + 1'd1;
+		if (z80_io_rd_e && (z80_port[7:1] == 7'h01)) z80_ymr_cnt  <= z80_ymr_cnt  + 1'd1;
+		if (z80_io_wr_e && (z80_port      == 8'h0a)) z80_okiw_cnt <= z80_okiw_cnt + 1'd1;
+		// Saturating: a fully starved Z80 loses far more than 65535 ticks a
+		// frame, and a wrapped counter would read as a healthy small number.
+		if ((z80_cediv == 4'd0) && z80_stall && !(&z80_stl_cnt))
+			z80_stl_cnt <= z80_stl_cnt + 1'd1;
+	end
+end
+
 reg        oki_we_eff_d;
 always @(posedge clk_sys) oki_we_eff_d <= oki_we_eff;
 reg [15:0] oki_wr_cnt, oki_wr_lat;
@@ -1652,37 +1705,35 @@ wire       irq_set = irq_cnt_lat[irq_bit];
 wire in_oki_row = (screen_y >= 9'd40) && (screen_y < 9'(40 + 24))
                && (screen_x < 9'(16 * ALV_BIT_W));
 wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
-// RESTORED TO THE OKI CHAIN, 2026-08-22, for Wing Force's missing effects.
+// THE Z80 SOUND-PORT CENSUS, 2026-08-22. Was the OKI chain for one build.
 //
-// The block is a scratch area and has carried, in order: the OKI chain, the
-// CPU's last bus address, the exception vector number, the unmapped address,
-// and the VIEW2 scroll probe. The scroll probe answered its question -- the
-// raw registers read back 7340/72c0 on hardware, exactly MAME -- and the tile
-// fault it was chasing is parked, so the rows go back to what the README calls
-// their default.
+// That build answered its question: the OKI rows lit whenever Wing Force made
+// any sound and were dark when it did not, so the whole OKI path -- writes,
+// sample fetch, channel busy, non-zero output -- is correct and driven. The
+// fault is upstream, in the Z80 not producing sound at all at those moments,
+// and Wing Force's music is the YM2151 rather than the OKI (MAME writes the YM
+// 232-540 times a second continuously; the OKI only during the demo).
 //
-// Wing Force plays music and no effects. Music is the YM2151 on the Z80, so
-// the Z80, its ROM cache, the latch and the YM are all proven; the OKI is the
-// only part of that board's sound path not exercised by the working half. It
-// is also the only board where the OKI hangs off the Z80's I/O ports rather
-// than the 68000's bus, and every one of those is a per-game fact set this
-// session.
+// So the rows now count what the Z80 actually does, to diff against
+// tools/mame_z80_ports.lua on the same title. Expected per frame, from MAME:
 //
-//   row 4  writes reaching the chip   from whichever CPU drives it
-//   row 5  sample-ROM fetches answered
-//   row 6  clocks with a channel flagged busy
-//   row 7  clocks with a non-zero sample
+//   row 4  YM2151 writes        menu ~8    demo ~18
+//   row 5  YM2151 status reads  menu ~120  demo ~107
+//   row 6  OKI writes           menu 0     demo 0-1
+//   row 7  4 MHz ticks LOST to a ROM-cache stall, saturating at ffff
 //
-// The first dark row is the break, and each rules out everything above it.
-// Row 4 dark means the Z80 is not writing the chip, or has_oki/the port decode
-// is wrong. Row 4 lit and 5 dark means the writes land but the sample fetch
-// does not, which points at base_oki or the bank. 6 dark with 5 lit means the
-// chip is fetching but never accepted a play command. 7 dark with 6 lit is a
-// clocking fault -- oki_cen_half makes this board's chip 1 MHz, not 2.
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? oki_wr_lat
-                        : (screen_y < 9'd52) ? oki_ok_lat
-                        : (screen_y < 9'd58) ? oki_busy_lat
-                                             : oki_snd_lat;
+// Rows 4-6 near MAME's numbers with no sound means the chips are being driven
+// and the fault is past them. All three near zero means the Z80 is not getting
+// round its loop -- and row 7 says whether the cache this session introduced
+// is why. Row 7 saturated is the smoking gun for that; row 7 small clears it.
+//
+// Blaze On is NOT a control for this. Its music and effects sound right, which
+// is not the same as being complete, and nobody has compared it against
+// anything. Run the census there too.
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? z80_ymw_lat
+                        : (screen_y < 9'd52) ? z80_ymr_lat
+                        : (screen_y < 9'd58) ? z80_okiw_lat
+                                             : z80_stl_lat;
 wire       oki_set = oki_row_val[oki_bit];
 
 // Row 9, magenta: the RAW joystick word for pad 1, live — not a per-frame

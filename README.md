@@ -85,17 +85,23 @@ tilemap layer: `+2` (what MAME does and the default), `0`, `-2` or `+4`. The off
 layer's scroll two lower — so this is a diagnostic for a reported two-pixel
 ghost on the Blaze On board, not a setting to leave on.
 
-**The tall block is a scratch area.** It is currently the OKI sound chain,
-which is its default, restored on 2026-08-22 to chase Wing Force's missing
-sound effects. The first dark row is where the sound path breaks, and each row
-rules out everything above it:
+**The tall block is a scratch area.** It is currently the **Z80 sound-port
+census**, for diffing against `tools/mame_z80_ports.lua` on the same title. The
+OKI chain lived here for one build and answered its question — the rows lit
+whenever Wing Force made any sound and were dark otherwise, so the OKI path is
+correct and the fault is upstream in the Z80.
 
 | Sub-row | Shows |
 |---|---|
-| 1st | Writes reaching the chip, from whichever CPU drives it — the 68000 at `400401`, or the Z80's port `0a` on Wing Force |
-| 2nd | Sample-ROM fetches the feeder answered |
-| 3rd | Clocks with a channel flagged busy — the chip accepted a play command |
-| 4th | Clocks where the chip produced a non-zero sample |
+| 1st | Z80 writes to the YM2151 (ports `02`/`03`), per frame. MAME's Wing Force: ~8 in the menu, ~18 in the demo |
+| 2nd | Z80 reads of the YM2151 status (port `03`), per frame. MAME: ~120 menu, ~107 demo — the driver polls it hard |
+| 3rd | Z80 writes to the OKI (port `0a`), per frame. MAME: 0 in the menu, 0–1 in the demo |
+| 4th | 4 MHz Z80 ticks LOST to a ROM-cache stall, per frame, **saturating at `ffff`** |
+
+Rows 1–3 near MAME's numbers while the game is silent means the chips are being
+driven and the fault is past them. All three near zero means the Z80 is not
+getting round its driver loop, and row 4 says whether the ROM cache is why:
+saturated at `ffff` implicates it, small clears it.
 
 It has previously carried the CPU's last bus address, the exception vector
 number, the unmapped address and the VIEW2 scroll probe. **Identify rows by
