@@ -711,6 +711,14 @@ wire signed [13:0] oki_snd;
 // Explosive Breaker's 1 MB, 3 for Wing Force's 512 KB, 1 for Magical Crystals'
 // 256 KB. It was a parameter fixed at 7, which would have played the wrong
 // sample on two of the three rather than failing.
+// WHO ACTUALLY DRIVES THE CHIP. Named once and used by both the chip and the
+// debug overlay, because they disagreed: the overlay counted kaneko_bus's
+// `oki_we` while Wing Force drives the OKI from the Z80, so its row read zero
+// no matter what the Z80 did. A census of the wrong signal returns zero and
+// looks exactly like an answer -- the failure CLAUDE.md's rule 6 is about.
+wire       oki_we_eff  = OKI_ON_Z80 ? z80_oki_we  : oki_we;
+wire [7:0] oki_din_eff = OKI_ON_Z80 ? z80_oki_din : oki_din;
+
 wire [23:0] oki_region_addr;
 kaneko_oki_bank u_okibank
 (
@@ -845,10 +853,7 @@ jt6295 u_oki
 (
 	.rst(rst_sys), .clk(clk_sys), .cen(oki_cen),
 	.ss(1'b1),                       // PIN7_HIGH: divide by 132
-	// Wing Force reaches the OKI through the Z80's I/O ports; every other
-	// game writes it directly from the 68000 at 0x400401.
-	.wrn(~(OKI_ON_Z80 ? z80_oki_we : oki_we)),
-	.din(OKI_ON_Z80 ? z80_oki_din : oki_din), .dout(oki_dout),
+	.wrn(~oki_we_eff), .din(oki_din_eff), .dout(oki_dout),
 	.rom_addr(oki_rom_addr), .rom_data(oki_rom_data), .rom_ok(oki_rom_ok[0]),
 	.sound(oki_snd), .sample()
 );
@@ -916,6 +921,8 @@ end
 // the chip starts a channel and produces samples. So every link below is
 // known good against an ideal sample ROM, and whichever row goes dark on
 // hardware is the one the model does not capture.
+reg        oki_we_eff_d;
+always @(posedge clk_sys) oki_we_eff_d <= oki_we_eff;
 reg [15:0] oki_wr_cnt, oki_wr_lat;
 reg [15:0] oki_ok_cnt, oki_ok_lat;
 reg [15:0] oki_busy_cnt, oki_busy_lat;
@@ -931,7 +938,12 @@ always @(posedge clk_sys) begin
 		oki_busy_lat <= oki_busy_cnt; oki_busy_cnt <= 0;
 		oki_snd_lat  <= oki_snd_cnt;  oki_snd_cnt  <= 0;
 	end else begin
-		if (oki_we)                        oki_wr_cnt   <= oki_wr_cnt   + 1'd1;
+		// Counted on the EDGE, not the level. kaneko_bus pulses for one cycle
+		// but the Z80's decode is a level held for a whole 4 MHz bus cycle --
+		// about twelve of these -- so counting the level would read twelve
+		// times higher on Wing Force and be incomparable with every other
+		// game. jt6295 latches on the same falling edge.
+		if (oki_we_eff && !oki_we_eff_d)   oki_wr_cnt   <= oki_wr_cnt   + 1'd1;
 		if (oki_rom_ok[0] && !oki_ok_d)    oki_ok_cnt   <= oki_ok_cnt   + 1'd1;
 		// dout's low nibble is the per-channel busy flag — the same byte the
 		// game polls at 400401 and keeps reading back as zero.
@@ -1640,49 +1652,37 @@ wire       irq_set = irq_cnt_lat[irq_bit];
 wire in_oki_row = (screen_y >= 9'd40) && (screen_y < 9'(40 + 24))
                && (screen_x < 9'(16 * ALV_BIT_W));
 wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
-// COMMANDEERED for the Blaze On hunt: the first of the four OKI rows carries
-// the CPU's last bus address, a[23:8], instead of the OKI write count. This
-// board has no OKI wired at all, so all four rows read zero and the top one
-// was costing a build to display nothing. Restore it when the sound path
-// lands. Reads as e.g. 0002 for a loop down in low ROM.
-// Row 4 carried a[23:9], which is zero every time because the loop is at
-// 0x100 — a row spending a whole build to display nothing. It now carries the
-// exception vector number, and row 5 the low half of the last bus address as a
-// cross-check that should read 0080..0082 for a loop at 0x100-0x105.
-// Rows 4 and 5 carry the two VIEW2 scroll registers as the top level sees
-// them, for one measurement.
+// RESTORED TO THE OKI CHAIN, 2026-08-22, for Wing Force's missing effects.
 //
-// The arithmetic says chip 0's two layers must coincide exactly — layer 0 is
-// dx 51 + scroll 461 and layer 1 is dx 53 + scroll 459, both 512, both
-// map_x = x. The game writes layer 1's scroll two lower for exactly that
-// reason. Simulation reads back 0x7340 and 0x72c0 and a directed test confirms
-// the two layers then emit identical pixels in all 320 columns; hardware draws
-// them two pixels apart. One of those numbers is not reaching the engine on
-// the board, and only reading them there will say which.
+// The block is a scratch area and has carried, in order: the OKI chain, the
+// CPU's last bus address, the exception vector number, the unmapped address,
+// and the VIEW2 scroll probe. The scroll probe answered its question -- the
+// raw registers read back 7340/72c0 on hardware, exactly MAME -- and the tile
+// fault it was chasing is parked, so the rows go back to what the README calls
+// their default.
 //
-//   row 4  c0r2, layer 0's scroll x   expect 7340
-//   row 5  c0r0, layer 1's scroll x   expect 72c0
+// Wing Force plays music and no effects. Music is the YM2151 on the Z80, so
+// the Z80, its ROM cache, the latch and the YM are all proven; the OKI is the
+// only part of that board's sound path not exercised by the working half. It
+// is also the only board where the OKI hangs off the Z80's I/O ports rather
+// than the 68000's bus, and every one of those is a per-game fact set this
+// session.
 //
-// 0000 on both means the register writes are not landing on hardware, which on
-// its own produces exactly the two-pixel split.
-// All four rows carry the scroll path, raw and latched, because the raw
-// registers came back CORRECT on hardware (7340 / 72c0, exactly MAME) and the
-// engine does not use them directly — it uses `lay_sx`, a copy taken once per
-// frame at frame_start. If that copy is not updating it holds its reset value
-// of zero, and then layer 0 is dx 51 + 0 and layer 1 is dx 53 + 0: a
-// two-pixel split, and the whole tilemap displaced, which is both symptoms.
+//   row 4  writes reaching the chip   from whichever CPU drives it
+//   row 5  sample-ROM fetches answered
+//   row 6  clocks with a channel flagged busy
+//   row 7  clocks with a non-zero sample
 //
-//   row 4  lay_sx layer 0, LATCHED    expect 7340
-//   row 5  lay_sx layer 1, LATCHED    expect 72c0
-//   row 6  c0r2, raw register         known 7340
-//   row 7  c0r0, raw register         known 72c0
-//
-// Rows 6 and 7 are the control: they are already confirmed, so if 4 and 5
-// disagree with them the latch is the fault and nothing downstream is.
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? lay_sx[15:0]
-                        : (screen_y < 9'd52) ? lay_sx[31:16]
-                        : (screen_y < 9'd58) ? c0r2
-                                             : c0r0;
+// The first dark row is the break, and each rules out everything above it.
+// Row 4 dark means the Z80 is not writing the chip, or has_oki/the port decode
+// is wrong. Row 4 lit and 5 dark means the writes land but the sample fetch
+// does not, which points at base_oki or the bank. 6 dark with 5 lit means the
+// chip is fetching but never accepted a play command. 7 dark with 6 lit is a
+// clocking fault -- oki_cen_half makes this board's chip 1 MHz, not 2.
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? oki_wr_lat
+                        : (screen_y < 9'd52) ? oki_ok_lat
+                        : (screen_y < 9'd58) ? oki_busy_lat
+                                             : oki_snd_lat;
 wire       oki_set = oki_row_val[oki_bit];
 
 // Row 9, magenta: the RAW joystick word for pad 1, live — not a per-frame

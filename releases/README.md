@@ -83,7 +83,7 @@ under investigation, so the ordinal numbering moves.
 | 1st | 20, widest | green | 68000 bus cycles. This is the CPU's pulse — if it is dark the CPU is not running, and if it dips the CPU is being starved of memory bandwidth. 20 bits. |
 | 2nd | 8, narrowest | amber | Interrupts acknowledged. Should be a steady **3** per frame — IRQ5, IRQ4 and IRQ3 — which draws as two adjacent lit blocks at the right-hand end. 8 bits. |
 | 3rd | 16 | cyan | Tile line fetches that overran — the fetch for a scanline was still running when the next one started. Zero is correct. Non-zero means the video path is short of SDRAM bandwidth, and the count says by how much. 16 bits. |
-| 4th | 16, tall | yellow | CPU writes reaching the OKI M6295 at `400401`. 16 bits. |
+| 4th | 16, tall | yellow | Writes reaching the OKI M6295, from whichever CPU drives it — the 68000 at `400401` on most boards, the Z80's port `0a` on Wing Force. Counted on the write edge so the two are comparable. It watched only the 68000's strobe until 2026-08-22 and therefore read zero on Wing Force whatever the Z80 did. 16 bits. |
 | ↳ | | yellow | OKI sample-ROM fetches answered. |
 | ↳ | | yellow | Clocks with an OKI channel flagged busy — the chip accepted a play command. |
 | ↳ | | yellow | Clocks where the OKI produced a non-zero sample. |
@@ -94,12 +94,12 @@ The four yellow rows are a **chain**, in order. Each one rules out everything
 above it, so the first dark row is where the sound path breaks. All four lit
 and no audio means the fault is past the chip, in the mixing or output stage.
 
-**That block is currently borrowed** for the VIEW2 scroll probe on the Blaze On
-board, and shows, top to bottom: `lay_sx` layer 0 (the latched copy the tilemap
-engine reads), `lay_sx` layer 1, then the raw registers `c0r2` and `c0r0`. It
-returns to the OKI chain when that investigation closes. Whenever it is
-repurposed, this table and the one in the top-level `README.md` are updated in
-the same commit.
+**That block is currently the OKI chain**, restored on 2026-08-22 to chase Wing
+Force's missing sound effects. It had been carrying the VIEW2 scroll probe;
+that probe answered its question — the raw scroll registers read back
+7340/72c0 on hardware, exactly MAME — and the tile fault it was chasing is
+parked, so the rows went back to their default. Whenever it is repurposed, this
+table and the one in the top-level `README.md` are updated in the same commit.
 
 These rows were added *during* the silent-sound investigation and the bug was
 actually found by reading the RTL, not by reading them — so treat the chain as

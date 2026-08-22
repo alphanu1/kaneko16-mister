@@ -85,18 +85,22 @@ tilemap layer: `+2` (what MAME does and the default), `0`, `-2` or `+4`. The off
 layer's scroll two lower — so this is a diagnostic for a reported two-pixel
 ghost on the Blaze On board, not a setting to leave on.
 
-**The tall block is a scratch area.** By default it is the OKI sound chain —
-CPU writes to the chip, sample-ROM fetches answered, clocks with a channel
-busy, clocks with a non-zero sample — in that order, so the first dark row is
-where the sound path breaks. It is currently carrying the VIEW2 scroll probe
-instead, top to bottom:
+**The tall block is a scratch area.** It is currently the OKI sound chain,
+which is its default, restored on 2026-08-22 to chase Wing Force's missing
+sound effects. The first dark row is where the sound path breaks, and each row
+rules out everything above it:
 
 | Sub-row | Shows |
 |---|---|
-| 1st | `lay_sx` layer 0 — the latched copy the tilemap engine reads |
-| 2nd | `lay_sx` layer 1 — same |
-| 3rd | `c0r2` — layer 0's scroll register, raw |
-| 4th | `c0r0` — layer 1's scroll register, raw |
+| 1st | Writes reaching the chip, from whichever CPU drives it — the 68000 at `400401`, or the Z80's port `0a` on Wing Force |
+| 2nd | Sample-ROM fetches the feeder answered |
+| 3rd | Clocks with a channel flagged busy — the chip accepted a play command |
+| 4th | Clocks where the chip produced a non-zero sample |
+
+It has previously carried the CPU's last bus address, the exception vector
+number, the unmapped address and the VIEW2 scroll probe. **Identify rows by
+width and colour, never by ordinal** — the ordinal moves, and a stale reading
+of this table costs a round trip to the board and a wrong diagnosis.
 
 Whenever that block is repurposed, this table and `releases/README.md` are
 updated in the same commit.
