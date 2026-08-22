@@ -122,6 +122,8 @@ SETS = {
 GAME_ID = {
     "explbrkr": 0,
     "mgcrystl": 1,
+    "blazeonj": 2,
+    "wingforc": 3,
 }
 
 # set name -> zip basename, where they differ
@@ -145,22 +147,26 @@ CATEGORY = {
 # is World or USA if one exists, otherwise Japan.
 PRIMARY = {"explbrkr", "mgcrystl", "wingforc"}
 
-# Which games the CORE actually supports today. Everything game-specific is
-# still compiled in for explbrkr — the memory map is bakubrkr_map, and the
-# offsets, colour base, sprite priorities and layer count are constants — so
-# loading any other set would produce a broken picture rather than a game.
+# Which games the CORE actually supports today.
 #
 # Shipping an MRA for a game the core cannot run is worse than shipping none:
 # it looks like a supported title and fails in a way the player cannot
-# diagnose. This set grows when the per-game configuration table lands, and
-# not before.
-# Magical Crystals is deliberately NOT here yet. Its game-table entry and its
+# diagnose.
+#
+# The Blaze On board joins on the per-game configuration table: its memory map
+# pages, ROM bases, video geometry, layer count, sprite list size, sprite
+# offset and INPUT WIRING all come from kaneko_gamecfg.sv, selected by the id
+# below. Both titles close the frame gate at 100%.
+#
+# Magical Crystals is deliberately NOT here. Its game-table entry and its
 # memory map are done, but it is the one title the frame gate does not close:
 # 298 pixels of line-scroll difference that nobody has explained. Shipping a
 # title with a known unexplained video discrepancy makes every later bug report
-# ambiguous, so it waits until that is understood. The Blaze On board is at
-# 100% and goes first.
-SUPPORTED = {"explbrkr"}
+# ambiguous, so it waits until that is understood.
+#
+# Neither Blaze On nor Wing Force has its Z80 + YM2151 sound CPU yet, so both
+# run silent. That is a stated limitation in the release README, not a bug.
+SUPPORTED = {"explbrkr", "blazeonj", "wingforc"}
 ALT_PARENT = {"blazeonj": "Blaze On"}
 
 # SDRAM layout: region -> (base, size). This IS the MRA's emission order, and
@@ -397,7 +403,16 @@ def build_mra(setname, rompath, outdir):
 
     # Index 1: one byte of configuration, read before the ROM stream.
     cfg = ET.SubElement(root, "rom", index="1")
-    ET.SubElement(cfg, "part").text = f"{GAME_ID.get(setname, 0):02X}"
+    # NOT .get(setname, 0). A game missing from the table has no correct id,
+    # and defaulting to 0 emits "Explosive Breaker" — the core then loads this
+    # game's ROMs and configures itself as a different PCB, which fails much
+    # later and nowhere near the cause. This shipped once; see findings.md.
+    if setname not in GAME_ID:
+        raise SystemExit(
+            f"{setname}: no entry in GAME_ID. Add it there and to the table in "
+            f"rtl/io/kaneko_gamecfg.sv — the two are checked against each other "
+            f"by nothing.")
+    ET.SubElement(cfg, "part").text = f"{GAME_ID[setname]:02X}"
 
     rom = ET.SubElement(root, "rom", index="0", zip=f"{zname}.zip", md5="none")
     cursor = 0

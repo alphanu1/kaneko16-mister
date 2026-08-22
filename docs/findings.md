@@ -4030,3 +4030,86 @@ settings at all. It exists because this was suspected once before.
    `outclk_2` is sitting unused at 48 MHz. This is the fix the note names, and
    it is also the prerequisite for the 2x SDRAM clock that would give the
    sprite renderer room.
+
+## 2026-08-22 — the Blaze On board, finished in RTL; and an MRA that lied about which game it was
+
+### The three items, and which one was real
+
+Two of the three remaining Blaze On items were constants that had been left
+compiled-in, and closing them was mechanical:
+
+- **One VIEW2 chip.** The Blaze On board has one, not two. Layers 2 and 3 are
+  now masked off when `two_chips` is low, so an absent chip cannot paint —
+  previously the second chip's registers read as zero and its layers were
+  *enabled*, because enable is active low.
+- **Tile line buffer 256 -> 320.** The buffer is now sized 320 (the widest
+  board) with the fetch width supplied at runtime as `h_active`, so Explosive
+  Breaker still fetches exactly 256. Buffer size and fetch count are two
+  different numbers and conflating them is what made this look like a
+  parameter change.
+
+The third was not a constant at all.
+
+### The inputs do NOT just move, they are assembled differently
+
+This is worth stating plainly because "per-game" had until now always meant "a
+different number in the table". Here it means a different wiring:
+
+```
+  explbrkr / mgcrystl          blazeon / wingforc
+  P1     b0    flip DIP        DSW2_P1  b0-7  difficulty, lives, demo, service
+         b1    service DIP              b8-13 P1 up/down/left/right/B1/B2
+         b8-13 P1 controls              b14   START1      b15  COIN1
+  P2     b8-13 P2 controls     DSW1_P2  b0-7  Coin_A, Coin_B
+  SYSTEM b8  START1                     b8-13 P2 controls
+         b9  START2                     b14   START2      b15  COIN2
+         b10 COIN1             UNK      unused
+         b11 COIN2             SYSTEM   b13 service  b14 tilt  b15 service coin
+         b12 service
+         b13 tilt
+         b14 service coin
+```
+
+Start and coin are in SYSTEM on one board and in the player words on the other.
+So the core builds both words and selects with `inputs_blazeon`; there is no
+arrangement of offsets that turns one into the other. Everything is active low
+on both boards. Blaze On also has REAL DIP switches where Explosive Breaker
+configures itself through its test mode, so those bits come from the OSD.
+
+### The MRA said the game was Explosive Breaker
+
+The Blaze On and Wing Force MRAs already on the device emitted a game-id byte
+of `00`. That is Explosive Breaker.
+
+`GAME_ID` in `tools/build_rom_regions.py` had two entries — `explbrkr: 0` and
+`mgcrystl: 1` — and the emitter reads it as `GAME_ID.get(setname, 0)`. A game
+missing from the table does not fail; it silently becomes game zero. So the
+core would have loaded Blaze On's ROMs into SDRAM correctly and then
+configured itself as a different PCB: wrong memory-map pages, wrong ROM bases,
+wrong geometry, wrong layer count, wrong input wiring.
+
+**A hardware test of Blaze On would have failed for a reason that had nothing
+to do with any of the RTL above**, and the obvious place to look would have
+been the new code. The comment in the file even says the two tables "are
+checked against each other by nothing".
+
+The `.get(setname, 0)` default is the same shape of fault as the SDRAM burst
+`default:` that hid the OKI silence and the harness `default:` that hid the
+port count: **a default that produces a plausible value instead of an error.**
+Three times now. The rule is in `CLAUDE.md`; this is its third incident.
+
+### State
+
+`make gate`, main tree, after all of the above:
+
+```
+GAME          FRAME     DIFF     MATCH
+mgcrystl        600      298  99.4803%
+explbrkr        900        0 100.0000%
+blazeonj        600        0 100.0000%
+wingforc        600        0 100.0000%
+```
+
+`SUPPORTED` now carries `explbrkr`, `blazeonj` and `wingforc`. Both new titles
+run **silent** — the Blaze On board is Z80 + YM2151 and neither is wired. That
+is a stated limitation, not a bug, and it is the next piece of work.

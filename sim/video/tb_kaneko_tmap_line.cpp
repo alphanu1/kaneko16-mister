@@ -141,6 +141,7 @@ int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
     dut = new Vkaneko_tmap_line;
 
+    dut->h_active = 256;   // the visible width under test
     dut->rst = 1; dut->start = 0; dut->rom_ready = 0xf; dut->rd_x = 0;
     dut->layer_en = 0xf; dut->linescroll_en = 0xf;
     dut->dx_f = 0; dut->dy_f = 0; dut->scroll_x_f = 0; dut->scroll_y_f = 0;

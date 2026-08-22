@@ -61,8 +61,18 @@ module kaneko_gamecfg #(
     output wire [15:0] spr_xoffs, spr_yoffs,
     output wire [8:0]  visarea_min_y,
     output wire        wide_screen,    // screen width > 0x100
-    output wire        fliptype
+    output wire        fliptype,
+
+    // ---- screen geometry, from set_visarea(). The totals do not change:
+    // 384 x 264 covers a 320-wide window as well as a 256-wide one.
+    output wire [9:0]  h_vis, v_vis, v_start, h_sync_start,
+
+    // The input words are ASSEMBLED differently, not merely relocated, so this
+    // selects a wiring rather than supplying a number. See the note in the top
+    // level.
+    output wire        inputs_blazeon
 );
+
     localparam [7:0] CFG_INDEX = 8'd1;
 
     // Held through a core reset and cleared only by power-on. An OSD reset must
@@ -126,6 +136,19 @@ module kaneko_gamecfg #(
     // (screen width > 0x100): 320 is, 256 is not.
     assign wide_screen   = blazeon_board;
     assign fliptype      = 1'b0;    // VU-002 default; none of these override it
+
+    // -------------------------------------------------------- geometry
+    //   explbrkr / mgcrystl  (0, 255, 16, 239)   256 x 224 from line 16
+    //   blazeon              (0, 319,  0, 231)   320 x 232 from line 0
+    //   wingforc             (0, 319,  0, 223)   320 x 224 from line 0
+    assign h_vis   = blazeon_board ? 10'd320 : 10'd256;
+    assign v_vis   = is_wf ? 10'd224 : is_bz ? 10'd232 : 10'd224;
+    assign v_start = blazeon_board ? 10'd0   : 10'd16;
+    // Sync sits centrally in what blanking is left, so it has to move with the
+    // window: 296 is inside a 320-wide picture and would cut it in half.
+    assign h_sync_start = blazeon_board ? 10'd336 : 10'd296;
+
+    assign inputs_blazeon = blazeon_board;
 endmodule
 
 `default_nettype wire

@@ -46,14 +46,15 @@ struct Cfg {
     bool    v2_2_pri, two_chips, wide;
     uint16_t pri, count, xoffs;
     uint16_t min_y;
+    uint16_t h_vis, v_vis, v_start, hsync;   // set_visarea()
 };
 
 const Cfg GAMES[] = {
   // name        id  wram v2w0 v2w1 spr  pal wdog  in    dx   dy  2pri 2chip wide   pri  count  xoffs min_y
-  { "explbrkr",  0, 0x10,0x50,0x58,0x60,0x70,0xa8,0xe0,  91,  -8, true , true , false,0x8888,1024,0x0000, 16 },
-  { "mgcrystl",  1, 0x30,0x60,0x68,0x70,0x50,0xa0,0xc0,  91,  -8, false, true , false,0x7532,1024,0x0000, 16 },
-  { "blazeonj",  2, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   8, false, false, true ,0x8821, 512,0xf980,  0 },
-  { "wingforc",  3, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   9, false, false, true ,0x8821, 512,0xf980,  0 },
+  { "explbrkr",  0, 0x10,0x50,0x58,0x60,0x70,0xa8,0xe0,  91,  -8, true , true , false,0x8888,1024,0x0000, 16, 256,224,16,296 },
+  { "mgcrystl",  1, 0x30,0x60,0x68,0x70,0x50,0xa0,0xc0,  91,  -8, false, true , false,0x7532,1024,0x0000, 16, 256,224,16,296 },
+  { "blazeonj",  2, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   8, false, false, true ,0x8821, 512,0xf980,  0, 320,232, 0,336 },
+  { "wingforc",  3, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   9, false, false, true ,0x8821, 512,0xf980,  0, 320,224, 0,336 },
 };
 
 void verify(const Cfg& g) {
@@ -84,6 +85,16 @@ void verify(const Cfg& g) {
     CK(d->spr_count   == g.count,     "spr_count");
     CK(d->spr_xoffs   == g.xoffs,     "spr_xoffs");
     CK(d->visarea_min_y == g.min_y,   "visarea_min_y");
+
+    CK(d->h_vis   == g.h_vis,         "h_vis");
+    CK(d->v_vis   == g.v_vis,         "v_vis");
+    CK(d->v_start == g.v_start,       "v_start");
+    // Sync must sit OUTSIDE the picture. 296 is inside a 320-wide window and
+    // would cut it in half, so this is not a cosmetic constant.
+    CK(d->h_sync_start == g.hsync,    "h_sync_start");
+    CK(d->h_sync_start >= d->h_vis,   "sync starts after the visible width");
+    CK(d->h_sync_start + 32 <= 384,   "sync ends inside the horizontal total");
+    CK(d->v_start + d->v_vis <= 264,  "the window fits the vertical total");
     #undef CK
 }
 

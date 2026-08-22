@@ -38,12 +38,27 @@ Miles Rally 1/2.
 | YM2149 x2 (jt49) | wired and mixed to the audio output; the game keeps their volumes at zero |
 | OKI M6295 (jt6295) | **working on hardware** — sound effects play. Bank map is a per-game parameter |
 | EEPROM (93C46) | working; 20,910 reads replayed against MAME, zero mismatches |
-| Inputs | two players, 2 buttons each, start/coin/service, and the board's two DIPs (flip screen, service) |
+| Inputs | two players, 2 buttons each, start/coin/service, and the board's DIPs — assembled per board, because the two boards wire the words differently, not just relocate them |
+| Game configuration table | `rtl/io/kaneko_gamecfg.sv` — one bitstream, four games; memory-map pages, ROM bases, video geometry, layer count, sprite list size and input wiring all selected by the MRA's game-id byte |
+| Z80 + YM2151 sound (Blaze On board) | **not started** — both Blaze On and Wing Force run silent |
 
-The 68000 completes explbrkr's self-test, formats a blank EEPROM, enables
-interrupts and runs its main loop, and the tilemap layers render on hardware.
-Sprites and inputs are the two blocks still missing from a playable core, and
-the OKI is wired but silent.
+Explosive Breaker is playable on hardware with sound. The 68000 completes its
+self-test, formats a blank EEPROM, enables interrupts and runs its main loop;
+tilemaps, sprites, inputs and the OKI all work.
+
+## Games
+
+One bitstream covers every game. The MRA hands the core a game-id byte and
+`rtl/io/kaneko_gamecfg.sv` selects everything that differs — an MRA for a game
+the core cannot run is not shipped, because it looks supported and then fails
+in a way a player cannot diagnose.
+
+| Game | State |
+|---|---|
+| Explosive Breaker | playable on hardware, with sound |
+| Blaze On (Japan) | frame-exact in simulation, **silent** — needs Z80 + YM2151 |
+| Wing Force (prototype) | frame-exact in simulation, **silent** — needs Z80 + YM2151 |
+| Magical Crystals | held back — an unexplained 298-pixel line-scroll difference |
 
 The debug overlay (OSD: Debug) puts seven rows of per-frame telemetry over the
 picture, each a binary count with the MSB at the left:

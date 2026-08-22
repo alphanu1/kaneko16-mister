@@ -27,13 +27,18 @@
 `default_nettype none
 
 module kaneko_tmap_line #(
-    parameter int unsigned H_VIS = 256
+    // The BUFFER is sized for the widest screen in the driver; how much of it
+    // a line actually uses is a runtime width, because fetching 320 pixels for
+    // a 256-wide game would cost 25% more tile ROM traffic for nothing — and
+    // the tile feeder is the part with the least headroom.
+    parameter int unsigned H_VIS = 320
 ) (
     input  wire        clk,
     input  wire        rst,
 
     // Pulse at the start of a line to fetch `line_y` into the spare bank.
     input  wire        start,
+    input  wire [9:0]  h_active,     // visible width of the CURRENT game
     input  wire [8:0]  line_y,
     output wire        busy,
 
@@ -92,15 +97,15 @@ module kaneko_tmap_line #(
     genvar gi;
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : g_seq
-            assign req_valid[gi]  = running && (x_req[gi] < 10'(H_VIS));
-            assign layer_done[gi] = (x_wr[gi] >= 10'(H_VIS));
+            assign req_valid[gi]  = running && (x_req[gi] < h_active);
+            assign layer_done[gi] = (x_wr[gi] >= h_active);
 
             always_ff @(posedge clk) begin
                 if (rst || start) begin
                     x_req[gi] <= '0;
                     x_wr[gi]  <= '0;
                 end else if (ce[gi]) begin
-                    if (x_req[gi] < 10'(H_VIS + LAT)) x_req[gi] <= x_req[gi] + 10'd1;
+                    if (x_req[gi] < (h_active + 10'(LAT))) x_req[gi] <= x_req[gi] + 10'd1;
                     if (l_valid[gi] && !layer_done[gi]) x_wr[gi] <= x_wr[gi] + 10'd1;
                 end
             end

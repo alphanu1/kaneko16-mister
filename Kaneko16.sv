@@ -149,6 +149,8 @@ wire        VIEW2_2_PRI, TWO_CHIPS, SPR_WIDE, SPR_FLIPTYPE;
 wire [15:0] SPR_PRI_SEL, SPR_XOFFS_CFG, SPR_YOFFS_CFG;
 wire [10:0] TILE_COLBASE_CFG, SPR_COLBASE_CFG, SPR_COUNT_CFG;
 wire [8:0]  SPR_MIN_Y;
+wire [9:0]  CFG_H_VIS, CFG_V_VIS, CFG_V_START, CFG_HSYNC;
+wire        INPUTS_BLAZEON;
 
 kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 (
@@ -171,7 +173,11 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 	.spr_count(SPR_COUNT_CFG),
 	.spr_xoffs(SPR_XOFFS_CFG), .spr_yoffs(SPR_YOFFS_CFG),
 	.visarea_min_y(SPR_MIN_Y), .wide_screen(SPR_WIDE),
-	.fliptype(SPR_FLIPTYPE)
+	.fliptype(SPR_FLIPTYPE),
+
+	.h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
+	.v_start(CFG_V_START), .h_sync_start(CFG_HSYNC),
+	.inputs_blazeon(INPUTS_BLAZEON)
 );
 
 // WIDE=1, so ioctl_addr counts bytes and advances by two per word.
@@ -743,6 +749,10 @@ wire hs, vs, hb, vb, de, vbl_rise;
 kaneko_video_timing u_timing
 (
 	.clk(clk_sys), .rst(rst_sys), .ce_pix(ce_pix),
+	// The visible window is per game — 256x224 from line 16 on this board,
+	// 320x232 from line 0 on the Blaze On board. The totals are shared.
+	.h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
+	.v_start(CFG_V_START), .h_sync_start(CFG_HSYNC),
 	.hcnt(hcnt), .vcnt(vcnt), .screen_x(screen_x), .screen_y(screen_y),
 	.hsync(hs), .vsync(vs), .hblank(hb), .vblank(vb), .de(de),
 	.vblank_rise(vbl_rise)
@@ -820,7 +830,17 @@ wire [15:0] c1r3 = v2r1_flat[ 3*16 +: 16];
 wire [15:0] c1r4 = v2r1_flat[ 4*16 +: 16];
 
 // Enables are ACTIVE LOW in the register.
-wire [3:0] lay_en_live = { ~c1r4[4], ~c1r4[12], ~c0r4[4], ~c0r4[12] };
+// ONE VIEW2 CHIP OR TWO.
+//
+// Layers 2 and 3 are the second chip. The Blaze On board has only one, and
+// there is no second chip to read a disable bit from — its register window is
+// not even decoded there — so the layers are masked off rather than left to
+// whatever the undriven register file happens to hold. An enabled layer
+// fetching from an unloaded tile region draws garbage over the picture, which
+// is the "renders a plausible wrong picture rather than failing" case hard
+// rule 9 is about.
+wire [3:0] lay_en_live = { ~c1r4[4]  & TWO_CHIPS, ~c1r4[12] & TWO_CHIPS,
+                           ~c0r4[4], ~c0r4[12] };
 wire [3:0] lay_ls_live = {  c1r4[3],  c1r4[11],  c0r4[3],  c0r4[11] };
 
 wire [63:0] lay_sx_live = { c1r0, c1r2, c0r0, c0r2 };  // L1 reg0, L0 reg2
@@ -920,10 +940,11 @@ wire [11:0] mix_cat;
 wire [23:0] mix_colour;
 wire [15:0] mix_pix;
 
-kaneko_tmap_line #(.H_VIS(256)) u_line
+kaneko_tmap_line #(.H_VIS(320)) u_line
 (
 	.clk(clk_sys), .rst(rst_sys),
-	.start(line_start), .line_y(screen_y + 9'd1), .busy(line_busy),
+	.start(line_start), .h_active(CFG_H_VIS),
+	.line_y(screen_y + 9'd1), .busy(line_busy),
 
 	.layer_en(lay_en), .dx_f(lay_dx), .dy_f(lay_dy),
 	.scroll_x_f(lay_sx), .scroll_y_f(lay_sy), .linescroll_en(lay_ls),
@@ -1125,12 +1146,48 @@ wire svc_coin = joy[9];
 wire dip_flip    = ~status[13];
 wire dip_service = ~status[14];
 
-wire [15:0] in_p1 = { 2'b11, ~p1_b2, ~p1_b1, ~p1_right, ~p1_left, ~p1_down, ~p1_up,
-                      6'b111111, dip_service, dip_flip };
-wire [15:0] in_p2 = { 2'b11, ~p2_b2, ~p2_b1, ~p2_right, ~p2_left, ~p2_down, ~p2_up,
-                      8'hff };
-wire [15:0] in_system = { 1'b1, ~svc_coin, ~pause, 1'b1,
+// THE INPUT WORDS ARE ASSEMBLED DIFFERENTLY PER BOARD, NOT JUST MOVED.
+//
+// This is the one per-game difference that is not a number. On this board the
+// start and coin bits are in SYSTEM; on the Blaze On board they are in the P1
+// and P2 words alongside that board's DIP switches, and SYSTEM carries only
+// service, tilt and the service coin:
+//
+//   explbrkr / mgcrystl        blazeon / wingforc
+//   P1     b0  flip DIP        DSW2_P1  b0-7  difficulty, lives, demo, service
+//          b1  service DIP              b8-13 P1 up/down/left/right/B1/B2
+//          b8-13 P1 controls            b14   START1     b15  COIN1
+//   P2     b8-13 P2 controls    DSW1_P2 b0-7  Coin_A, Coin_B
+//   SYSTEM b8  START1                   b8-13 P2 controls
+//          b9  START2                   b14   START2     b15  COIN2
+//          b10 COIN1            UNK     unused
+//          b11 COIN2            SYSTEM  b13 service  b14 tilt  b15 service coin
+//          b12 service
+//          b13 tilt
+//          b14 service coin
+//
+// Everything is active low on both. Blaze On also has REAL DIP switches where
+// Explosive Breaker configures everything through its test mode, so those bits
+// come from the OSD rather than reading as "not set".
+wire [5:0] p1_bits = { ~p1_b2, ~p1_b1, ~p1_right, ~p1_left, ~p1_down, ~p1_up };
+wire [5:0] p2_bits = { ~p2_b2, ~p2_b1, ~p2_right, ~p2_left, ~p2_down, ~p2_up };
+
+// ---- Explosive Breaker / Magical Crystals
+wire [15:0] in_p1_eb = { 2'b11, p1_bits, 6'b111111, dip_service, dip_flip };
+wire [15:0] in_p2_eb = { 2'b11, p2_bits, 8'hff };
+wire [15:0] in_sys_eb = { 1'b1, ~svc_coin, ~pause, 1'b1,
                           ~coin2, ~coin1, ~start2, ~start1, 8'hff };
+
+// ---- Blaze On board. The DIPs are OSD switches; default all ones, which is
+// every setting at its factory position because they are active low.
+wire [7:0]  dsw2 = { dip_service, 7'h7f };
+wire [15:0] in_p1_bz  = { ~coin1, ~start1, p1_bits, dsw2 };
+wire [15:0] in_p2_bz  = { ~coin2, ~start2, p2_bits, 8'hff };
+wire [15:0] in_sys_bz = { dip_service, ~pause, ~svc_coin, 13'h1fff };
+
+wire [15:0] in_p1     = INPUTS_BLAZEON ? in_p1_bz  : in_p1_eb;
+wire [15:0] in_p2     = INPUTS_BLAZEON ? in_p2_bz  : in_p2_eb;
+wire [15:0] in_system = INPUTS_BLAZEON ? in_sys_bz : in_sys_eb;
 
 // ----------------------------------------------------- palette / CPU view
 // Mode 3 shows PALETTE RAM as a grid of swatches: 64 across by 32 down, each

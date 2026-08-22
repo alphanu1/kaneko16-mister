@@ -41,15 +41,8 @@ module kaneko_video_timing #(
     parameter int unsigned H_TOTAL = 384,
     parameter int unsigned V_TOTAL = 264,
 
-    // Visible window, from MAME's visarea. explbrkr and mgcrystl are
-    // set_visarea(0, 255, 16, 239): 256 x 224, starting at line 16.
-    parameter int unsigned H_VIS   = 256,
-    parameter int unsigned V_VIS   = 224,
-    parameter int unsigned V_START = 16,
-
-    // Sync position and width, within the blanking. Not measured either;
-    // chosen to sit centrally in the blanking so a display locks.
-    parameter int unsigned H_SYNC_START = 296,
+    // Sync width and vertical sync position are shared; the rest of the
+    // window is per game and arrives as an input — see below.
     parameter int unsigned H_SYNC_WIDTH = 32,
     parameter int unsigned V_SYNC_START = 248,
     parameter int unsigned V_SYNC_WIDTH = 8
@@ -57,6 +50,22 @@ module kaneko_video_timing #(
     input  wire        clk,
     input  wire        rst,
     input  wire        ce_pix,       // one tick per pixel
+
+    // THE VISIBLE WINDOW IS PER GAME AND SO IT IS AN INPUT.
+    //
+    // From each game's set_visarea():
+    //
+    //   explbrkr / mgcrystl   (0, 255, 16, 239)   256 x 224 from line 16
+    //   blazeon               (0, 319,  0, 231)   320 x 232 from line 0
+    //   wingforc              (0, 319,  0, 223)   320 x 224 from line 0
+    //
+    // The totals do not change — 384 x 264 covers a 320-wide window as well as
+    // a 256-wide one — so only the window and where sync sits inside the
+    // blanking move. A parameter here would mean one bitstream per game.
+    input  wire [9:0]  h_vis,
+    input  wire [9:0]  v_vis,
+    input  wire [9:0]  v_start,
+    input  wire [9:0]  h_sync_start,
 
     output logic [9:0] hcnt,         // 0 .. H_TOTAL-1
     output logic [9:0] vcnt,         // 0 .. V_TOTAL-1
@@ -87,19 +96,19 @@ module kaneko_video_timing #(
                 // The line on which the visible window ends. The driver's own
                 // sprite buffering and interrupts are keyed to scanlines, so
                 // this edge is what the rest of the core hangs off.
-                if (vcnt == 10'(V_START + V_VIS - 1)) vblank_rise <= 1'b1;
+                if (vcnt == (v_start + v_vis - 10'd1)) vblank_rise <= 1'b1;
             end else begin
                 hcnt <= hcnt + 10'd1;
             end
         end
     end
 
-    assign hblank = (hcnt >= 10'(H_VIS));
-    assign vblank = (vcnt <  10'(V_START)) || (vcnt >= 10'(V_START + V_VIS));
+    assign hblank = (hcnt >= h_vis);
+    assign vblank = (vcnt < v_start) || (vcnt >= (v_start + v_vis));
     assign de     = ~hblank & ~vblank;
 
-    assign hsync  = (hcnt >= 10'(H_SYNC_START)) &&
-                    (hcnt <  10'(H_SYNC_START + H_SYNC_WIDTH));
+    assign hsync  = (hcnt >= h_sync_start) &&
+                    (hcnt <  (h_sync_start + 10'(H_SYNC_WIDTH)));
     assign vsync  = (vcnt >= 10'(V_SYNC_START)) &&
                     (vcnt <  10'(V_SYNC_START + V_SYNC_WIDTH));
 
