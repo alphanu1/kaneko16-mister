@@ -70,6 +70,7 @@ localparam CONF_STR = {
 	"O[13],Flip screen,Off,On;",
 	"O[14],Service switch,Off,On;",
 	"O[15],Sprite offscreen skip,On,Off;",
+	"O[16],Sprites,On,Off;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
@@ -306,6 +307,9 @@ assign SDRAM_DQ  = sd_dq_oe ? sd_dq_o : 16'bZ;
 // the OSD exposes the setting at all — see kaneko_sdram.sv.
 assign SDRAM_CLK = ~clk_sdram;
 
+// Declared above the controller because its port gating uses rom_loaded.
+wire rom_loaded, ldr_overflow;
+
 kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300)) u_sdram
 (
 	.clk(clk_sdram), .rst_n(pll_locked), .ready(mem_ready),
@@ -319,7 +323,26 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300)) u_sdram
 	.wr_req(ldr_wr_req), .wr_addr(ldr_wr_addr), .wr_din(ldr_wr_din),
 	.wr_be(ldr_wr_be), .wr_ack(ldr_wr_ack),
 
-	.p_req  ({p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}),
+	// NOBODY READS SDRAM UNTIL THE ROM IS IN IT.
+	//
+	// Every reader — four tile layers, the CPU, the OKI and two sprite ports —
+	// runs from power-up, so during the ROM download eight ports hammer the
+	// controller while the loader tries to write. The write is prioritised over
+	// reads but only when the pipeline is free, and with eight readers that
+	// window closes. The download then crawls or stalls, `rom_loaded` never
+	// asserts, the 68000 stays in reset, the palette stays zero and the screen
+	// is black with every debug counter dead.
+	//
+	// It was latent at seven ports and tipped over at eight. There is nothing
+	// to read before the ROM is there — the data would be garbage — so the
+	// readers are simply held off. Requesters hold `req` until acknowledged and
+	// the controller latches on its rising edge, so masking here parks them and
+	// they resume the moment it lifts.
+	//
+	// The boot harness has carried a `video_idle` input for exactly this since
+	// it was written. The core never had the equivalent.
+	.p_req  (rom_loaded ? {p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}
+	                    : 8'b0),
 	.p_addr ({p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
 	.p_din  ({8{16'd0}}),
 	.p_be   ({8{2'b11}}),
@@ -328,7 +351,6 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300)) u_sdram
 	.p_dout (p_dout_bus)
 );
 
-wire rom_loaded, ldr_overflow;
 
 kaneko_rom_loader #(.SDR_AW(SDR_AW)) u_loader
 (
@@ -984,11 +1006,26 @@ wire [15:0] spr_ram_q;
 // serves every game — Explosive Breaker simply uses 256 columns of it. 320 is
 // not a power of two, so the address is y*320 + x; rounding up to 512 would
 // not fit in 553 M10K beside everything else.
+// SPRITES OFF, AS A DIAGNOSTIC.
+//
+// Explosive Breaker went black and simulation clears every change made since
+// it last worked — including a boot on all eight ports with the real sprite
+// subsystem competing for the bus. What simulation does NOT have is the four
+// tile layers fetching at the same time, so the one thing it cannot rule out
+// is total SDRAM load.
+//
+// Held in reset, the subsystem makes no requests at all and its two ports go
+// quiet, which takes the design back to six active requesters. Combined with
+// forcing the sprite pixel transparent, this answers in one build whether the
+// fault is anywhere in the sprite path — bus load or pixel path — instead of
+// bisecting six commits at twenty minutes each.
+wire spr_off = status[16];
+
 kaneko_spr_sys #(
 	.BMP_W(320), .BMP_H(256), .SPRITES(1024), .SDR_AW(SDR_AW)
 ) u_spr
 (
-	.clk(clk_sys), .rst(rst_sys),
+	.clk(clk_sys), .rst(rst_sys | spr_off),
 	.frame_start(vbl_rise),
 	.keep_sprites(keep_sprites),
 	.skip_en(~status[15]),
@@ -1024,7 +1061,8 @@ kaneko_mixer u_mix
 	.layer_colour_f(mix_colour),
 	.layer_pix_f(mix_pix),
 
-	.spr_pix(spr_pix), .spr_prio(spr_prio),
+	.spr_pix(spr_off ? 14'd0 : spr_pix),
+	.spr_prio(spr_off ? 2'd0  : spr_prio),
 
 	.view2_2_pri(VIEW2_2_PRI),
 	.spr_pri_f(SPR_PRI_SEL),

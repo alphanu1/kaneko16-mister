@@ -345,7 +345,12 @@ int main(int argc, char** argv) {
     std::printf("== C: interrupt acknowledge path (forced level 7)\n");
     dut = new Vkaneko_cpumem_harness;
     {
-        if (!boot_dut(rom, false, true, good_lat, 0)) return 2;
+        // video_idle FALSE: the readers keep hammering SDRAM through the ROM
+        // download, which is what the board does. Idling them here is what
+        // stopped this harness reproducing a load that never completes — the
+        // core has no equivalent of video_idle, so the harness was kinder to
+        // the loader than the hardware is.
+        if (!boot_dut(rom, false, false, good_lat, 0)) return 2;
         uint64_t acks = 0, vec_reads = 0;
         int p_ia = 0;
         dut->ipl_force = 7;
