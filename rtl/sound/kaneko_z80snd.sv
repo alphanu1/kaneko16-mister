@@ -103,9 +103,18 @@ module kaneko_z80snd (
     assign rom_addr = cpu_addr;
 
     // -------------------------------------------------------------- RAM
-    // 8 KB at 0xc000. Declared as a plain 1-D array with a plain address, the
-    // shape that infers block RAM — see the inference notes in findings.
-    logic [7:0] ram [0:8191];
+    // 8 KB at 0xc000. The shape is the one that infers block RAM, and it was
+    // NOT ENOUGH: Quartus 17.0 built all 8192 bytes out of flip-flops without
+    // one word of complaint — 65,557 registers and 30,302 ALUTs of read mux,
+    // which took the design from fitting to 7606 LABs against the device's
+    // 4191 and failed the build with "Can't fit design in device". The map log
+    // carries an inference message for kaneko_z80rom's array on the line above
+    // and simply nothing for this one; absence was the only signal.
+    //
+    // Same silent fallback already documented on kaneko_rom_loader's FIFO. The
+    // attribute is the fix there for the same reason it is here: it turns a
+    // regression into a BUILD ERROR instead of half the device.
+    (* ramstyle = "M10K" *) logic [7:0] ram [0:8191];
     logic [7:0] ram_q;
 
     always_ff @(posedge clk) begin

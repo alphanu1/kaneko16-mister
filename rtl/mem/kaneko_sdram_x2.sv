@@ -91,7 +91,22 @@ module kaneko_sdram_x2 #(
             assign f_req[g]  = s_req[g] & ~done & ~f_ack[g];
             assign f_addr[g] = s_addr[g];
             assign s_ack[g]  = f_ack[g];      // already two fast cycles wide
-            assign s_dout[g] = dout_r;
+
+            // BYPASSED ON THE ACKNOWLEDGE CYCLE, not just registered.
+            //
+            // `dout_r` does not load until the fast edge AFTER f_ack, but
+            // f_ack is two fast cycles wide and the slow edge can land on
+            // either of them. Land on the first and the slow side latches the
+            // previous transaction's data -- or zero, on the first read of a
+            // port. That failed almost exactly half the reads, which is what
+            // "half" means here: the two alignments are equally likely and one
+            // of them is wrong.
+            //
+            // The controller writes p_dout and raises p_ack on the SAME edge
+            // and holds both until that port completes again, so f_dout is
+            // already valid throughout the acknowledge. The register is kept
+            // for the cycles after it.
+            assign s_dout[g] = f_ack[g] ? f_dout[g] : dout_r;
         end
     endgenerate
 

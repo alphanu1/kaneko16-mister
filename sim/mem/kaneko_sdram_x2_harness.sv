@@ -106,7 +106,11 @@ module kaneko_sdram_x2_harness #(
 
     // T_REFI scales with the clock: 8192 rows in 64 ms is one refresh every
     // 7.8125 us, which is 750 cycles at 96 MHz rather than 375 at 48.
-    kaneko_sdram #(.COL_BITS(COL_BITS), .NP(NP), .T_REFI(700)) u_ctrl (
+    // INIT_NOP shortened for simulation exactly as the other harnesses do.
+    // Left at its 10,000-cycle default it outlasts the whole run, so the
+    // controller spends the test in power-up NOPs and the device model's
+    // refresh watchdog fires on a controller that has not started yet.
+    kaneko_sdram #(.COL_BITS(COL_BITS), .NP(NP), .T_REFI(700), .INIT_NOP(600)) u_ctrl (
         .clk(clk), .rst_n(rst_n), .ready(ready), .rd_lat_sel(rd_lat_sel),
         .sd_cke(sd_cke), .sd_cs_n(sd_cs_n), .sd_ras_n(sd_ras_n),
         .sd_cas_n(sd_cas_n), .sd_we_n(sd_we_n), .sd_ba(sd_ba),
