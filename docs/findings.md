@@ -4495,3 +4495,49 @@ Bus error, vector 2, is impossible in this core — BERR is never asserted — s
 anything else distinguishes "jumped into garbage" (4 illegal, 10/11 line-A/F)
 from "genuine arithmetic trap" (5 divide by zero, 6 CHK) from "odd word
 address" (3).
+
+### The SDRAM capture point changes whether Blaze On crashes
+
+Two experiments on the bitstream already on the board, no rebuild:
+
+```
+  Sprites = Off              no change, still black
+  SDRAM capture CL+1 (def)   black
+                CL+2         black
+                CL+3         black
+                CL+0         RUNS LONGER, then draws garbage tiles
+```
+
+**Sprites off changing nothing rules out sprite bandwidth** as the cause, which
+was the leading theory an hour ago.
+
+**A capture point that changes a game from crashed to running is the signature
+of a marginal capture race**, not a logic fault. If CL+1 were uniformly one
+cycle late, every burst would be shifted by a word and Explosive Breaker could
+not work either — it does. So the window is marginal and whether a given read
+lands correctly depends on traffic and data pattern. Blaze On drives more
+video bandwidth than Explosive Breaker (320 wide against 256, 232 lines against
+224) and tips it over.
+
+This is the fault `rtl/pll/pll.v` has been describing all along:
+
+```
+  All three PLL outputs:  phase_shift = "0 ps"
+  Kaneko16.sv:            assign SDRAM_CLK = ~clk_sdram;
+```
+
+The clock the memory sees is the internal clock INVERTED THROUGH FABRIC — half
+a period of skew at 48 MHz plus uncontrolled routing and IO delay, rather than
+a dedicated phase-shifted PLL output. The file's own note says "the cause is
+timing and the fix is a properly phase-shifted SDRAM_CLK". This is the first
+hard evidence for that rather than a suspicion.
+
+The garbage tiles at CL+0 are probably a SECOND bug that CL+1 was hiding by
+crashing the game before it ever drew a frame. Not yet investigated; the colour
+base is 0x400 for every Tier 1 game including Blaze On, so it is not that.
+
+Open question that decides the fix: does Explosive Breaker still work at CL+0?
+If it does, the immediate move is to change the default and both games run
+while the real phase-shift work is done properly. If it does not, no single
+capture point suits both and the fault is in the burst or arbiter logic rather
+than the pad timing — a different fix entirely.
