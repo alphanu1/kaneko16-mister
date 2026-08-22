@@ -5147,3 +5147,45 @@ shadowing the real core for twelve hours.
 
 Every scripted edit now asserts the anchor text exists before replacing, and
 greps for the result afterwards. A rule is in CLAUDE.md.
+
+### One sprite engine is enough: the second VU-002 is not needed
+
+Measured on hardware, Wing Force in a busy scene: **sprite overruns zero**,
+while the tilemap feeder's overruns run to three bars in the same frame. So the
+sprite path finishes every frame with room, and the tilemap path is the one
+short of time.
+
+That settles one of the design study's §9 open items in the practical
+direction. The Blaze On board carries TWO VU-002 chips reading ONE shared
+sprite list at 0x700000 — `blazeon_map` has a single spriteram and a single
+register block the device uses, with the second chip's registers at 0x980000
+kept as plain RAM. MAME's own comment is "there is actually a 2nd sprite chip!
+looks like our device emulation handles both at once", and the ROM list marks
+`BZ_SP1.U68` and `BZ_SP2.U86` as duplicate copies "for 2nd sprite chip".
+
+The second chip bought FILL RATE, not sprites and not graphics: a VU-002's
+internal bitmap is finite and this board is 320 wide where the rest of the
+driver is 256. An FPGA line buffer has no such limit, so one engine rendering
+the shared list into a 320-wide bitmap produces what the two chips jointly
+produced — and the overrun counter now says it does so inside the frame budget.
+
+Implementing a second engine would cost block RAM and buy nothing measurable.
+Revisit only if that row ever goes non-zero.
+
+### The tilemap feeder overruns, and it is NOT raw bandwidth
+
+```
+  Explosive Breaker   4 layers x 256 = 1024 pixel-fetches per line   no overrun
+  Blaze On board      2 layers x 320 =  640                          overruns
+```
+
+The board that fetches LESS is the one that misses, so volume is not the
+constraint and the disabled-layer fetch fix — real and worth keeping — did not
+clear it. Sprites are not starving it either, since the sprite engine finishes
+every frame.
+
+That leaves the access pattern. The two boards place their tile and sprite ROM
+at different SDRAM offsets, and if Blaze On's land such that tile and sprite
+fetches keep alternating rows within a bank, every switch costs a row activate
+that Explosive Breaker's layout happens to avoid. Untested, and a separate
+thread from the two-pixel split.
