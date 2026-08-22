@@ -93,15 +93,16 @@ correct and the fault is upstream in the Z80.
 
 | Sub-row | Shows |
 |---|---|
-| 1st | Z80 writes to the YM2151 (ports `02`/`03`), per frame. MAME's Wing Force: ~8 in the menu, ~18 in the demo |
-| 2nd | Z80 reads of the YM2151 status (port `03`), per frame. MAME: ~120 menu, ~107 demo — the driver polls it hard |
-| 3rd | Z80 writes to the OKI (port `0a`), per frame. MAME: 0 in the menu, 0–1 in the demo |
-| 4th | 4 MHz Z80 ticks LOST to a ROM-cache stall, per frame, **saturating at `ffff`** |
+| 1st | Z80 writes to the YM2151 (ports `02`/`03`), per frame — the control. MAME's Wing Force: ~8 menu, ~18 demo |
+| 2nd | Clocks where **jt51's own output** is non-zero — is the chip producing anything? |
+| 3rd | Clocks where the **mixed** output is non-zero — did it survive the mix? |
+| 4th | 4 MHz Z80 ticks LOST to a ROM-cache stall, per frame, saturating at `ffff` |
 
-Rows 1–3 near MAME's numbers while the game is silent means the chips are being
-driven and the fault is past them. All three near zero means the Z80 is not
-getting round its driver loop, and row 4 says whether the ROM cache is why:
-saturated at `ffff` implicates it, small clears it.
+Row 1 is the control and should sit near MAME's rate. Row 2 dark with row 1
+healthy means jt51 is being written and producing nothing. Row 2 lit with row 3
+dark means the mix is eating it — the OKI is summed in at full weight beside the
+YM before the halving. Row 4 is the ROM cache, measured at a 0.5% miss rate
+against a real MAME fetch trace, so it should stay small.
 
 It has previously carried the CPU's last bus address, the exception vector
 number, the unmapped address and the VIEW2 scroll probe. **Identify rows by

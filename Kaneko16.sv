@@ -957,19 +957,29 @@ reg [15:0] z80_ymw_cnt,  z80_ymw_lat;
 reg [15:0] z80_ymr_cnt,  z80_ymr_lat;
 reg [15:0] z80_okiw_cnt, z80_okiw_lat;
 reg [15:0] z80_stl_cnt,  z80_stl_lat;
+reg [15:0] ym_nz_cnt,    ym_nz_lat;      // clocks where jt51's output is non-zero
+reg [15:0] mix_nz_cnt,   mix_nz_lat;     // clocks where the mixed output is non-zero
 always @(posedge clk_sys) begin
 	if (rst_sys) begin
 		z80_ymw_cnt <= 0; z80_ymr_cnt <= 0; z80_okiw_cnt <= 0; z80_stl_cnt <= 0;
+		ym_nz_cnt <= 0; mix_nz_cnt <= 0; ym_nz_lat <= 0; mix_nz_lat <= 0;
 		z80_ymw_lat <= 0; z80_ymr_lat <= 0; z80_okiw_lat <= 0; z80_stl_lat <= 0;
 	end else if (vbl_rise) begin
 		z80_ymw_lat  <= z80_ymw_cnt;  z80_ymw_cnt  <= 0;
 		z80_ymr_lat  <= z80_ymr_cnt;  z80_ymr_cnt  <= 0;
 		z80_okiw_lat <= z80_okiw_cnt; z80_okiw_cnt <= 0;
+		ym_nz_lat    <= ym_nz_cnt;    ym_nz_cnt    <= 0;
+		mix_nz_lat   <= mix_nz_cnt;   mix_nz_cnt   <= 0;
 		z80_stl_lat  <= z80_stl_cnt;  z80_stl_cnt  <= 0;
 	end else begin
 		if (z80_io_wr_e && (z80_port[7:1] == 7'h01)) z80_ymw_cnt  <= z80_ymw_cnt  + 1'd1;
 		if (z80_io_rd_e && (z80_port[7:1] == 7'h01)) z80_ymr_cnt  <= z80_ymr_cnt  + 1'd1;
 		if (z80_io_wr_e && (z80_port      == 8'h0a)) z80_okiw_cnt <= z80_okiw_cnt + 1'd1;
+		// PAST THE YM INTERFACE. The two rows above proved the Z80 writes the
+		// chip at MAME's rate while the board is silent, so the question moved
+		// downstream: is jt51 producing anything, and does it survive the mix?
+		if (ym2151_l != 16'sd0 && !(&ym_nz_cnt)) ym_nz_cnt <= ym_nz_cnt + 1'd1;
+		if (z80_mix_l != 16'd0 && !(&mix_nz_cnt)) mix_nz_cnt <= mix_nz_cnt + 1'd1;
 		// Saturating: a fully starved Z80 loses far more than 65535 ticks a
 		// frame, and a wrapped counter would read as a healthy small number.
 		if ((z80_cediv == 4'd0) && z80_stall && !(&z80_stl_cnt))
@@ -1733,9 +1743,25 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 // Blaze On is NOT a control for this. Its music and effects sound right, which
 // is not the same as being complete, and nobody has compared it against
 // anything. Run the census there too.
+// ROWS MOVED DOWNSTREAM, 2026-08-22. The census answered its question: with
+// Wing Force silent, the Z80 wrote the YM about 15 times a frame and polled its
+// status a hundred-odd times, which is MAME's rate (8-18 and ~107-120). The
+// CPU, its ROM cache -- measured at a 0.5% miss rate against a real MAME fetch
+// trace -- and the command path are all healthy, and the fault is past the
+// chip's write port. So:
+//
+//   row 4  YM2151 writes per frame          the control, should stay ~15
+//   row 5  clocks with jt51's output non-zero
+//   row 6  clocks with the MIXED output non-zero
+//   row 7  4 MHz ticks lost to a ROM-cache stall
+//
+// Row 5 dark with row 4 healthy means jt51 is being written and producing
+// nothing -- its state or its enables. Row 5 lit and row 6 dark means the
+// mix is eating it, which is where the OKI is summed in at full weight next
+// to the YM before the halving.
 wire [15:0] oki_row_val = (screen_y < 9'd46) ? z80_ymw_lat
-                        : (screen_y < 9'd52) ? z80_ymr_lat
-                        : (screen_y < 9'd58) ? z80_okiw_lat
+                        : (screen_y < 9'd52) ? ym_nz_lat
+                        : (screen_y < 9'd58) ? mix_nz_lat
                                              : z80_stl_lat;
 wire       oki_set = oki_row_val[oki_bit];
 

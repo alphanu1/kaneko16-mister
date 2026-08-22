@@ -94,9 +94,11 @@ The four yellow rows are a **chain**, in order. Each one rules out everything
 above it, so the first dark row is where the sound path breaks. All four lit
 and no audio means the fault is past the chip, in the mixing or output stage.
 
-**That block is currently the Z80 sound-port census** — per frame: YM2151
-writes, YM2151 status reads, OKI writes, and 4 MHz ticks lost to a ROM-cache
-stall (saturating at `ffff`). Compare against `tools/mame_z80_ports.lua` run on
+**That block currently traces the sound path past the YM's write port** — per
+frame: YM2151 writes (the control), clocks where jt51's output is non-zero,
+clocks where the MIXED output is non-zero, and 4 MHz ticks lost to a ROM-cache
+stall (saturating at `ffff`). It counted the Z80's ports before this, which
+established that the CPU drives the YM at MAME's rate even when silent. Compare against `tools/mame_z80_ports.lua` run on
 the same title. It carried the OKI chain for one build before this, which
 showed that path to be correct. It had been carrying the VIEW2 scroll probe;
 that probe answered its question — the raw scroll registers read back
