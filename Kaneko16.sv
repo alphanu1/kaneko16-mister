@@ -71,6 +71,7 @@ localparam CONF_STR = {
 	"O[14],Service switch,Off,On;",
 	"O[15],Sprite offscreen skip,On,Off;",
 	"O[16],Sprites,On,Off;",
+	"O[17],Tilemaps,On,Off;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
@@ -1003,7 +1004,20 @@ kaneko_tilerom #(.NREQ(4), .SDR_AW(SDR_AW)) u_trom
 // ---------------------------------------------------------- line fetch
 // Started at the top of every line for the NEXT one, so the display always
 // reads a finished bank.
-wire line_start = ce_pix && (hcnt == 10'd0);
+// TILEMAPS OFF: no line fetch is started, so the tile ROM feeder issues no
+// SDRAM requests at all. Paired with the existing sprite switch — which holds
+// kaneko_spr_sys in reset and therefore genuinely stops its fetching, not just
+// its output — this leaves the 68000 as the ONLY consumer of SDRAM on a board
+// whose OKI is idle.
+//
+// It exists to settle one question that nothing else can: both Blaze On board
+// titles park their CPU on hardware while running 491 frames in simulation,
+// and the one thing the boot harness does not model is the video path
+// competing for memory. With both switches off the contention is gone. If the
+// CPU still parks, contention is not the cause and the whole line of enquiry
+// is closed; if it boots, it is.
+wire tile_off = status[17];
+wire line_start = ce_pix && (hcnt == 10'd0) && ~tile_off;
 
 wire [35:0]  ln_scr_addr;
 wire [63:0]  ln_scr_data;

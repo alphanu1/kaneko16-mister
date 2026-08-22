@@ -4688,3 +4688,37 @@ frames in simulation and parks it immediately on hardware, with the CPU, the
 memory map, the register decode and every input word verified against MAME.
 The remaining difference is the video path's SDRAM traffic, which the boot
 harness does not model at all.
+
+### Wing Force fails identically — the fault is BOARD-WIDE
+
+Wing Force parks its CPU exactly as Blaze On does. The two share the
+`blazeon_map` configuration and differ in geometry (v_vis 224 against 232),
+in where the OKI lives (Z80 I/O ports rather than the 68000 bus) and in MAME's
+68000 clock. None of those differences matters to the fault.
+
+That eliminates every per-title cause at once: not Blaze On's ROM, not its
+region fill, not its 232-line geometry. Whatever it is, both titles on this
+board share it.
+
+Also worth recording because it validates an earlier result: `spr_off` holds
+`kaneko_spr_sys` in RESET rather than merely blanking its output, so the
+"sprites off, no change" test genuinely removed the sprite fetching and sprite
+bandwidth is properly ruled out. A switch that only blanked the output would
+have made that result meaningless.
+
+### A tilemap kill switch, to close the contention question
+
+`O[17] Tilemaps On/Off` stops `line_start`, so the tile ROM feeder issues no
+SDRAM requests at all. With it and the sprite switch both off, the 68000 is the
+ONLY consumer of SDRAM on a board whose OKI is idle.
+
+This exists to settle the one hypothesis nothing else can reach. Both Blaze On
+board titles run 491 frames in simulation and park immediately on hardware, and
+the single thing the boot harness does not model is the video path competing
+for memory. Adding the video path to the harness is hours of work; this is one
+switch and one build, and it is decisive in both directions:
+
+  still parks with zero video traffic  ->  contention is NOT the cause, and
+                                           that whole line of enquiry closes
+  boots                                ->  contention confirmed, and the fix is
+                                           in the arbiter or burst scheduling
