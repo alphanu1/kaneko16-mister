@@ -5212,3 +5212,45 @@ The fix is priority, not bandwidth: the ports with a per-line deadline should
 outrank the ports with a per-frame one. Round-robin within each tier, tier 1
 first. Hard rule 9 applies — this is shared code and Explosive Breaker works
 today, so it needs the gate and a hardware check before it is believed.
+
+### The layer-1 +2 is MAME's INFERENCE, not a measurement — and our gate cannot check it
+
+Challenged on where the two-pixel offset comes from, and the honest answer is
+that the only evidence is MAME. MAME documents its own reasoning, in a note
+about Great 1000 Miles Rally at `kaneko_tmap.cpp:80`:
+
+```
+  car select screen scroll values:
+      $6x0000: $72c0 ; $fbc0 ; 7340 ; 0
+      $72c0/$40 = $1cb = $200-$35  /  $7340/$40 = $1cd = $1cb+2
+```
+
+The author observed that the two layers' scroll registers differ by exactly 2
+and inferred the chip must offset layer 1 by 2 so they coincide. That is
+reasoning from software behaviour, not from a PCB. The device then hardcodes it:
+
+```
+  m_tmap[1]->set_scrolldx(-(m_dx+2), ...)
+```
+
+**Blaze On writes the identical values, $72c0 and $7340.** Same convention
+across the family.
+
+Two readings fit the same evidence:
+
+1. MAME's — the hardware offsets layer 1 by +2 and the game writes -2 to cancel
+   it, so the layers coincide.
+2. The alternative — the hardware does NOT offset, and the game genuinely wants
+   layer 1 two pixels across.
+
+**The frame gate cannot distinguish them, because MAME is its reference.** If
+reading 2 is right, this core reproduces MAME's mistake and the gate still
+reports 100%. Every green number in that column is silent on this question, and
+that is worth remembering wherever the oracle is an emulator rather than a
+board: a gate against MAME proves agreement, not correctness.
+
+Hardware is the better evidence here, and hardware disagrees — the board draws
+the two layers two pixels apart. `O[21] Layer1 dx +2` removes the offset at run
+time so the question can be settled by looking. It is a switch and not an edit
+because the offset is correct per MAME and Explosive Breaker depends on it;
+hard rule 9 forbids quietly tuning it until one game looks right.

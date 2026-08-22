@@ -78,6 +78,12 @@ the ordinal numbering has moved more than once.
 | 5th | 16 | white | **sprite** passes that did not finish before the next frame |
 | 6th | 16 | magenta | live joystick 1 word — bit 0 at the right |
 
+`Layer1 dx +2` in the OSD removes the two-pixel offset the VIEW2 chip applies
+to its second tilemap layer. The offset is correct — MAME sets
+`set_scrolldx(-(m_dx+2))` for `tmap[1]` and the game cancels it by writing that
+layer's scroll two lower — so this is a diagnostic for a reported two-pixel
+ghost on the Blaze On board, not a setting to leave on.
+
 **The tall block is a scratch area.** By default it is the OKI sound chain —
 CPU writes to the chip, sample-ROM fetches answered, clocks with a channel
 busy, clocks with a non-zero sample — in that order, so the first dark row is

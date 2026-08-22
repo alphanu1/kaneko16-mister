@@ -73,6 +73,7 @@ localparam CONF_STR = {
 	"O[16],Sprites,On,Off;",
 	"O[17],Tilemaps,On,Off;",
 	"O[20:19],Game override,Off(MRA),1 Magical Crystals,2 Blaze On,3 Wing Force;",
+	"O[21],Layer1 dx +2,On,Off;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
@@ -1008,8 +1009,29 @@ end
 
 // Layer 1's dx is two further along than layer 0's: MAME sets scrolldx to
 // -(m_dx + 2) for tmap[1].
-wire [43:0] lay_dx = { 11'(V2_DX_CFG + 11'sd2), 11'(V2_DX_CFG),
-                       11'(V2_DX_CFG + 11'sd2), 11'(V2_DX_CFG) };
+// Layer 1 sits two pixels further along than layer 0. That is REAL VIEW2
+// behaviour, straight from MAME:
+//
+//   m_tmap[0]->set_scrolldx(-m_dx,     ...)
+//   m_tmap[1]->set_scrolldx(-(m_dx+2), ...)
+//
+// and the game cancels it by writing layer 1's scroll two LOWER — 0x72c0
+// against 0x7340, 459 against 461. Both halves are verified on the board, and
+// the arithmetic makes the two layers coincide exactly.
+//
+// The board nevertheless draws them two pixels apart, and this offset is the
+// only +2 anywhere in the path. `O[21]` removes it at run time so that can be
+// tested by looking rather than argued about: if the picture comes good with
+// it off, the game's compensation is NOT reaching the engine despite the
+// overlay reading correct, and the fault is between the latch and the address
+// engine. If nothing changes, this is not the cause.
+//
+// A switch, not an edit: the offset is correct per MAME and Explosive Breaker
+// depends on it, so it must not be quietly removed to make one game look
+// right — hard rule 9.
+wire signed [10:0] l1_dx = status[21] ? V2_DX_CFG : 11'(V2_DX_CFG + 11'sd2);
+wire [43:0] lay_dx = { 11'(l1_dx), 11'(V2_DX_CFG),
+                       11'(l1_dx), 11'(V2_DX_CFG) };
 wire [43:0] lay_dy = { 11'(V2_DY_CFG), 11'(V2_DY_CFG), 11'(V2_DY_CFG), 11'(V2_DY_CFG) };
 
 // ------------------------------------------------------- tile ROM feeder

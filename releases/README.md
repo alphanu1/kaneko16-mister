@@ -38,6 +38,14 @@ of the newest build in this directory.
   before treating that as a fault.
 - Screen timing is not PCB-verified (384x264 at 6 MHz, 59.1856 Hz).
 
+## Layer1 dx +2
+
+The VIEW2 chip draws its second tilemap layer two pixels further along than the
+first — real hardware behaviour, which the game cancels by writing that layer's
+scroll two lower. `Layer1 dx +2` in the OSD removes the offset, as a diagnostic
+for a two-pixel ghost reported on the Blaze On board. Leave it **On**; Off is
+wrong for every game that behaves.
+
 ## The debug overlay
 
 `Debug overlay` in the OSD (off by default) draws seven rows of per-frame
