@@ -3968,3 +3968,65 @@ that names the thing it checks has to match the spelling actually used.**
 Both fixed: the guard matches either spelling, and the boot harness now
 instantiates the real sprite subsystem on its real ports, so a boot verified
 there is verified under the contention the board actually has.
+
+## 2026-08-22 — the black screen is INTERMITTENT, which invalidates the hunt
+
+`cb481bcc` black-screened, was replaced with a known-good build, was put back
+unchanged an hour later, and booted. Same RBF, same MRA, opposite results.
+
+That single fact undoes most of a night's reasoning. Every theory below was
+formed on the assumption of a deterministic fault, and each was tested by
+changing something and seeing the screen stay black:
+
+| theory | how it was "tested" | what the test was actually worth |
+|---|---|---|
+| MRA config byte | removed it, still black | nothing |
+| SDRAM map resize | reverted it, still black | nothing |
+| reader contention during load | gated readers, still black | nothing |
+| sprite path | kill switch, still black | nothing |
+| address decode | reverted it, still black... then it booted | nothing |
+
+**A single failing observation cannot exonerate a change when the fault is
+intermittent.** Five changes were cleared on exactly that evidence, and none of
+them were actually cleared. The bisect that was about to start would have
+inherited the same flaw: a build that boots once proves nothing, and three
+builds of that is three wasted hours.
+
+The tell was there and was missed. Every theory was endorsed by simulation and
+refuted by hardware, five times running. That pattern does not mean five wrong
+guesses about logic — it means the fault is not in logic at all. Something that
+passes every simulation and varies between identical bitstreams is timing,
+placement, or the analogue behaviour of an interface.
+
+### The candidate, already documented in this repository
+
+`rtl/pll/pll.v` says it outright, written when the SDRAM clock was HALVED to
+buy margin rather than fix the cause:
+
+> at 80 MHz the device is clocked on the inverse of the controller clock, which
+> gives it only a half period of skew and no true phase shift ... if the data
+> comes back correct the cause is timing and the fix is a properly
+> phase-shifted SDRAM_CLK
+
+`SDRAM_CLK` is still `~clk_sdram`. The interface has no proper constraint, so
+static timing analysis cannot see it and never fails. Adding an eighth port
+grew the arbiter; every build since has had a different placement; and a
+marginal interface boots or does not depending on where the fitter happened to
+put things.
+
+That also explains why the OSD carries a `SDRAM capture` option with four
+settings at all. It exists because this was suspected once before.
+
+### What would settle it, in order of cost
+
+1. **Power-cycle the same bitstream several times.** If it boots some times and
+   not others, it is confirmed without building anything.
+2. **Sweep `SDRAM capture`.** If a different capture phase boots a bitstream
+   that otherwise does not, confirmed.
+3. **Checksum the ROM in SDRAM after loading** and show it on the debug
+   overlay. Turns "black screen" into "the ROM arrived corrupt", which is a
+   fact rather than an inference.
+4. **Drive `SDRAM_CLK` from the spare PLL output with a real phase shift.**
+   `outclk_2` is sitting unused at 48 MHz. This is the fix the note names, and
+   it is also the prerequisite for the 2x SDRAM clock that would give the
+   sprite renderer room.
