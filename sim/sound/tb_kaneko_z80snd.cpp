@@ -17,18 +17,42 @@ Vkaneko_z80snd* d;
 long checks = 0, fails = 0;
 int  ce_div = 0;
 
+// Deliveries the YM2151 would actually latch. jt51 forms
+// `write = !cs_n && !wr_n` and samples it at the RISING EDGE with cen_p1 as
+// the enable, so the values that matter are the ones settled before the edge,
+// not after it. Counting after the edge reads a write that was taken as if it
+// never happened -- which it does, because taking it releases the request.
+long ym_deliv = 0;
+uint8_t ym_deliv_din = 0;
+int     ym_deliv_a0  = -1;
+
 void tick(int n = 1) {
     for (int i = 0; i < n; i++) {
         d->ym_ce = (ce_div == 0);   // free-running; the CPU's stall never gates it
         ce_div = (ce_div + 1) % 12;      // 48 MHz / 12 = 4 MHz
         d->clk = 0; d->eval();
+        if (d->ym_cen_p1 && !d->ym_cs_n && !d->ym_wr_n) {
+            ym_deliv++;
+            ym_deliv_din = d->ym_din;
+            ym_deliv_a0  = d->ym_a0;
+        }
         d->clk = 1; d->eval();
     }
 }
 
+// LONG ENOUGH FOR THE SOUND CHIP'S CLOCK TO RUN, which is the point.
+//
+// This ticked once, and that made the bench unable to represent hardware: the
+// YM2151's write is delivered in its cen_p1 domain -- half the 4 MHz enable,
+// so one pulse every 24 of these -- and the module holds a request until a
+// cen_p1 has taken it. A one-tick idle never produces one, so a write stayed
+// pending forever and the chip select never released, which read as "a memory
+// cycle selects the YM" when the real behaviour is "the write has not been
+// collected yet". On the board the bus is never idle for zero time and the
+// chip's clock never stops.
 void idle() {
     d->mreq_n = 1; d->iorq_n = 1; d->rd_n = 1; d->wr_n = 1;
-    tick();
+    tick(32);
 }
 
 // A Z80 memory read: address, MREQ and RD asserted, data sampled after the
@@ -172,6 +196,44 @@ int main(int argc, char** argv) {
     tick();
     check(d->ym_cs_n == 1, "a MEMORY cycle at 0x0002 does not select the YM");
     idle();
+
+    // ---- EVERY WRITE REACHES THE CHIP'S SAMPLING DOMAIN, EXACTLY ONCE.
+    //
+    // This is the check that was missing, and its absence cost a day. jt51
+    // does not latch a write when the CPU makes it: jt51.v forms
+    // `write = !cs_n && !wr_n` and samples it in the cen_p1 domain, which is
+    // HALF the 4 MHz enable -- one opportunity every 24 clocks. A Z80 I/O
+    // strobe is only one or two 4 MHz ticks wide, so passing it through raw
+    // makes delivery depend on parity: land on the wrong tick and the write
+    // is dropped in silence, with every signal looking correct.
+    //
+    // On hardware that was Wing Force writing the YM at MAME's rate -- about
+    // fifteen times a frame -- while jt51's output sat at exactly zero.
+    //
+    // So: issue the same write at EVERY phase relative to cen_p1, and demand
+    // that the chip sees it once. Once, not "at least once" -- a duplicate is
+    // its own bug, because a repeated key-on retriggers a note.
+    printf("== every write is delivered once, at every cen_p1 phase\n");
+    for (int phase = 0; phase < 24; phase++) {
+        idle();
+        for (int k = 0; k < phase; k++) tick();     // slide against cen_p1
+
+        ym_deliv = 0; ym_deliv_a0 = -1; ym_deliv_din = 0;
+        d->cpu_addr = 0x0003; d->cpu_dout = 0x5a;
+        d->iorq_n = 0; d->wr_n = 0;
+        tick(2);                       // a short strobe, as an OUT presents
+        d->iorq_n = 1; d->wr_n = 1;
+        tick(64);                      // let any held request drain
+
+        if (ym_deliv != 1) {
+            check(false, "write delivered exactly once");
+            if (fails <= 12) printf("    phase %2d: chip saw it %ld times\n", phase, ym_deliv);
+        } else {
+            check(true, "write delivered exactly once");
+            check(ym_deliv_din == 0x5a, "delivered data is the byte written");
+            check(ym_deliv_a0  == 1,    "delivered a0 is the data half");
+        }
+    }
 
     printf("\ntb_kaneko_z80snd: %ld checks, %ld fails\n", checks, fails);
     delete d;

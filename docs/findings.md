@@ -5707,3 +5707,54 @@ its cache miss rate is simply a different number. Its census should be read too.
 The rate itself was never wrong: MAME clocks the YM2151 at 4 MHz on both
 boards, `YM2151(config, m_ymsnd, 4000000)` for Blaze On and `XTAL(16'000'000)/4`
 for Wing Force. Only the gating was.
+
+### The YM2151 writes were never reaching the chip
+
+Wing Force wrote the YM2151 about fifteen times a frame -- MAME's own rate --
+while jt51's output sat at exactly zero. Every signal looked right.
+
+jt51 does not latch a write when the CPU makes it. `jt51.v` forms
+
+```
+wire write = !cs_n && !wr_n;
+jt51_mmr u_mmr( .cen( cen_p1 ), .write( write ), ... );
+```
+
+and samples that in the **cen_p1** domain -- HALF the chip clock, one
+opportunity every 24 clocks at 4 MHz. A Z80 I/O strobe is one or two 4 MHz
+ticks wide. Passing it through raw therefore makes delivery a matter of parity:
+land on the wrong tick and the write is dropped, silently, with cs_n, wr_n, a0
+and din all correct at every instant anyone would look at them.
+
+The bench now sweeps a write across all 24 phases and demands the chip see it
+exactly once. Against the shipped pass-through it reports **zero deliveries at
+every phase**.
+
+**This is also why the previous fix made things marginally worse.** Before it,
+`ce_d` toggled on the CPU's STALLED enable, so cen_p1's phase wandered against
+the writes and some of them landed by luck -- enough for the menu tune, not
+enough for the demo. Giving the sound chip a free-running enable was correct in
+itself, and it made the phase constant, which turned intermittent delivery into
+consistent failure. The reported symptom, music lasting "an extra split
+second", was the change working exactly as designed on top of a second fault.
+
+The request is latched on its rising edge, with address and data, and released
+by the first cen_p1 that takes it. On the rising edge and not on the level:
+holding it while the CPU's strobe is asserted delivers the write TWICE at some
+phases -- once during the strobe, once from the still-pending request after it
+-- and a repeated key-on retriggers a note. The bench caught that too, on the
+first run of the new test against the first version of the fix.
+
+Two things worth keeping:
+
+**The bench could not see this before because `idle()` ticked once.** The
+sound chip's clock never stops on hardware, so a one-tick idle cannot
+represent it, and a write left pending forever read as "a memory cycle selects
+the YM" rather than "the write has not been collected". A bench that cannot
+represent the passage of time cannot test anything paced by it.
+
+**The instrument had to be moved three times before it pointed here.** OKI
+chain, then a Z80 port census, then past the YM's write port -- each answered
+its question and each answer moved the search. The census was decisive: the Z80
+writing at MAME's rate while producing nothing is what ruled out the CPU, the
+ROM cache, the command path and the OKI in a single reading.

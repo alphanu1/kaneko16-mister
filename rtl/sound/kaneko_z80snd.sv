@@ -188,10 +188,66 @@ module kaneko_z80snd (
     always_ff @(posedge clk) if (ym_ce) ce_d <= ~ce_d;
     assign ym_cen    = ym_ce;
     assign ym_cen_p1 = ym_ce && ce_d;
-    assign ym_cs_n   = ~sel_ym;
-    assign ym_wr_n   = wr_n;
-    assign ym_a0     = cpu_addr[0];
-    assign ym_din    = cpu_dout;
+
+    // THE WRITE IS HELD UNTIL cen_p1 HAS ACTUALLY TAKEN IT.
+    //
+    // jt51 samples writes in its cen_p1 domain -- jt51.v builds
+    // `write = !cs_n && !wr_n` and hands it to jt51_mmr clocked by cen_p1,
+    // which is HALF the chip clock, one pulse every two 4 MHz ticks. The Z80
+    // holds an I/O write strobe for one or two ticks. Passing the strobe
+    // through raw therefore makes it a coin toss whether any given write is
+    // seen at all: land on the wrong parity and it is dropped in silence.
+    //
+    // That was survivable by accident while ce_d toggled on the CPU's stalled
+    // enable, because the phase wandered and writes landed often enough. Once
+    // the sound chip was given a free-running enable the phase became fixed,
+    // and a register that always fell on the wrong tick was dropped EVERY
+    // time. On hardware: the Z80 wrote the YM at MAME's rate -- about fifteen
+    // times a frame -- while jt51's output sat at exactly zero.
+    //
+    // So the request is latched, with its address and data, and held until a
+    // cen_p1 goes by. Address and data are latched too: the Z80 releases the
+    // bus as soon as its cycle ends, which can be before the chip has looked.
+    // ONE REQUEST IN, ONE DELIVERY OUT, whatever the phase.
+    //
+    // Latched on the REQUEST'S RISING EDGE and released by the first cen_p1
+    // that takes it. Holding it while the CPU's strobe is asserted instead
+    // delivers the write TWICE at some phases -- the chip samples it once
+    // during the strobe and again from the still-pending request after the
+    // strobe drops -- and a repeated key-on retriggers a note. The bench
+    // sweeps all 24 phases and demands exactly one delivery at each.
+    logic       ym_pend;
+    logic       ym_wr_req_d;
+    logic [7:0] ym_din_q;
+    logic       ym_a0_q;
+    wire        ym_wr_req  = sel_ym && ~wr_n;
+    wire        ym_wr_edge = ym_wr_req && !ym_wr_req_d;
+
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            ym_pend     <= 1'b0;
+            ym_wr_req_d <= 1'b0;
+            ym_din_q    <= 8'd0;
+            ym_a0_q     <= 1'b0;
+        end else begin
+            ym_wr_req_d <= ym_wr_req;
+            if (ym_wr_edge) begin
+                ym_pend  <= 1'b1;
+                ym_din_q <= cpu_dout;
+                ym_a0_q  <= cpu_addr[0];
+            end else if (ym_cen_p1 && ym_pend) begin
+                ym_pend  <= 1'b0;
+            end
+        end
+    end
+
+    // Address and data come from the latch, never straight from the bus: the
+    // Z80 releases both when its cycle ends, which can be before the chip has
+    // had a cen_p1 to look.
+    assign ym_cs_n   = ~ym_pend;
+    assign ym_wr_n   = ~ym_pend;
+    assign ym_a0     = ym_a0_q;
+    assign ym_din    = ym_din_q;
 
     // ---------------------------------------------------- read multiplexer
     // A decoded address that returns nothing is worse than one not decoded at
