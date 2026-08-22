@@ -361,7 +361,22 @@ assign SDRAM_CLK = ~clk_sdram;
 // Declared above the controller because its port gating uses rom_loaded.
 wire rom_loaded, ldr_overflow;
 
-kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300)) u_sdram
+// WHICH PORTS HAVE A DEADLINE, by index:
+//
+//   p0, p2, p3, p4   tile feeder, one per layer — must finish a LINE
+//   p1               68000 ROM fetch — the CPU stalls on DTACK waiting
+//   p5               OKI samples — a whole frame of slack
+//   p6, p7           sprite ROM — a whole frame of slack
+//
+// Round-robin gave all eight an equal share, so the sprite ports took their
+// slots on schedule while the tile feeder missed its line. On hardware that
+// showed as tilemap overruns on the Blaze On board and a smeared layer, and
+// turning sprites off took those overruns to zero — the measurement that
+// identified this.
+//
+// 8'b0001_1111: tiles and the CPU first, sound and sprites with what is left.
+kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300),
+               .URGENT(8'b0001_1111)) u_sdram
 (
 	.clk(clk_sdram), .rst_n(pll_locked), .ready(mem_ready),
 	.rd_lat_sel(status[5:4]),

@@ -5323,3 +5323,79 @@ The one path neither harness covers is the CPU's writes into `kaneko_vmem` —
 the frame gate loads VRAM from C++ arrays and the boot harness ties the video
 read ports to zero. If our VRAM contents differ from MAME's, everything above
 being correct is exactly what you would see.
+
+### The tile data is perfect, so the smearing is the FETCHER missing its deadline
+
+The CPU's writes into `kaneko_vmem`, compared tile by tile against MAME's dump
+of the same screen:
+
+```
+  layer 0 (bank 0x1000): 0 of 1024 tiles differ
+  layer 1 (bank 0x0000): 0 of 1024 tiles differ
+```
+
+Perfect. That was the last untested link in the tilemap chain, and it is clean.
+
+(The first run of this test reported 401 and 400 tiles differing, all of them
+pure byte swaps: `mame_dump_frame.lua` writes u16 LITTLE-endian and the
+comparison read big-endian. The all-zero tiles matched either way and hid it.
+Third instrument of the day to produce a confident wrong answer, after the
+vector latch that measured itself and the register dump printed after the wrong
+run. The signature that saved it was that the differences were SYSTEMATIC — a
+byte swap is a bug in the reader, random noise would have been a bug in the
+core.)
+
+So every stage is verified: VRAM contents, renderer, registers, latch, layer
+offset, line scroll, tile ROM addressing, line buffer. And the picture is still
+wrong, which leaves only the thing simulation does not model — the fetcher
+running out of time on real hardware.
+
+The evidence for that was already in hand:
+
+```
+  tilemap overruns    up to 3 bars on the Blaze On board
+  sprites OFF         overruns go to ZERO
+```
+
+An overrun means the line fetch did not finish before the next line started, so
+that line is drawn from a PARTIALLY FILLED buffer — part new pixels, part
+stale. That is what a smeared layer is. It also explains why one layer looks
+right and the other does not: the layer with the heavier per-line workload is
+the one that misses, and the sparse text and stars finish comfortably.
+
+### Fix: the arbiter must respect deadlines, not share equally
+
+`kaneko_sdram` arbitrated pure round-robin over all eight ports:
+
+```
+  p0, p2, p3, p4   tile feeder      must finish a LINE
+  p1               68000 ROM        stalls the CPU on DTACK
+  p5               OKI samples      a whole frame of slack
+  p6, p7           sprite ROM       a whole frame of slack
+```
+
+Equal share means the ports with a frame of slack take their slots on schedule
+while the ports with a line deadline miss — and the sprite engine duly finishes
+every frame, which is why its own overrun counter reads zero and made it look
+innocent.
+
+`URGENT` is now a parameter: a one marks a port that cannot wait. Urgent ports
+are served first, round-robin among themselves; the rest share what is left,
+also round-robin. Default is all ones, exactly the old behaviour, so nothing
+else changes. The core passes `8'b0001_1111`.
+
+The harness uses the core's mask rather than the default — a harness that
+measures a configuration the core does not ship is how the per-game pages and
+the input words both got past this project already — and the new test fails on
+the old behaviour, which is the only reason to believe it:
+
+```
+  round-robin (old)   urgent 821, slack 494    <- roughly the 5:3 port ratio
+  tiered (new)        urgent 1315, slack 0
+```
+
+Slack going to zero is under SYNTHETIC saturation, where the tile ports request
+continuously. In the core the feeder goes idle once the line is fetched, so
+sprites get the rest of every line plus hblank and vblank. That is an argument
+rather than a measurement, and the sprite overrun row is where it would show if
+it is wrong.

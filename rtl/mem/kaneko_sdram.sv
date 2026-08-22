@@ -121,6 +121,21 @@ module kaneko_sdram #(
   parameter int unsigned ROW_BITS = 13,
   parameter int unsigned BA_BITS  = 2,
   parameter int unsigned NP = 5,      // read/write ports, see D8
+  // WHICH PORTS HAVE A DEADLINE.
+  //
+  // Round-robin gives every port an equal share, which is wrong when the ports
+  // have wildly different deadlines. The tile feeder must finish a LINE before
+  // the next one starts; the sprite engine has a whole FRAME. Under equal
+  // share the sprite ports take their slots on schedule, the tile feeder
+  // misses, and the sprite engine comfortably makes its own — which is exactly
+  // what the two overrun counters showed on hardware, and turning sprites off
+  // took the tilemap overruns to zero.
+  //
+  // A one in this mask marks a port that cannot wait. Urgent ports are served
+  // first, round-robin among themselves; everything else shares what is left,
+  // also round-robin. Default is all ones, which is the old behaviour exactly,
+  // so every existing harness measures what it always measured.
+  parameter logic [NP-1:0] URGENT = '1,
 
   // Device timing, in clk cycles. Defaults suit -7E parts around 100 MHz.
   parameter int unsigned T_RCD  = 2,
@@ -421,13 +436,22 @@ module kaneko_sdram #(
   always_comb begin
     rr_valid = 1'b0;
     rr_grant = rr_next;
-    // Walk the rotation from rr_next and take the first pending port. A loop
-    // rather than a case ladder per rotation position: the ladder form is NP
-    // copies of the same priority chain and every copy is a chance to mistype
-    // an index.
+    // TWO PASSES, URGENT FIRST. Within each pass the rotation still starts at
+    // rr_next, so ports of equal urgency keep taking turns and none can hold
+    // the bus. A loop rather than a case ladder per rotation position: the
+    // ladder form is NP copies of the same priority chain and every copy is a
+    // chance to mistype an index.
     for (j = 0; j < NP; j = j + 1) begin
       cand = (rr_next + j) % NP;
-      if (pend[cand] && !inflight[cand] && !rr_valid) begin
+      if (URGENT[cand] && pend[cand] && !inflight[cand] && !rr_valid) begin
+        rr_valid = 1'b1;
+        rr_grant = ($clog2(NP))'(cand);
+      end
+    end
+    // Only once nothing with a deadline is waiting.
+    for (j = 0; j < NP; j = j + 1) begin
+      cand = (rr_next + j) % NP;
+      if (!URGENT[cand] && pend[cand] && !inflight[cand] && !rr_valid) begin
         rr_valid = 1'b1;
         rr_grant = ($clog2(NP))'(cand);
       end

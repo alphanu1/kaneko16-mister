@@ -66,6 +66,15 @@ module kaneko_cpumem_harness #(
     output logic [31:0] dbg_v2r0_we_cnt,
     output logic [31:0] dbg_v2r0_be_cnt,
 
+    // A window into VIEW2 chip 0's TILE MEMORY, so a test can compare what the
+    // 68000 actually wrote against what MAME holds at the same point. Neither
+    // harness has ever looked: the frame gate loads VRAM from C++ arrays and
+    // this one tied the video read ports to zero, so the CPU write path into
+    // kaneko_vmem is the last link in the tilemap chain with no coverage.
+    input  wire [9:0]   dbg_vram_addr,
+    output wire [31:0]  dbg_c0_t0_q,
+    output wire [31:0]  dbg_c0_t1_q,
+
     // Read capture depth. The board wants 0 (CL+1) on hardware evidence; the
     // device model wants 3 (CL+3), which is what the controller resets to. A
     // harness that hard-wired either one would be testing the other machine,
@@ -549,8 +558,8 @@ module kaneko_cpumem_harness #(
         .we_spr(spr_we), .we_pal(pal_we),
         .uds(~UDSn), .lds(~LDSn),
         .q_vram0(q_vram0), .q_vram1(q_vram1), .q_spr(q_spr), .q_pal(q_pal),
-        .c0_t0_addr(10'd0), .c0_t0_q(),
-        .c0_t1_addr(10'd0), .c0_t1_q(),
+        .c0_t0_addr(dbg_vram_addr), .c0_t0_q(dbg_c0_t0_q),
+        .c0_t1_addr(dbg_vram_addr), .c0_t1_q(dbg_c0_t1_q),
         .c0_s0_addr(11'd0), .c0_s0_q(),
         .c0_s1_addr(11'd0), .c0_s1_q(),
         .c1_t0_addr(10'd0), .c1_t0_q(),

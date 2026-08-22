@@ -487,6 +487,41 @@ int main(int argc, char** argv) {
     printf("  total cycles=%u, %ld transactions served\n", total, served);
   }
 
+  // ------------------------------------------------- deadline ports win
+  //
+  // Ports 0-4 are the tile feeder and the 68000 and have deadlines; 5-7 are
+  // the OKI and the sprite engine and have a whole frame. Under the old pure
+  // round-robin all eight shared equally, the tile feeder missed its line and
+  // the sprite engine made its frame comfortably — which on hardware was a
+  // smeared tilemap layer, and turning sprites off took the overruns to zero.
+  //
+  // With every port hammering continuously, the urgent ones must take
+  // essentially all of the bus. This fails on the round-robin the controller
+  // shipped with, which is the point of it.
+  {
+    long urgent = 0, slack = 0;
+    // Every port re-issues the instant it completes, so all eight are pending
+    // essentially all the time and the arbiter has to choose on every grant.
+    for (int i = 0; i < NP; i++) h.issue(i, 0x2000 + i * 0x400, false, 0);
+    for (int c = 0; c < 20000; c++) {
+      h.step();
+      for (int i = 0; i < NP; i++)
+        if (!h.port[i].busy) {
+          (i < 5 ? urgent : slack)++;
+          h.issue(i, 0x2000 + i * 0x400 + ((c * 8) & 0x3ff), false, 0);
+        }
+    }
+    for (int i = 0; i < NP; i++) h.port[i].busy = false;
+    h.drain();
+    h.checks++;
+    printf("  arbitration under full load: urgent(0-4) served %ld, slack(5-7) served %ld\n",
+           urgent, slack);
+    if (urgent == 0 || slack > urgent / 4) {
+      printf("  FAIL deadline ports did not get priority\n");
+      h.fails++;
+    }
+  }
+
   h.checks++;
   if (h.d->violations != 0) {
     printf("  FAIL device model reported %u protocol violations, flags=%04x\n",

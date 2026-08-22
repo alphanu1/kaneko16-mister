@@ -335,6 +335,53 @@ int main(int argc, char** argv) {
     Stats a = run(rom, false, !trace_path, false, run_a, good_lat, 0);
     report("result", a, run_a);
 
+    // ---- what the 68000 wrote into VIEW2 chip 0's TILE MEMORY, against
+    // MAME's copy of the same. The last link in the tilemap chain with no
+    // coverage: the frame gate loads VRAM from C++ arrays and this harness
+    // tied the video read ports to zero. With the renderer, the registers, the
+    // layer offset and the tile ROM feeder all verified, and hardware showing
+    // ONE layer drawn correctly and the other not, a wrong bank here is what
+    // the symptom looks like.
+    //
+    // MAME's view2_0_vram.bin: 0x0000 is vram_1 (layer 1), 0x1000 is vram_0
+    // (layer 0). Two words per tile, attribute then code; kaneko_vmem presents
+    // them as {code, attr}.
+    if (const char* vp = getenv("CMP_VRAM")) {
+        std::vector<uint8_t> ref;
+        if (FILE* f = fopen(vp, "rb")) {
+            fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
+            ref.resize((size_t)n);
+            if (fread(ref.data(), 1, (size_t)n, f) != (size_t)n) ref.clear();
+            fclose(f);
+        }
+        if (ref.size() < 0x2000) {
+            std::printf("\n    CMP_VRAM: %s unreadable or short\n", vp);
+        } else {
+            // LITTLE-endian. mame_dump_frame.lua writes u16 low byte first,
+            // and reading it big-endian made every non-zero tile look wrong —
+            // 401 of 1024 "differ", all of them pure byte swaps, while the
+            // all-zero tiles matched either way and hid it.
+            auto le16 = [&](size_t o) { return (unsigned)(ref[o] | (ref[o + 1] << 8)); };
+            long bad0 = 0, bad1 = 0, shown = 0;
+            for (int i = 0; i < 1024; i++) {
+                dut->dbg_vram_addr = i; tick(); tick();
+                unsigned o0 = (unsigned)dut->dbg_c0_t0_q;
+                unsigned o1 = (unsigned)dut->dbg_c0_t1_q;
+                unsigned m0 = (le16(0x1000 + i * 4 + 2) << 16) | le16(0x1000 + i * 4);
+                unsigned m1 = (le16(0x0000 + i * 4 + 2) << 16) | le16(0x0000 + i * 4);
+                if (o0 != m0) { bad0++;
+                    if (shown < 6) { std::printf("      L0 tile %4d  ours %08x  mame %08x\n",
+                                                 i, o0, m0); shown++; } }
+                if (o1 != m1) { bad1++;
+                    if (shown < 6) { std::printf("      L1 tile %4d  ours %08x  mame %08x\n",
+                                                 i, o1, m1); shown++; } }
+            }
+            std::printf("\n    VIEW2 chip0 tile memory against MAME\n");
+            std::printf("      layer 0 (bank 0x1000): %ld of 1024 tiles differ\n", bad0);
+            std::printf("      layer 1 (bank 0x0000): %ld of 1024 tiles differ\n", bad1);
+        }
+    }
+
     // ---- what the 68000 actually wrote into VIEW2 chip 0's registers.
     // Blaze On locks layer 1's scroll 2 below layer 0's to cancel the
     // hardware's dx+2 for that layer; MAME shows L0 sx=0x7340 (461) and
