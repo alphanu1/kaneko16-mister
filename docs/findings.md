@@ -4722,3 +4722,63 @@ switch and one build, and it is decisive in both directions:
                                            that whole line of enquiry closes
   boots                                ->  contention confirmed, and the fix is
                                            in the arbiter or burst scheduling
+
+## 2026-08-22 — the game-id byte never arrived. One bug, three dead games.
+
+Blaze On reports **256x224** in the MiSTer OSD. That is Explosive Breaker's
+geometry. And `ZZ-TEST-EB-as-game01.mra` — Explosive Breaker's own ROMs with
+the config byte changed to 01 — boots Explosive Breaker normally, when it
+should have handed it Magical Crystals' memory map and broken it.
+
+Two independent proofs of one thing: **the MRA's `<rom index="1">` config byte
+never reaches the core, and `game_id` is stuck at its reset value of 0.**
+
+```
+  explbrkr   id 0   WORKS      <- and 0 is the reset default
+  mgcrystl   id 1   black, CPU running
+  blazeonj   id 2   black, CPU parked
+  wingforc   id 3   black, CPU parked
+```
+
+### Why: one byte is zero words
+
+The core runs `hps_io` with **WIDE=1**, 16-bit file I/O. Our config ROM was a
+single byte:
+
+```
+  ours          <rom index="1"><part>02</part></rom>        ONE byte
+  1942, works   <rom index="1"><part>05 98</part></rom>     TWO bytes
+```
+
+A one-byte file is zero 16-bit words, so the transfer never produces an ioctl
+write and the latch never fires. Every working MiSTer core that passes config
+this way sends an even number of bytes. Fixed in
+`tools/build_rom_regions.py`; no bitstream change, the MRA alone.
+
+The id now goes in BOTH bytes rather than being padded with a zero, on purpose:
+a pad in the wrong half reads as game 0, which is Explosive Breaker, which is
+indistinguishable from working for one game in four. That is precisely the
+failure being fixed.
+
+### The signal that was in hand for hours
+
+Correcting Blaze On's MRA from id 00 to id 02 changed NOTHING on hardware. That
+was observed, noted, and moved past. **A configuration change that provably
+alters the artefact and provably changes nothing on the device is evidence
+about the DELIVERY PATH, not the content.** Every hour after that was spent
+below the fault: the per-game pages, the ROM window, the region fill, the input
+word order, the 0xFF00 SYSTEM value, the acknowledge windows. All real, all
+verified against MAME, none of them able to take effect.
+
+### The default that hid it, for the fourth time
+
+`game_id` falls back to 0 when nothing sets it, and 0 is a REAL GAME that then
+works perfectly. Had the fallback been an invalid id — one that renders
+obviously broken or refuses to run — the fault would have been visible on
+Explosive Breaker the first time it was loaded, instead of hiding behind the
+one title anybody was testing.
+
+**The fallback for a missing selector must not be a valid selection.** Fourth
+incident of a default that returns a plausible value: the SDRAM burst length,
+the harness port count, `GAME_ID.get(setname, 0)`, and now the reset value of
+`game_id` itself.

@@ -449,7 +449,23 @@ def build_mra(setname, rompath, outdir):
             f"{setname}: no entry in GAME_ID. Add it there and to the table in "
             f"rtl/io/kaneko_gamecfg.sv — the two are checked against each other "
             f"by nothing.")
-    ET.SubElement(cfg, "part").text = f"{GAME_ID[setname]:02X}"
+    # TWO BYTES, NOT ONE, AND THE ID IN BOTH.
+    #
+    # The core runs hps_io with WIDE=1 — 16-bit file I/O. A one-byte file is
+    # zero 16-bit words, so the transfer never produces an ioctl write and the
+    # core keeps game_id at its reset value. Explosive Breaker is id 0, so it
+    # worked; every other title silently ran on Explosive Breaker's memory map,
+    # geometry and inputs, which cost most of a night. Every working MiSTer core
+    # that passes config this way sends an even number of bytes — 1942's is
+    # "05 98".
+    #
+    # The id is written into BOTH bytes rather than padded with a zero, so it
+    # does not matter which half of the 16-bit word the core reads. A pad byte
+    # in the wrong half reads as game 0, which is Explosive Breaker, which is
+    # exactly the failure this comment exists to prevent — indistinguishable
+    # from working, for one game out of four.
+    ET.SubElement(cfg, "part").text = \
+        f"{GAME_ID[setname]:02X} {GAME_ID[setname]:02X}"
 
     rom = ET.SubElement(root, "rom", index="0", zip=f"{zname}.zip", md5="none")
     cursor = 0
