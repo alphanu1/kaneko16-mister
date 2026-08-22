@@ -206,8 +206,36 @@ module kaneko_tmap_line #(
             // index is enough to lose it, and Quartus says nothing — the only
             // symptom is the ALM count and a block-memory total that falls by
             // exactly the size of the memory that vanished.
-            logic [W-1:0] lb0 [0:H_VIS-1];
-            logic [W-1:0] lb1 [0:H_VIS-1];
+            // MLAB, EXPLICITLY. The shape above is a correct simple-dual-port
+            // shape and Quartus inferred nothing from it -- no message, no
+            // warning, just 4 layers x 2 banks x 320 x 14 bits built out of
+            // flip-flops at a cost of 18,362 ALMs, 44% of the device, for
+            // eight line buffers. The tell is the same one the Z80 work RAM
+            // gave: an inference message for other arrays and silence here.
+            //
+            // MLAB rather than M10K, for two reasons. The device is at 98% of
+            // its 553 M10K blocks and kaneko_vmem is already being evicted
+            // into logic for want of them, so spending more there makes the
+            // real problem worse. And MLAB was completely unused -- 0 bits of
+            // a capacity of up to half the device's 4,191 LABs -- while
+            // "Auto RAM to MLAB Conversion" sat On and never fired, because
+            // auto-conversion only reshapes memory Quartus already recognises
+            // AS memory, and it never recognised this.
+            //
+            // DEPTH IS THE FULL ADDRESS RANGE, NOT H_VIS, AND THAT IS THE
+            // WHOLE FIX. XW is $clog2(320) = 9, so wa and rd_i span 0..511
+            // while the array was declared 0..319. An address that can exceed
+            // the array is not a memory Quartus will infer, and the ramstyle
+            // attribute did NOT rescue it: ramstyle only steers an inference
+            // that already succeeds, so with inference declined the attribute
+            // was dropped in silence. Adding it changed the synthesis estimate
+            // by exactly zero -- 75132 ALMs and 99379 registers before and
+            // after, 0 MLAB bits both times -- which is what made it obvious.
+            //
+            // Padding to 512 costs 21,504 bits that are never addressed and
+            // buys the inference.
+            (* ramstyle = "MLAB" *) logic [W-1:0] lb0 [0:(1<<XW)-1];
+            (* ramstyle = "MLAB" *) logic [W-1:0] lb1 [0:(1<<XW)-1];
             logic [W-1:0] q0, q1;
 
             wire [XW-1:0] wa = x_wr[gi][XW-1:0];
