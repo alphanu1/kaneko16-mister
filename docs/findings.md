@@ -4831,3 +4831,57 @@ acted on the forced one — a core running one board's pages with another's
 geometry, and a readout lying about which. There is now one effective id, and
 the test asserts the override moves every output, not just the one being
 looked at.
+
+## 2026-08-22 — twelve hours of hardware tests were run against the wrong bitstream
+
+`Kaneko16_GOOD.rbf`, the fallback parked in `_Arcade/cores/` at 00:35, shadowed
+`Kaneko16.rbf` on every single load. MiSTer's `mra_loader.cpp` resolves
+`<rbf>Kaneko16</rbf>` like this:
+
+```
+  snprintf(newstring, ..., "%s", filename);            // "Kaneko16"
+  if (!strncasecmp(newstring, entry->d_name, len) &&
+      (entry->d_name[len] == '.' || entry->d_name[len] == '_'))
+      if (!lastfound[0] || strcmp(lastfound, entry->d_name) < 0)
+          strcpy(lastfound, entry->d_name);            // keeps the GREATEST
+```
+
+It accepts `Kaneko16` followed by `.` or `_`, and keeps the lexicographically
+greatest. `'_'` is 0x5F, `'.'` is 0x2E, so `Kaneko16_GOOD.rbf` wins.
+
+**Everything measured on hardware after 00:35 was measuring `ba391b84`.** The
+deploys were correct and checksum-verified on the card; the FPGA never loaded
+them. Explosive Breaker kept working, so nothing looked wrong.
+
+Invalidated, all of it: Blaze On black with the CPU parked, the 256x224
+geometry reading, sprites-off making no difference, the SDRAM capture CL+0
+results, the exception-vector readings, the "game-id byte never arrives"
+conclusion, and the `ZZ-TEST-EB-as-game01` result. Also the two anomalies that
+were written up as unexplained — overlay rows at scanlines 92 and 100 "not
+rendering", and an OSD option that "was not there". Both were simply absent
+from the loaded bitstream. One of them had a whole findings entry theorising
+about video geometry.
+
+With the fallback moved out of `cores/`:
+
+```
+  explbrkr   works
+  blazeonj   RUNS — warning screen and attract, tiles/sprites misplaced
+  wingforc   RUNS from its own MRA, same misplacement
+  mgcrystl   boots, debug overlay good, screen black
+```
+
+**The game-id byte does arrive.** Wing Force loading its own geometry from its
+own MRA proves it. The per-game table works, and every fix made during the
+blackout — the pages, the ROM window, the region fill, the input word order,
+the 0xFF00 SYSTEM value, the acknowledge windows — is real and now actually
+running.
+
+### The lesson is about verification, not about MiSTer
+
+A checksum on the SD card proves the copy landed. It proves nothing about what
+the FPGA loaded, and that distinction went unexamined for twelve hours while
+being cited as evidence. The fix is a visible marker that changes every build —
+a new OSD entry, a version nibble on the overlay — checked before any reading
+is trusted. `releases/` already has a rule that working is defined by the
+device and not by the build directory; this is the same rule one level deeper.
