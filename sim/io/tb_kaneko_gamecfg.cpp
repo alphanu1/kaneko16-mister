@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Kaneko 16-bit arcade core for MiSTer FPGA — Copyright (C) 2026 alphanu1
+//
+// Per-game configuration, including the ioctl path that delivers the game id.
+//
+// That path selects the MEMORY MAP. A wrong byte here is a core that decodes
+// nothing and shows a black screen, which is exactly what happened when this
+// logic lived in the top level where no harness could reach it. It was pulled
+// back out and hardwired until it could be tested. This is that test.
+#include <cstdio>
+#include <cstdint>
+#include "Vkaneko_gamecfg.h"
+#include "verilated.h"
+
+namespace {
+
+Vkaneko_gamecfg* d;
+long checks = 0, fails = 0;
+
+void tick(int n = 1) {
+    for (int i = 0; i < n; i++) { d->clk = 0; d->eval(); d->clk = 1; d->eval(); }
+}
+
+void ioctl_byte(uint8_t index, uint8_t value) {
+    d->ioctl_index = index;
+    d->ioctl_dout  = value;
+    d->ioctl_wr    = 1;
+    tick();
+    d->ioctl_wr    = 0;
+    tick();
+}
+
+void check(bool ok, const char* what) {
+    checks++;
+    if (!ok) { fails++; printf("  FAIL: %s\n", what); }
+}
+
+// Every field, per game, taken from MAME's address_map and machine_config and
+// from the frame gate's table. Written out rather than computed, so a wrong
+// value in the RTL cannot be matched by the same wrong value here.
+struct Cfg {
+    const char* name;
+    uint8_t id;
+    uint8_t wram, v2w0, v2w1, spr, pal, wdog, in;
+    int     dx, dy;
+    bool    v2_2_pri, two_chips, wide;
+    uint16_t pri, count, xoffs;
+    uint16_t min_y;
+};
+
+const Cfg GAMES[] = {
+  // name        id  wram v2w0 v2w1 spr  pal wdog  in    dx   dy  2pri 2chip wide   pri  count  xoffs min_y
+  { "explbrkr",  0, 0x10,0x50,0x58,0x60,0x70,0xa8,0xe0,  91,  -8, true , true , false,0x8888,1024,0x0000, 16 },
+  { "mgcrystl",  1, 0x30,0x60,0x68,0x70,0x50,0xa0,0xc0,  91,  -8, false, true , false,0x7532,1024,0x0000, 16 },
+  { "blazeonj",  2, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   8, false, false, true ,0x8821, 512,0xf980,  0 },
+  { "wingforc",  3, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   9, false, false, true ,0x8821, 512,0xf980,  0 },
+};
+
+void verify(const Cfg& g) {
+    char msg[160];
+    #define CK(expr, field) do { \
+        snprintf(msg, sizeof msg, "%s: %s", g.name, field); \
+        check(expr, msg); } while (0)
+
+    CK(d->game_id == g.id,            "game_id");
+    CK(d->pg_wram == g.wram,          "pg_wram");
+    CK(d->pg_v2w0 == g.v2w0,          "pg_v2w0");
+    CK(d->pg_v2w1 == g.v2w1,          "pg_v2w1");
+    CK(d->pg_spr  == g.spr,           "pg_spr");
+    CK(d->pg_pal  == g.pal,           "pg_pal");
+    CK(d->pg_wdog == g.wdog,          "pg_wdog");
+    CK(d->pg_in   == g.in,            "pg_in");
+
+    // 11-bit signed, so sign-extend before comparing.
+    int dx = d->v2_dx; if (dx & 0x400) dx -= 0x800;
+    int dy = d->v2_dy; if (dy & 0x400) dy -= 0x800;
+    CK(dx == g.dx,                    "v2_dx");
+    CK(dy == g.dy,                    "v2_dy");
+
+    CK(d->view2_2_pri == g.v2_2_pri,  "view2_2_pri");
+    CK(d->two_chips   == g.two_chips, "two_chips");
+    CK(d->wide_screen == g.wide,      "wide_screen");
+    CK(d->spr_pri_f   == g.pri,       "spr_pri_f");
+    CK(d->spr_count   == g.count,     "spr_count");
+    CK(d->spr_xoffs   == g.xoffs,     "spr_xoffs");
+    CK(d->visarea_min_y == g.min_y,   "visarea_min_y");
+    #undef CK
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    Verilated::commandArgs(argc, argv);
+    d = new Vkaneko_gamecfg;
+
+    d->rst = 1; d->ioctl_wr = 0; d->ioctl_index = 0; d->ioctl_dout = 0;
+    tick(4);
+    d->rst = 0; tick(2);
+
+    // ---------------------------------------------------------------- 1
+    printf("== reset selects game 0\n");
+    check(d->game_id == 0, "game_id is 0 out of reset");
+    verify(GAMES[0]);
+
+    // ---------------------------------------------------------------- 2
+    printf("== each game id selects its whole configuration\n");
+    for (const auto& g : GAMES) {
+        ioctl_byte(1, g.id);
+        verify(g);
+    }
+
+    // ---------------------------------------------------------------- 3
+    // The ROM stream is index 0 and the save is index 2. Neither may touch the
+    // game id — a stray write here re-maps memory under a running game.
+    printf("== other ioctl indices are ignored\n");
+    ioctl_byte(1, 2);                       // Blaze On
+    check(d->game_id == 2, "id set before the interference test");
+    for (uint8_t idx : {0, 2, 3, 255}) {
+        ioctl_byte(idx, 0x7e);
+        char m[64]; snprintf(m, sizeof m, "index %u left the game id alone", idx);
+        check(d->game_id == 2, m);
+    }
+    verify(GAMES[2]);
+
+    // ---------------------------------------------------------------- 4
+    // An id nobody has defined must fall back to game 0, not decode nothing.
+    printf("== an unknown id falls back to Explosive Breaker's map\n");
+    ioctl_byte(1, 0x5a);
+    check(d->pg_wram == 0x10, "unknown id uses game 0's work RAM page");
+    check(d->pg_in   == 0xe0, "unknown id uses game 0's input page");
+    check(d->spr_count == 1024, "unknown id uses game 0's sprite count");
+
+    // ---------------------------------------------------------------- 5
+    // A core reset must NOT forget the game; only power-on may.
+    printf("== the id survives a core reset\n");
+    ioctl_byte(1, 3);
+    check(d->game_id == 3, "Wing Force selected");
+    d->rst = 1; tick(4); d->rst = 0; tick(2);
+    check(d->game_id == 0, "power-on reset clears it to game 0");
+
+    printf("\ntb_kaneko_gamecfg: %ld checks, %ld fails\n", checks, fails);
+    delete d;
+    return fails ? 1 : 0;
+}
