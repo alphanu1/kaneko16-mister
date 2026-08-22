@@ -4660,3 +4660,31 @@ Verification, after both fixes:
             264 lines at 59.19 Hz, MAME's screen is a different height at 60)
   explbrkr  100000 accesses, NO divergence at all
 ```
+
+### CORRECTION: the SYSTEM bug was real but was NOT the crash
+
+Deployed, and Blaze On is unchanged — still black, still parked. Explosive
+Breaker is unaffected, so the shared-mux change is safe.
+
+The evidence against the SYSTEM word being the cause was already in hand and
+was not weighed properly: the 400M-tick simulation ran 491 frames without ever
+touching 0x000100, and that run had `in_system` tied to 0xffff — the WRONG
+value. A wrong value that does not crash the game in simulation is not the
+thing crashing it on hardware. "The oracle found a divergence" was allowed to
+become "the oracle found the cause".
+
+Both fixes stand on their own merits: the word order and the 0xFF00 idle value
+are what MAME says the board does. Neither is the black screen.
+
+What this build DOES bring is a working vector instrument. The previous one
+used `eab[23:8]` to mean "byte address below 0x100", which admits 0x1ff and let
+the park loop overwrite the latch with its own fetches every pass — it always
+read near-zero regardless. With `eab[23:7]` it can only latch a genuine vector
+fetch, so for the first time it distinguishes "took an exception" from "jumped
+here deliberately". Those are opposite investigations.
+
+Still unexplained and now the central question: the core runs Blaze On for 491
+frames in simulation and parks it immediately on hardware, with the CPU, the
+memory map, the register decode and every input word verified against MAME.
+The remaining difference is the video path's SDRAM traffic, which the boot
+harness does not model at all.
