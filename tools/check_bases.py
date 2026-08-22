@@ -19,8 +19,15 @@ import importlib.util
 import re
 import sys
 
+# base_z80 was NOT checked here until the Z80 started reading SDRAM. While its
+# ROM was a block-RAM copy filled by snooping the loader, a wrong base simply
+# missed the window and left the memory empty -- the Z80 then did nothing at
+# all, which is loud. Reading from SDRAM makes the same mistake quiet: the CPU
+# fetches whatever happens to live at that address and runs it. Only two of the
+# four games have a Z80, so the entry is allowed to be absent.
 REGION = {"base_trom0": "view2_0", "base_trom1": "view2_1",
-          "base_spr": "kan_spr", "base_oki": "oki1"}
+          "base_spr": "kan_spr", "base_oki": "oki1",
+          "base_z80": "audiocpu"}
 
 
 def load_tool():
