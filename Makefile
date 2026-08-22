@@ -174,36 +174,10 @@ quartus: qsf-check nports-check lint test quartus-check
 	  echo "== $$t"; \
 	  $(QUARTUS_BIN)/$$t --read_settings_files=on --write_settings_files=off \
 	    Kaneko16 -c Kaneko16 > build/$$t.log 2>&1 || { tail -20 build/$$t.log; exit 1; }; \
+	  if [ "$$t" = quartus_map ]; then \
+	    tools/check_ports.py build/quartus/Kaneko16.map.rpt || exit 1; \
+	  fi; \
 	done
-	@# A PORT DECLARED AND CONNECTED BY NOTHING IS A SILENT WRONG ANSWER.
-	@#
-	@# The per-game memory map shipped for eleven commits driving nothing:
-	@# kaneko_gamecfg computed all seven window pages and kaneko_bus's inputs
-	@# were left off the instance, so Quartus tied them to GND and every window
-	@# decoded at page 0x00. It said so in the report every single build —
-	@#
-	@#   pg_wram  Input  Warning  Declared by entity but not connected by
-	@#                            instance ... the port will be connected to GND
-	@#
-	@# — and nobody read a 2 MB report. Verilator's PINMISSING catches the same
-	@# thing but the top level is never verilated (it instantiates VHDL and
-	@# vendor IP), so this is the only place it can be caught. Checked right
-	@# after quartus_map, which is where the answer first exists.
-	@if grep -q "Declared by entity but not connected by instance" \
-	     build/quartus/Kaneko16.map.rpt; then \
-	  echo ""; \
-	  echo "UNCONNECTED INPUT PORTS — these are tied to GND, not defaulted:"; \
-	  grep -B200 "Declared by entity but not connected by instance" \
-	    build/quartus/Kaneko16.map.rpt \
-	    | grep -oE "Port Connectivity Checks: \"[^\"]+\"" | tail -1; \
-	  grep "Declared by entity but not connected by instance" \
-	    build/quartus/Kaneko16.map.rpt \
-	    | sed -E 's/^; *([a-zA-Z0-9_]+).*/    \1/' | sort -u; \
-	  echo ""; \
-	  echo "Connect them or give the port a default. A page tied to GND"; \
-	  echo "decodes at 0x00, which is where the ROM lives."; \
-	  exit 1; \
-	fi
 	@# quartus_sta takes neither settings flag — it is a different front end.
 	@echo "== quartus_sta"
 	@$(QUARTUS_BIN)/quartus_sta Kaneko16 -c Kaneko16 > build/quartus_sta.log 2>&1 \
