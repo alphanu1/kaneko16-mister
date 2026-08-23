@@ -2109,6 +2109,13 @@ screen_rotate u_rotate
 	.DDRAM_WE(DDRAM_WE), .DDRAM_RD(DDRAM_RD)
 );
 
+// screen_rotate has no FB_FORCE_BLANK port, so the core owns it. Low: the
+// framebuffer's contents are what we want shown. It exists for cores that
+// must blank the surface while reconfiguring it, which this one never does --
+// the geometry only changes when a different game is loaded, and that is a
+// reset.
+assign FB_FORCE_BLANK = 1'b0;
+
 assign CLK_VIDEO = clk_sys;
 assign CE_PIXEL  = cep_d[1];
 assign VGA_DE    = de_d[1];
