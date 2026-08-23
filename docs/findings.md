@@ -6039,3 +6039,40 @@ second pairing a zero-fill against the upper half of the odd ROM.
 is a real and useful reading, and it was interpreted as a fault in what the CPU
 was reading without first checking that it had anything to read. Before
 debugging what code does, confirm the code is there.
+
+### Screen timing: the rate is corroborated, the blanking is not
+
+Worth writing down once, because the release notes carried a paragraph of it
+and it belongs here instead.
+
+`kaneko_video_timing` runs 384x264 totals at 6 MHz, which is
+
+```
+6e6 / (384 * 264) = 59.1856 Hz
+```
+
+MAME's driver mostly does not model this. Its refresh rates are:
+
+```
+bakubrkr  59        blazeon  60      mgcrystl  60      gtmr  60
+wingforc  59.1854   shogwarr 59.1854
+```
+
+Round numbers everywhere except two machines, which carry 59.1854 -- four
+decimal places from our derivation. The agreement is therefore with the only
+figures in the driver that look measured rather than assumed, which is about as
+much corroboration as exists without a PCB.
+
+**The rate matters and is not a detail.** This hardware clocks its sound from
+the frame interrupt, so 60 Hz instead of 59.1856 plays the music 1.4% sharp and
+runs the game 1.4% fast, and an off-rate core judders against a fixed-60
+display at roughly one repeated frame every seventy.
+
+What remains a derivation is how the totals SPLIT: 128 of 384 horizontal and 40
+of 264 vertical. No `set_raw()` anywhere in the driver pins the blanking, so
+only a capture from a real PCB would settle it. It decides where the picture
+sits and how long the game has in vblank to write VRAM -- a smaller thing than
+the rate, and not nothing.
+
+Not a user-facing limitation, which is why it is no longer in the release
+notes: nobody playing the core can act on it.
