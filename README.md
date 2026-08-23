@@ -93,16 +93,12 @@ correct and the fault is upstream in the Z80.
 
 | Sub-row | Shows |
 |---|---|
-| 1st | Z80 writes to the YM2151 (ports `02`/`03`), per frame — the control. MAME's Wing Force: ~8 menu, ~18 demo |
-| 2nd | Clocks where **jt51's own output** is non-zero — is the chip producing anything? |
-| 3rd | Clocks where the **mixed** output is non-zero — did it survive the mix? |
+| 1st | Z80 writes to YM2151 register `0x14` (timer control) per frame. MAME's Wing Force: **~3.9** — this is the driver's tempo loop |
+| 2nd | Z80 writes to YM2151 register `0x08` (KEY ON/OFF) per frame. MAME: **~1.1** — the notes themselves |
+| 3rd | Clocks where **jt51's own output** is non-zero |
 | 4th | 4 MHz Z80 ticks LOST to a ROM-cache stall, per frame, saturating at `ffff` |
 
-Row 1 is the control and should sit near MAME's rate. Row 2 dark with row 1
-healthy means jt51 is being written and producing nothing. Row 2 lit with row 3
-dark means the mix is eating it — the OKI is summed in at full weight beside the
-YM before the halving. Row 4 is the ROM cache, measured at a 0.5% miss rate
-against a real MAME fetch trace, so it should stay small.
+Rows 1 and 2 are counted from the strobe the CHIP sees, not the CPU's bus, and are compared against `tools/mame_ym_regs.lua` run on the same title. Row 1 near 4 with row 2 near 1 means the driver is doing what the oracle's does and the fault is inside jt51 or past it. Row 1 healthy with row 2 at zero means the tempo loop runs and no note is ever keyed. Both at zero means the writes are not reaching the chip.
 
 It has previously carried the CPU's last bus address, the exception vector
 number, the unmapped address and the VIEW2 scroll probe. **Identify rows by

@@ -94,17 +94,7 @@ The four yellow rows are a **chain**, in order. Each one rules out everything
 above it, so the first dark row is where the sound path breaks. All four lit
 and no audio means the fault is past the chip, in the mixing or output stage.
 
-**That block currently traces the sound path past the YM's write port** — per
-frame: YM2151 writes (the control), clocks where jt51's output is non-zero,
-clocks where the MIXED output is non-zero, and 4 MHz ticks lost to a ROM-cache
-stall (saturating at `ffff`). It counted the Z80's ports before this, which
-established that the CPU drives the YM at MAME's rate even when silent. Compare against `tools/mame_z80_ports.lua` run on
-the same title. It carried the OKI chain for one build before this, which
-showed that path to be correct. It had been carrying the VIEW2 scroll probe;
-that probe answered its question — the raw scroll registers read back
-7340/72c0 on hardware, exactly MAME — and the tile fault it was chasing is
-parked, so the rows went back to their default. Whenever it is repurposed, this
-table and the one in the top-level `README.md` are updated in the same commit.
+**That block currently counts YM2151 register writes** — per frame: writes to `0x14` (timer control, MAME's Wing Force does ~3.9), writes to `0x08` (KEY ON/OFF, ~1.1), clocks where jt51's output is non-zero, and 4 MHz ticks lost to a ROM-cache stall. Compare against `tools/mame_ym_regs.lua` on the same title. Earlier arrangements established that the Z80 writes the chip at MAME's rate, so the counts are right and the CONTENT is the open question.
 
 These rows were added *during* the silent-sound investigation and the bug was
 actually found by reading the RTL, not by reading them — so treat the chain as

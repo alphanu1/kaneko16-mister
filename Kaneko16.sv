@@ -1035,18 +1035,35 @@ reg [15:0] z80_ymw_cnt,  z80_ymw_lat;
 reg [15:0] z80_ymr_cnt,  z80_ymr_lat;
 reg [15:0] z80_okiw_cnt, z80_okiw_lat;
 reg [15:0] z80_stl_cnt,  z80_stl_lat;
+// THE ADDRESS HALF, LATCHED, so a write can be attributed to a register.
+// The YM2151 is written as a pair: register number to port 02, value to port
+// 03. Watching the delivered strobe rather than the Z80's bus, because the
+// delivery is one-shot and held for cen_p1 -- counting the CPU side would
+// count requests, not what the chip actually saw.
+reg  [7:0] ym_reg_addr;
+wire       ym_deliv = ~u_z80snd.ym_cs_n && ~u_z80snd.ym_wr_n && z80_ym_cen_p1;
+wire       ym_reg_wr = ym_deliv && u_z80snd.ym_a0;      // the data half
+always @(posedge clk_sys)
+	if (ym_deliv && !u_z80snd.ym_a0) ym_reg_addr <= u_z80snd.ym_din;
+
+reg [15:0] ym_key_cnt,   ym_key_lat;     // writes to 0x08, KEY ON/OFF
+reg [15:0] ym_tmr_cnt,   ym_tmr_lat;     // writes to 0x14, timer control
 reg [15:0] ym_nz_cnt,    ym_nz_lat;      // clocks where jt51's output is non-zero
 reg [15:0] mix_nz_cnt,   mix_nz_lat;     // clocks where the mixed output is non-zero
 always @(posedge clk_sys) begin
 	if (rst_sys) begin
 		z80_ymw_cnt <= 0; z80_ymr_cnt <= 0; z80_okiw_cnt <= 0; z80_stl_cnt <= 0;
 		ym_nz_cnt <= 0; mix_nz_cnt <= 0; ym_nz_lat <= 0; mix_nz_lat <= 0;
+		ym_key_cnt <= 0; ym_tmr_cnt <= 0; ym_key_lat <= 0; ym_tmr_lat <= 0;
+		ym_reg_addr <= 8'd0;
 		z80_ymw_lat <= 0; z80_ymr_lat <= 0; z80_okiw_lat <= 0; z80_stl_lat <= 0;
 	end else if (vbl_rise) begin
 		z80_ymw_lat  <= z80_ymw_cnt;  z80_ymw_cnt  <= 0;
 		z80_ymr_lat  <= z80_ymr_cnt;  z80_ymr_cnt  <= 0;
 		z80_okiw_lat <= z80_okiw_cnt; z80_okiw_cnt <= 0;
 		ym_nz_lat    <= ym_nz_cnt;    ym_nz_cnt    <= 0;
+		ym_key_lat   <= ym_key_cnt;   ym_key_cnt   <= 0;
+		ym_tmr_lat   <= ym_tmr_cnt;   ym_tmr_cnt   <= 0;
 		mix_nz_lat   <= mix_nz_cnt;   mix_nz_cnt   <= 0;
 		z80_stl_lat  <= z80_stl_cnt;  z80_stl_cnt  <= 0;
 	end else begin
@@ -1057,6 +1074,13 @@ always @(posedge clk_sys) begin
 		// chip at MAME's rate while the board is silent, so the question moved
 		// downstream: is jt51 producing anything, and does it survive the mix?
 		if (ym2151_l != 16'sd0 && !(&ym_nz_cnt)) ym_nz_cnt <= ym_nz_cnt + 1'd1;
+		// WHICH YM REGISTER, not how many writes. The counts already match
+		// MAME; the content is the open question, and two registers decide
+		// whether anything is audible at all.
+		if (ym_reg_wr && (ym_reg_addr == 8'h08) && !(&ym_key_cnt))
+			ym_key_cnt <= ym_key_cnt + 1'd1;
+		if (ym_reg_wr && (ym_reg_addr == 8'h14) && !(&ym_tmr_cnt))
+			ym_tmr_cnt <= ym_tmr_cnt + 1'd1;
 		if (z80_mix_l != 16'd0 && !(&mix_nz_cnt)) mix_nz_cnt <= mix_nz_cnt + 1'd1;
 		// Saturating: a fully starved Z80 loses far more than 65535 ticks a
 		// frame, and a wrapped counter would read as a healthy small number.
@@ -1837,9 +1861,20 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 // nothing -- its state or its enables. Row 5 lit and row 6 dark means the
 // mix is eating it, which is where the OKI is summed in at full weight next
 // to the YM before the halving.
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? z80_ymw_lat
-                        : (screen_y < 9'd52) ? ym_nz_lat
-                        : (screen_y < 9'd58) ? mix_nz_lat
+// WHICH REGISTERS, against MAME's own figures for the same title.
+// tools/mame_ym_regs.lua counts 900 frames of a working Wing Force:
+//
+//   0x14  timer control  3506 writes  ~3.9 per frame   the tempo loop
+//   0x08  KEY ON/OFF     1007 writes  ~1.1 per frame   the notes themselves
+//
+// Row 4 near 4 and row 5 near 1 means the driver is doing what the oracle's
+// does and the fault is inside jt51 or past it. Row 4 healthy with row 5 at
+// zero means the tempo loop runs and no note is ever keyed, which is a
+// different fault from anything chased so far. Both at zero means the writes
+// are not reaching the chip after all.
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? ym_tmr_lat
+                        : (screen_y < 9'd52) ? ym_key_lat
+                        : (screen_y < 9'd58) ? ym_nz_lat
                                              : z80_stl_lat;
 wire       oki_set = oki_row_val[oki_bit];
 
