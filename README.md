@@ -4,12 +4,11 @@ An FPGA implementation of Kaneko's 16-bit arcade hardware for MiSTer
 (Terasic DE10-Nano, Cyclone V 5CSEBA6U23I7). Not an emulator: RTL that behaves
 as the original silicon did, verified against MAME as an oracle.
 
-**Status: three of the four bring-up games are playable on hardware.**
-Explosive Breaker, Blaze On and Wing Force run with graphics, input and sound;
-Magical Crystals boots and draws its self-test screen, then goes black; it is
-not shipped. Later titles needing the
-CALC3 or TOYBOX MCUs are not attempted. See `docs/HANDOFF.md` for the gap
-analysis.
+**Status: all four Tier 1 games are playable on hardware.** Explosive Breaker,
+Magical Crystals, Blaze On and Wing Force run with graphics, input and sound,
+and all four are shipped. Wing Force is missing its OKI sound effects and its
+attract music; everything else plays. Later titles needing the CALC3 or TOYBOX
+MCUs are not attempted. See `docs/HANDOFF.md` for the gap analysis.
 
 ## The hardware
 
@@ -47,13 +46,12 @@ Miles Rally 1/2.
 | Z80 + YM2151 sound (Blaze On board) | **working on Blaze On** — music and effects. T80 at 4 MHz, jt51, and a 256-byte cache over SDRAM for the program ROM; a 48 KB copy in block RAM did not fit. Wing Force has in-game music but no OKI effects and no attract music; its OKI hangs off the Z80's I/O ports rather than the 68000's bus, and that path is still open |
 | Screen rotation | **working on hardware** — per game, because it is per game in both senses: Explosive Breaker is ROT90 and Wing Force ROT270, turned in OPPOSITE directions, while Blaze On and Magical Crystals are ROT0. Uses MiSTer's `screen_rotate` and the DDR3 framebuffer, so it costs no M10K and no SDRAM bandwidth. **Off by default** — on a landscape monitor a turned game is a tall strip, and the framebuffer path costs a frame of latency. OSD: Off / Auto (per game) / CW / CCW |
 
-Three of the four games are playable on hardware. The 68000 completes its
+All four games are playable on hardware. The 68000 completes its
 self-test, formats a blank EEPROM, enables interrupts and runs its main loop;
 tilemaps, sprites, inputs and sound all work on Explosive Breaker and Blaze On,
 and Wing Force is complete apart from its OKI effects.
 
-Magical Crystals boots, runs and matches MAME on the bus, but its screen stays
-black because it never takes an interrupt. It is not shipped.
+Magical Crystals joined them on 2026-08-23 and plays correctly.
 
 ## Games
 
@@ -67,7 +65,7 @@ in a way a player cannot diagnose.
 | Explosive Breaker | **playable**, with sound |
 | Blaze On (Japan) | **playable**, with music and effects |
 | Wing Force (prototype) | **playable**, graphics, input and in-game music all correct. **No OKI sound effects, and no music in the attract demo** |
-| Magical Crystals | **not shipped — draws its self-test, then goes black.** The first cause is fixed: its MRA carried no 68000 program ROM, so the CPU executed half a megabyte of zeros. With that corrected it **draws its self-test screen on hardware** — so the tilemap path, the palette and the tile-ROM fetch all work for this game — and its bus trace matches MAME over **all 138,246 compared accesses out of a million**. What remains is that it takes **zero interrupts** on the board while running at a healthy ~46,800 bus cycles a frame. MAME shows the game spins in an idle loop at `01f820` — 2.7 million fetches in 600 frames — and does all of its work in the interrupt handlers, so no interrupts is a complete explanation of the black screen. Our own simulation of the same RTL *does* take them, so hardware and simulation disagree and that is the open question. See `docs/findings.md` |
+| Magical Crystals | **playable**, with sound. Took two independent fixes: its MRA carried no 68000 program ROM, because its two program ROMs are different sizes and the emitter assumed symmetric interleave lanes; and six DSW bits at `c00000` were driven low where the board pulls them high, which failed a boot check and left the 68000 masked at level 7 refusing interrupts |
 
 Two OSD options are development instruments rather than settings. The **debug
 overlay** draws per-frame counters over the picture — bus cycles, interrupts,

@@ -8,6 +8,7 @@ Copy to the SD card:
 | `Explosive Breaker (World).mra` | `/media/fat/_Arcade/` |
 | `Blaze On (Japan).mra` | `/media/fat/_Arcade/` |
 | `Wing Force (Japan, prototype).mra` | `/media/fat/_Arcade/` |
+| `Magical Crystals (World, 92-01-10).mra` | `/media/fat/_Arcade/` |
 
 ROMs are supplied by you and must be in `/media/fat/games/mame/` as the MRA
 names them. Nothing here contains ROM data.
@@ -20,7 +21,7 @@ lexicographically greatest — so a spare copy called `Kaneko16_GOOD.rbf` beats
 
 ## What works
 
-**Three of the four games.** One bitstream covers them all; the MRA hands the
+**All four games.** One bitstream covers them all; the MRA hands the
 core a game-id byte and `rtl/io/kaneko_gamecfg.sv` selects the memory map, ROM
 bases, screen geometry, layer count, sprite list size and input wiring.
 
@@ -29,10 +30,10 @@ bases, screen geometry, layer count, sprite list size and input wiring.
 | Explosive Breaker | playable, with sound |
 | Blaze On (Japan) | playable, with music and effects |
 | Wing Force (prototype) | playable, with in-game music; **no OKI sound effects, and no music in the attract demo** |
-| Magical Crystals | **not shipped — draws its self-test, then goes black.** The missing program ROM is fixed and the CPU now runs correctly. The self-test screen appears, so the graphics path works; the picture then goes black because the game never takes an interrupt, and it does all of its drawing in the interrupt handlers |
+| Magical Crystals | playable, with sound |
 
-An MRA for a game the core cannot run is deliberately not shipped: it looks
-supported and then fails in a way a player cannot diagnose.
+An MRA is shipped only for a game somebody has played on hardware. One that
+merely builds and passes its gates is a candidate, not a release.
 
 ## Not finished, as of `Kaneko16_20260823.rbf`
 
@@ -40,15 +41,6 @@ This list describes the RBF named above. Every entry is removed in the same
 change as the RBF that fixes it, so if an item is still here it is still true
 of the newest build in this directory. **The heading carries the RBF's name for
 exactly that reason — if they disagree, trust neither and check.**
-
-- **Magical Crystals is not shipped.** It boots now — the earlier fault, an
-  MRA that carried no 68000 program ROM, is fixed — and its bus trace matches
-  MAME exactly over a million accesses. **Its self-test screen draws
-  correctly**, which is as far as it gets: the picture then goes black because
-  the game never takes an interrupt, and it does all of its drawing inside the
-  interrupt handlers. The core takes those interrupts
-  correctly in simulation, so the disagreement is between simulation and
-  hardware and is still being chased.
 
 - **Wing Force has no sound effects**, and no music in the attract demo. Its
   in-game music is correct. The OKI on that board hangs off the Z80's I/O ports
@@ -58,6 +50,13 @@ exactly that reason — if they disagree, trust neither and check.**
   Adventure need TOYBOX and, for GTMR, the KC-002 sprite chip's 8bpp path.
 
 Removed from this list since 20260822, all confirmed on hardware:
+
+- ~~Magical Crystals is not shipped~~ — it plays. Two independent faults: its
+  MRA carried no 68000 program ROM, because its two program ROMs are different
+  sizes and the emitter assumed symmetric interleave lanes; and six DSW bits at
+  `c00000` were driven low where the board pulls them high, which failed a boot
+  check and left the 68000 masked at level 7, refusing interrupts it could see
+  being raised.
 
 - ~~Screen rotation is not implemented~~ — done, per game and in both
   directions, **off by default**.

@@ -200,15 +200,22 @@ PRIMARY = {"explbrkr", "mgcrystl", "wingforc"}
 # offset and INPUT WIRING all come from kaneko_gamecfg.sv, selected by the id
 # below. Both titles close the frame gate at 100%.
 #
-# Magical Crystals is deliberately NOT here. Its game-table entry and its
-# memory map are done, but it is the one title the frame gate does not close:
-# 298 pixels of line-scroll difference that nobody has explained. Shipping a
-# title with a known unexplained video discrepancy makes every later bug report
-# ambiguous, so it waits until that is understood.
+# Magical Crystals joined on 2026-08-23, after a person played it on hardware.
+# It needed two fixes, in this order, and neither was visible from the other:
 #
-# Neither Blaze On nor Wing Force has its Z80 + YM2151 sound CPU yet, so both
-# run silent. That is a stated limitation in the release README, not a bug.
-SUPPORTED = {"explbrkr", "blazeonj", "wingforc"}
+#   1. its MRA carried no 68000 program ROM at all, because its two program
+#      ROMs are DIFFERENT SIZES and the emitter assumed symmetric lanes
+#   2. six DSW bits at c00000 were driven low where the board pulls them high,
+#      so the game failed a boot check and sat with the 68000 masked at level 7
+#
+# The 298-pixel line-scroll difference in the M0 frame gate is still open and
+# is NOT a reason to withhold it any more: the game runs and plays correctly on
+# hardware, which is a stronger statement about the title than a static frame
+# diff is. The discrepancy stays recorded in findings.md and HANDOFF.md.
+#
+# Wing Force has no OKI sound effects and no attract music. That is a stated
+# limitation in the release README, not a bug.
+SUPPORTED = {"explbrkr", "blazeonj", "wingforc", "mgcrystl"}
 ALT_PARENT = {"blazeonj": "Blaze On"}
 
 # SDRAM layout: region -> (base, size). This IS the MRA's emission order, and

@@ -6251,3 +6251,57 @@ Zero acknowledgements cannot distinguish "never asserted" from "asserted and
 ignored", and those need opposite work, so the overlay now counts IPL
 assertions separately from acknowledgements. See `docs/debug-overlay.md` for
 the truth table.
+
+### Magical Crystals runs: six DIP bits, driven the wrong way, 2026-08-23
+
+It plays. The black screen was **not** the interrupt path, which is where the
+zero-interrupt reading pointed and where an afternoon nearly went.
+
+`in_p1_eb` built the word the game reads at `c00000` with bits 7..2 tied LOW,
+under a comment asserting they were "absent". They are not absent in either
+game:
+
+```
+PORT_DIPUNUSED_DIPLOC( 0x0004, 0x0004, "SW1:3" )   /* Listed as "Unused" */
+... 0x0008, 0x0010, 0x0020, 0x0040, 0x0080
+```
+
+`PORT_DIPUNUSED_DIPLOC(mask, default, loc)` with **default equal to the mask**
+is a DIP switch in the off position. These are active low, so the board pulls
+all six HIGH. `bakubrkr` and `mgcrystl` declare them identically, and Explosive
+Breaker has run correctly for weeks with all six wrong simply because it never
+reads them.
+
+Magical Crystals does. It failed a boot check, never lowered its interrupt
+mask, and sat at level 7 refusing requests — which is why the overlay showed a
+healthy 46,800 bus cycles a frame with zero interrupts acknowledged.
+
+**"Listed as Unused" describes the CABINET, not the program.** The manual is
+telling an operator not to bother with the switch. It says nothing about
+whether the game reads the word, and this core treated the two as the same
+statement.
+
+#### The instrument that found it, and the two that did not
+
+Counting acknowledgements could not distinguish "never asserted" from "asserted
+and ignored", and those need opposite work. The first attempt at a counter
+measured IPL **edges** — useless, because `kaneko_irq` holds a request until it
+is acknowledged, so one the CPU never answers asserts once and stays asserted:
+no further edges, and a reading identical to never asserting. Counting **clocks
+with IPL asserted** settled it in one photograph: saturated at `ffff`, held all
+frame, with zero acknowledgements. That is a masked CPU refusing a valid
+request, and it moved the search upstream to the boot checks.
+
+#### Why simulation passed and hardware failed
+
+This had been recorded as an open question carrying real risk. The answer was
+in the harness, not the core: `kaneko_cpumem_harness` drove `in_p1` as a
+blanket `16'hffff` — bits 7..2 HIGH, the CORRECT value — so the game passed its
+check in simulation, unmasked, took interrupts and ran. **The harness was right
+and the core was wrong, and the idealised constant hid the difference.** The
+harness now builds its input words per game, so this class fails at the desk.
+
+Third bug in this project from undefined or misread MAME port bits, after Blaze
+On's `0xFF00` SYSTEM word and the swapped P1/P2/UNK ordering. The rule earned
+again: **take every input word bit by bit from `INPUT_PORTS_START`, including
+the bits that look like they are not there.**
