@@ -6305,3 +6305,57 @@ Third bug in this project from undefined or misread MAME port bits, after Blaze
 On's `0xFF00` SYSTEM word and the swapped P1/P2/UNK ordering. The rule earned
 again: **take every input word bit by bit from `INPUT_PORTS_START`, including
 the bits that look like they are not there.**
+
+### Wing Force reads the fourth input word every frame, 2026-08-23
+
+The core drove `in_unk` as a hardcoded `16'h0000` for every game. MAME:
+
+| game | address | declaration | reads |
+|---|---|---|---|
+| bakubrkr | `e00006` | high byte `IPT_UNKNOWN`, low byte not declared | `ff00` |
+| blazeon | `c00004` | `PORT_BIT(0xffff, IP_ACTIVE_LOW, IPT_UNKNOWN)` | `ffff` |
+| wingforc | `c00004` | the same declaration | `ffff` |
+| mgcrystl | — | no such port; its map stops at SYSTEM | — |
+
+MAME comments that port `/* ? - c00004.w */ // unused?`, so it was reasonable
+to expect no game reads it. **Wing Force reads it about once per frame.** A
+read tap says 1,476 reads in 1,500 frames, first at frame 1 from `PC=00055c`:
+
+```
+frame 1500  c00000=2977  c00004(UNK)=1476  c00006(SYSTEM)=2974
+```
+
+Half the rate of P1 and SYSTEM, every frame, from boot. "Unused" in a MAME
+comment is a note about what the author could not identify, not a statement
+that the program ignores it — the same mistake as reading "Listed as Unused" on
+a DIP as permission to drive it low.
+
+Fourth incident of this class, after Blaze On's `0xFF00` SYSTEM word, the
+swapped P1/P2/UNK ordering and the DSW bits that kept Magical Crystals from
+booting. Like the DSW bug it could ONLY appear on hardware, because
+`kaneko_cpumem_harness` drives `in_unk` as `0xffff` — the correct value — so
+simulation was fed the right word and the board was not.
+
+`tb_kaneko_gamecfg` now checks `in_unk_val` for all four games against a table
+transcribed from `INPUT_PORTS_START`.
+
+#### MAME's Wing Force sound census, for comparison
+
+`tools/mame_z80_ports.lua` on `wingforc`, per second:
+
+```
+r03 = 6300-7200   YM2151 status polled, continuously
+w02/w03 = 232-564 YM2151 written, continuously -- music plays THROUGHOUT
+w0a               OKI written only during the attract demo, t=4..23
+r06 = 1-2         the sound latch, read only a handful of times
+```
+
+Two things to hold onto. MAME has YM music running the whole time including
+attract, so "no music in the attract demo" is a real difference and not the
+game being quiet there. And the Z80 reads the latch only a handful of times,
+so the 68000 issues a command occasionally and the Z80's own sequencer does the
+rest — which means a missing effect is more likely a 68000-side decision than a
+broken Z80 port write.
+
+Whether this fixes the OKI is not yet established. It is a real divergence on a
+word the game samples every frame, which is enough to fix on its own.
