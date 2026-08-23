@@ -30,7 +30,7 @@ Miles Rally 1/2.
 | Tilemap pixel fetch and line buffers | fuzzed clean; rendering on hardware, no visible artefacts |
 | VU-002 sprite subsystem | `kaneko_spr_sys`: parser, resolved table, double-buffered bitmap and mask, mixer read. 65k checks clean, instantiated in the core |
 | Video timing | 384x264 at 6 MHz, 59.1856 Hz; running on hardware |
-| SDRAM controller, ROM loader | running on hardware |
+| SDRAM controller, ROM loader | running on hardware at **96 MHz**, twice the core clock, through `kaneko_sdram_x2`. The read capture depth is an OSD option because the board has never agreed with the simulation model about it — it wants CL+4 where the model wants CL+5. Changing it at runtime leaves artefacts until the affected data is overwritten; it is a diagnostic, not a setting |
 | 68000 (fx68k) + bus decode | running on hardware; matches MAME exactly over 100k bus accesses |
 | ROM line cache | 16 lines x 4 words, 0.1% miss; CPU back to MAME's bus rate |
 | SDRAM masters | nine: four tile layers, the 68000, the OKI, two sprite ports and the Z80's program fetch. Served in two tiers by deadline, not equal share |
@@ -41,7 +41,7 @@ Miles Rally 1/2.
 | EEPROM (93C46) | working; 20,910 reads replayed against MAME, zero mismatches |
 | Inputs | two players, 2 buttons each, start/coin/service, and the board's DIPs — assembled per board, because the two boards wire the words differently, not just relocate them |
 | Game configuration table | `rtl/io/kaneko_gamecfg.sv` — one bitstream, four games; memory-map pages, ROM bases, video geometry, layer count, sprite list size and input wiring all selected by the MRA's game-id byte |
-| Z80 + YM2151 sound (Blaze On board) | **built and fits, not yet confirmed on hardware** — T80 at 4 MHz, jt51, Wing Force's OKI on the Z80's I/O ports, and a 256-byte cache over SDRAM for the program ROM. A 48 KB copy in block RAM did not fit; see `docs/findings.md` |
+| Z80 + YM2151 sound (Blaze On board) | **working on Blaze On** — music and effects. T80 at 4 MHz, jt51, and a 256-byte cache over SDRAM for the program ROM; a 48 KB copy in block RAM did not fit. Wing Force is still silent and open: its Z80 writes the YM at MAME's rate while jt51 produces nothing |
 | Screen rotation | **not implemented** — Explosive Breaker is ROT90 and Wing Force ROT270, and both currently output unrotated |
 
 Explosive Breaker is playable on hardware with sound. The 68000 completes its

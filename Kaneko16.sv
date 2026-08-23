@@ -67,7 +67,7 @@ localparam CONF_STR = {
 	"Kaneko16;;",
 	"-;",
 	"O[8],Aspect ratio,4:3,16:9;",
-	"O[5:4],SDRAM capture,CL+5,CL+3,CL+2,CL+4;",
+	"O[5:4],SDRAM capture,CL+4,CL+5,CL+3,CL+2;",
 	"O[9],Show,Game,Palette+CPU;",
 	"O[11],Debug overlay,Off,On;",
 	"-;",
@@ -449,20 +449,32 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(700),
                .URGENT(9'b1_0011_1111)) u_sdram
 (
 	.clk(clk_sdram), .rst_n(pll_locked), .ready(mem_ready),
-	// THE FIRST OSD POSITION IS THE DEFAULT AND MUST WORK.
+	// THE FIRST OSD POSITION IS THE DEFAULT AND MUST WORK ON THE BOARD.
 	//
 	// kaneko_sdram's own mapping is 0->CL+3, 1->CL+2, 2->CL+4, 3->CL+5, and
-	// tb_kaneko_sdram_x2 measured that at 96 MHz only 3 (CL+5) reads correct
-	// data -- 0, 1 and 2 fail every one of its 6402 checks. status defaults to
-	// zero, so position 0 is remapped to 3 rather than left selecting a depth
-	// that returns garbage on first boot and looks like the clock change
-	// failing. All four remain reachable.
+	// status defaults to zero, so position 0 is whatever a fresh boot gets.
 	//
-	// The menu text was wrong as well: it read CL+1,CL+0,CL+2,CL+3, which
+	// SIMULATION AND SILICON DISAGREE HERE, AND SILICON WINS.
+	// tb_kaneko_sdram_x2 measures that at 96 MHz only 3 (CL+5) reads correct
+	// data against sdram_model -- 0, 1 and 2 fail all 6402 of its checks. The
+	// board wants 2 (CL+4): CL+5 gave a black screen and a 68000 running
+	// garbage with zero interrupts acknowledged. The same disagreement is
+	// already on record at 48 MHz, where kaneko_sdram's own header notes
+	// "1 -> CL+2 (the board: its device is clocked on the inverse of
+	// clk_sys)" while the model wanted 0. The real device has never matched
+	// the model, which is the entire reason this is an OSD option.
+	//
+	// Changing it at runtime leaves artefacts that do not always clear, and
+	// that is expected rather than a fault: reads already in flight are
+	// captured at the old depth and everything buffered from them is wrong
+	// until it is overwritten. It is a diagnostic, not a setting to tune while
+	// playing.
+	//
+	// The menu text was wrong as well; it read CL+1,CL+0,CL+2,CL+3, which
 	// matched none of the four values it was selecting.
-	.rd_lat_sel(status[5:4] == 2'd0 ? 2'd3 :
-	            status[5:4] == 2'd1 ? 2'd0 :
-	            status[5:4] == 2'd2 ? 2'd1 : 2'd2),
+	.rd_lat_sel(status[5:4] == 2'd0 ? 2'd2 :
+	            status[5:4] == 2'd1 ? 2'd3 :
+	            status[5:4] == 2'd2 ? 2'd0 : 2'd1),
 
 	.sd_cke(SDRAM_CKE), .sd_cs_n(SDRAM_nCS), .sd_ras_n(SDRAM_nRAS),
 	.sd_cas_n(SDRAM_nCAS), .sd_we_n(SDRAM_nWE), .sd_ba(SDRAM_BA),
