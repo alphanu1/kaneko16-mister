@@ -4,7 +4,7 @@ Copy to the SD card:
 
 | from | to |
 |---|---|
-| `Kaneko16_20260822.rbf` | `/media/fat/_Arcade/cores/` |
+| `Kaneko16_20260823.rbf` | `/media/fat/_Arcade/cores/` — **rename to `Kaneko16.rbf` on the card** |
 | `Explosive Breaker (World).mra` | `/media/fat/_Arcade/` |
 | `Blaze On (Japan).mra` | `/media/fat/_Arcade/` |
 | `Wing Force (Japan, prototype).mra` | `/media/fat/_Arcade/` |
