@@ -117,11 +117,20 @@ in `docs/debug-overlay.md` in the source repository.
 | R | Pause (the board's TILT input) |
 | L | Service coin — adds a credit without a coin |
 
-`Flip screen` and `Service switch` in the OSD are the board's two physical DIP
-switches — everything else this game configures through its own test mode,
-which is why there is no DIP menu. **`Service switch` is the way into the test
-menu**; the L button is a different input, the service coin, which adds a
-credit without dropping one in.
+`Service switch` in the OSD is the board's service DIP, and **it is the way
+into the test menu** on the games that have one — Explosive Breaker and Magical
+Crystals. Neither Blaze On nor Wing Force has any test-menu code at all, so
+there is nothing for it to reach on those two. Everything else these games
+configure through their own test mode, which is why there is no DIP menu.
+
+The L button is a different input: the service coin, which adds a credit
+without dropping one in.
+
+There is no `Flip screen` option. It was there and did nothing visible — the
+game reads that DIP and flips its own rendering, which this core does not
+implement — so it only offered a state the picture could not show. Screen
+orientation is `Rotation`, which turns the finished image and is a separate
+mechanism.
 
 ## Sprite offscreen skip (OSD)
 

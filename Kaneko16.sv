@@ -81,7 +81,6 @@ localparam CONF_STR = {
 	"O[9],Show,Game,Palette+CPU;",
 	"O[11],Debug overlay,Off,On;",
 	"-;",
-	"O[13],Flip screen,Off,On;",
 	"O[14],Service switch,Off,On;",
 	"O[15],Sprite offscreen skip,On,Off;",
 	"O[16],Sprites,On,Off;",
@@ -1940,7 +1939,23 @@ wire svc_coin = joy[9];
 
 // Flip screen and service are DIPs, not buttons: held, and off by default.
 // Active low, so 1 is "not set".
-wire dip_flip    = ~status[13];
+// HELD AT THE FACTORY POSITION, and no longer an OSD option.
+//
+// This is the board's Flip_Screen DIP -- bit 0 of the word at c00000/e00000,
+// active low, so 1 is Off, which is what MAME defaults it to.
+//
+// It was exposed in the OSD and did nothing a player could see. The game reads
+// the DIP and flips its OWN rendering, which means writing mirrored scroll and
+// tile attributes, and this core does not implement that path: fliptype is
+// hardwired off in kaneko_gamecfg. Offering the switch let a user select a
+// state the renderer cannot draw.
+//
+// Orientation is handled by the Rotation option, which turns the finished
+// picture through MiSTer's framebuffer and is a different mechanism entirely.
+//
+// Bit 13 is now unused. The OSD names its bits explicitly, so nothing
+// renumbered when the line went.
+wire dip_flip    = 1'b1;
 wire dip_service = ~status[14];
 
 // THE INPUT WORDS ARE ASSEMBLED DIFFERENTLY PER BOARD, NOT JUST MOVED.
