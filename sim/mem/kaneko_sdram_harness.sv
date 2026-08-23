@@ -73,17 +73,10 @@ module kaneko_sdram_harness #(
   output logic [23:0] mon_total
 );
 
-  // NPORTS-AHEAD-BY-ONE
-  //
-  // TEN, not nine: the tenth is the sprite-bitmap candidate being measured.
-  // The core still has one fewer and will until the move lands, so
-  // nports-check allows exactly this file to run one port ahead. The marker
-  // above is what it looks for; delete it when the core catches up and the
-  // guard goes back to demanding an exact match.
-  //
-  // The allowance is deliberately +1 and not "any number": a harness with
-  // FEWER ports than the core is a port nothing tests, which is what the
-  // guard exists to catch and is still an error.
+  //   // TEN, matching Kaneko16.sv. The tenth was added here first to measure the
+  // sprite bitmap as a candidate master; the core has since caught up by
+  // giving that port to the CALC3 board's second OKI, so the ahead-by-one
+  // exemption is gone and nports-check demands an exact match again.
   localparam int unsigned NP    = 10;
   localparam int unsigned T_RCD = 2;
   localparam int unsigned T_RP  = 2;

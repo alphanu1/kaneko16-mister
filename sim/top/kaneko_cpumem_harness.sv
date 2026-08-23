@@ -20,7 +20,7 @@
 module kaneko_cpumem_harness #(
     parameter int unsigned SDR_AW  = 25,
     parameter int unsigned SDR_COL = 10,
-    parameter int unsigned NPORTS  = 9
+    parameter int unsigned NPORTS  = 10
 ) (
     input  wire        clk,
     input  wire        rst,

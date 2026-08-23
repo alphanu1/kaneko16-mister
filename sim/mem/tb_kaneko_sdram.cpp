@@ -39,11 +39,7 @@
 // tested five, so the OKI's port was the one port never arbitrated in a test —
 // and it was also the one port blen() forgot, which is how a single-word burst
 // reached hardware and made the sound path silent.
-// NPORTS-AHEAD-BY-ONE
-//
-// One more than the core has today: the extra is the sprite-bitmap candidate
-// being measured. nports-check allows this file to run a single port ahead
-// while the move is in progress; remove the marker when the core catches up.
+// // Ten, matching Kaneko16.sv. The tenth port is the CALC3 board's second OKI.
 static const int NP = 10;
 
 // Burst length per port. This mirrored a per-port blen() in kaneko_sdram.sv and

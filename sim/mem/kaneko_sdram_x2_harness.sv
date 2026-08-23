@@ -14,7 +14,8 @@
 
 module kaneko_sdram_x2_harness #(
     parameter int unsigned COL_BITS = 9,
-    parameter int unsigned NP       = 9
+    // Ten, matching Kaneko16.sv. The tenth is the CALC3 board's second OKI.
+    parameter int unsigned NP       = 10
 ) (
     input  logic clk,              // FAST: the controller clock
     input  logic rst_n,
@@ -32,7 +33,7 @@ module kaneko_sdram_x2_harness #(
     // as a pragma. That is recorded against kaneko_mixer.sv and was walked
     // into again writing this one.)
     input  logic [NP-1:0] p_req,
-    input  logic [COL_BITS+15:1] a0, a1, a2, a3, a4, a5, a6, a7, a8,
+    input  logic [COL_BITS+15:1] a0, a1, a2, a3, a4, a5, a6, a7, a8, a9,
     output logic [NP-1:0] p_ack,
     output logic [63:0] d0, d1, d2, d3, d4, d5, d6, d7, d8,
 
@@ -90,7 +91,7 @@ module kaneko_sdram_x2_harness #(
 
     kaneko_sdram_x2 #(.NP(NP), .AW(AW)) u_x2 (
         .clk_fast(clk),
-        .s_req(p_req), .s_addr({a8, a7, a6, a5, a4, a3, a2, a1, a0}),
+        .s_req(p_req), .s_addr({a9, a8, a7, a6, a5, a4, a3, a2, a1, a0}),
         // Reads only in this harness; the adapter's write pass-through is
         // exercised by tb_kaneko_sdram, which has the writing port.
         .s_we({NP{1'b0}}), .s_din({NP{16'd0}}), .s_be({NP{2'b11}}),
