@@ -5982,3 +5982,60 @@ including the bits that are not there.**
 Whether this is what has kept Magical Crystals dark is not yet known. It is one
 confirmed difference from the hardware, corrected; the black screen may have
 more than one cause.
+
+### Magical Crystals had no program ROM
+
+It never booted. The debug overlay showed a healthy 68000 bus-cycle count and
+ZERO interrupts acknowledged, which was read -- twice -- as "the CPU is looping
+in early init waiting on something it reads". Two real bugs were found and
+fixed chasing that reading: the input words, where every difference between
+this game and Explosive Breaker is in bits MAME never declares and which
+therefore read zero, and the EEPROM byte, which is 0x00 or 0x01 and was being
+returned as 0x7e or 0x7f.
+
+Neither was ever going to boot it. `tools/build_rom_regions.py` described four
+regions for mgcrystl -- view2_0, view2_1, kan_spr, oki1 -- and **no maincpu**.
+Every MRA ever built for it shipped with the 68000's region zero-filled, and
+the CPU executed half a megabyte of zeros.
+
+Every symptom follows exactly. It really was fetching, so the bus-cycle count
+was healthy. 0x0000 decodes as `ori.b #0,d0`, which never enables interrupts,
+so the interrupt row was zero. Nothing ever wrote VRAM or the palette, so the
+screen stayed black.
+
+**The tool had been saying so on every run:**
+
+```
+0x0000000 maincpu   0x0080000  absent, zero-filled
+```
+
+That line was printed, read and walked past more than once in the same session
+that then went looking for the fault in input ports and EEPROM bits. The frame
+gate reinforced the mistake by scoring the game at 99.48%, which it does by
+rendering MAME's dumped VRAM without executing a single instruction -- a
+measurement that cannot see whether the CPU has any code at all.
+
+**THE REGION IS ASYMMETRIC**, which is why it is not a one-line addition:
+
+```
+ROM_LOAD16_BYTE( "mc100e02.u18", 0x000000, 0x020000 )   even bytes, 128 KB
+ROM_LOAD16_BYTE( "mc101e02.u19", 0x000001, 0x040000 )   odd  bytes, 256 KB
+```
+
+The odd ROM covers twice the span of the even one and `ROMREGION_ERASE` fills
+the rest, so the even bytes of the upper half are genuinely zero. Both files on
+disk match those sizes, and every mgcrystl set in MAME is built the same way,
+so it is the hardware and not a MAME quirk.
+
+`tools/verify_mra.py` sized its interleave buffer from the first part and threw
+a ValueError rather than silently accepting a half-length region, which is the
+right failure. It handles unequal lanes now. The MRA emitter still pads the
+short lane with zeros instead of expressing the asymmetry; the MiSTer loader
+accepts `offset` and `length` on a `<part>` and applies `map` to inline hex
+inside an `<interleave>`, so the correct form is two interleave blocks, the
+second pairing a zero-fill against the upper half of the odd ROM.
+
+**The lesson is about the instrument, not the game.** "CPU runs, no interrupts"
+is a real and useful reading, and it was interpreted as a fault in what the CPU
+was reading without first checking that it had anything to read. Before
+debugging what code does, confirm the code is there.

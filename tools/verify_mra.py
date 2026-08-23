@@ -33,13 +33,20 @@ def expand(mra_path, rompath):
             elif el.tag == "part":
                 out += z.read(el.get("name"))
             elif el.tag == "interleave":
+                # THE TWO LANES NEED NOT BE THE SAME LENGTH. Magical Crystals
+                # supplies the EVEN bytes of the first 256 KB from a 128 KB
+                # part and the ODD bytes of the whole 512 KB from a 256 KB one,
+                # with ROM_REGION's ERASE covering the rest. Sizing the buffer
+                # from parts[0] assumed a symmetry that held for every set
+                # described until then and threw a ValueError on the first one
+                # that broke it.
                 parts = [(p.get("map"), z.read(p.get("name"))) for p in el]
-                n = len(parts[0][1])
-                buf = bytearray(n * 2)
+                span = max(len(d) for _, d in parts) * 2
+                buf  = bytearray(span)
                 for m, data in parts:
                     # map="01" supplies byte 0 of each 16-bit word, "10" byte 1.
                     lane = 0 if m == "01" else 1
-                    buf[lane::2] = data
+                    buf[lane:len(data) * 2:2] = data
                 out += buf
             else:
                 sys.exit(f"unhandled MRA element <{el.tag}>")

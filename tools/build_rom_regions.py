@@ -41,6 +41,22 @@ import sys, os, re, zipfile, hashlib
 # would produce a region of exactly the right size holding the wrong picture.
 SETS = {
     "mgcrystl": {
+        # THE TWO HALVES ARE NOT THE SAME SIZE. mc100e02 supplies the EVEN
+        # bytes of the first 256 KB; mc101e02 supplies the ODD bytes of the
+        # whole 512 KB. ROM_REGION is 0x040000*2 with ROMREGION_ERASE, so the
+        # even bytes of the upper half are zero and that is what the hardware
+        # gives. Transcribed from ROM_START( mgcrystl ) rather than from the
+        # zip listing, per the note on explbrkr below.
+        #
+        # This region was MISSING ENTIRELY until 2026-08-23, so every Magical
+        # Crystals MRA shipped with a zero-filled program ROM and the 68000
+        # executed a megabyte of nothing. It presented as a black screen with
+        # a healthy bus-cycle count and zero interrupts acknowledged -- a CPU
+        # running perfectly well through code that does not exist.
+        "maincpu": [
+            ("mc100e02.u18", 0x000000, 0x020000, [], "16le", 0),
+            ("mc101e02.u19", 0x000000, 0x040000, [], "16le", 1),
+        ],
         "view2_0": [("mc010.u04", 0x000000, 0x100000, [])],
         "view2_1": [("mc020.u34", 0x000000, 0x100000, [])],
         "kan_spr": [
@@ -266,7 +282,10 @@ def sdram_end(setname):
     return max(b + n for _, b, n in sdram_map(setname))
 
 REGION_SIZE = {
-    "mgcrystl": {"view2_0": 0x100000, "view2_1": 0x100000,
+    # maincpu is 0x040000*2 in ROM_START, with ROMREGION_ERASE: the even bytes
+    # of the upper half are genuinely zero, not absent.
+    "mgcrystl": {"maincpu": 0x080000,
+                 "view2_0": 0x100000, "view2_1": 0x100000,
                  "kan_spr": 0x280000, "oki1": 0x040000},
     # Blaze On (Japan). ONE VIEW2 chip. The duplicate sprite files load to the
     # same offsets with identical data — the board has two sprite chips fed the

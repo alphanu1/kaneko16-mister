@@ -42,7 +42,7 @@ Miles Rally 1/2.
 | Inputs | two players, 2 buttons each, start/coin/service, and the board's DIPs — assembled per board, because the two boards wire the words differently, not just relocate them |
 | Game configuration table | `rtl/io/kaneko_gamecfg.sv` — one bitstream, four games; memory-map pages, ROM bases, video geometry, layer count, sprite list size and input wiring all selected by the MRA's game-id byte |
 | Z80 + YM2151 sound (Blaze On board) | **working on Blaze On** — music and effects. T80 at 4 MHz, jt51, and a 256-byte cache over SDRAM for the program ROM; a 48 KB copy in block RAM did not fit. Wing Force is still silent and open: its Z80 writes the YM at MAME's rate while jt51 produces nothing |
-| Screen rotation | **implemented, unconfirmed on hardware** — per game, because it is per game in both senses: Explosive Breaker is ROT90 and Wing Force ROT270, turned in OPPOSITE directions, while Blaze On and Magical Crystals are ROT0. Uses MiSTer's `screen_rotate` and the DDR3 framebuffer, so it costs no M10K and no SDRAM bandwidth. **Off by default** — on a landscape monitor a turned game is a tall strip, and the framebuffer path costs a frame of latency. OSD: Off / Auto (per game) / CW / CCW |
+| Screen rotation | **working on hardware** — per game, because it is per game in both senses: Explosive Breaker is ROT90 and Wing Force ROT270, turned in OPPOSITE directions, while Blaze On and Magical Crystals are ROT0. Uses MiSTer's `screen_rotate` and the DDR3 framebuffer, so it costs no M10K and no SDRAM bandwidth. **Off by default** — on a landscape monitor a turned game is a tall strip, and the framebuffer path costs a frame of latency. OSD: Off / Auto (per game) / CW / CCW |
 
 Three of the four games are playable on hardware. The 68000 completes its
 self-test, formats a blank EEPROM, enables interrupts and runs its main loop;
@@ -62,8 +62,8 @@ in a way a player cannot diagnose.
 |---|---|
 | Explosive Breaker | **playable**, with sound |
 | Blaze On (Japan) | **playable**, with music and effects |
-| Wing Force (prototype) | **playable**, graphics and input correct. No OKI effects and no music in the attract demo; the YM2151 register census is chasing it |
-| Magical Crystals | **held back — has never booted.** Black screen from the start; the frame gate also shows a 298-pixel line-scroll difference |
+| Wing Force (prototype) | **playable**, graphics, input and in-game music all correct. **No OKI sound effects, and no music in the attract demo** |
+| Magical Crystals | **not shipped — cause found, fix in progress.** It has never booted, and the reason is that the MRA never carried a 68000 program ROM: `maincpu` was missing from the ROM description, so the region was zero-filled and the CPU executed half a megabyte of zeros. That is why it showed a healthy bus-cycle count and zero interrupts. The frame gate's 99.48% is unrelated — it renders from MAME's dumped VRAM without running an instruction |
 
 The debug overlay (OSD: Debug) puts seven rows of per-frame telemetry over the
 picture, each a binary count with the MSB at the left:

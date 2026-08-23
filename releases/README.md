@@ -28,8 +28,8 @@ bases, screen geometry, layer count, sprite list size and input wiring.
 |---|---|
 | Explosive Breaker | playable, with sound |
 | Blaze On (Japan) | playable, with music and effects |
-| Wing Force (prototype) | playable; **no OKI effects, and no music in the attract demo** |
-| Magical Crystals | **not shipped — has never booted.** Black screen from the start |
+| Wing Force (prototype) | playable, with in-game music; **no OKI sound effects, and no music in the attract demo** |
+| Magical Crystals | **not shipped — cause found, fix in progress.** The MRA never carried a 68000 program ROM, so the CPU executed a zero-filled region |
 
 An MRA for a game the core cannot run is deliberately not shipped: it looks
 supported and then fails in a way a player cannot diagnose.
