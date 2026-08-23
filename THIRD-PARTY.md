@@ -119,7 +119,12 @@ Reference only, for repository structure, bootstrap and verification patterns.
 It is the same author's work, so reuse is unencumbered — but take it as a
 **copy into this tree with its own header**, never as a cross-repo include.
 
-## Ported from the Model 1 core
+## Ported from the Model 2 core
+
+<!-- This heading said "Model 1" until 2026-08-23, directly contradicting the
+     text below it, which says the code came from sega-model2-mister and is
+     emphatic that it is NOT the Model 1 version. Naming the wrong upstream
+     project in a licence file is the one error here that actually matters. -->
 
 ### `rtl/mem/kaneko_sdram.sv`, `rtl/mem/bw_monitor.sv`
 Ported 2026-08-20 from **`sega-model2-mister`** (`rtl/mem/m2_sdram.sv`,

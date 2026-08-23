@@ -31,6 +31,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The default is this machine's board. Override it for yours:
+#
+#     MISTER=1.2.3.4 tools/deploy.sh
+#
+# or set MISTER in your environment. It is a private-range address and means
+# nothing outside the LAN it was written on, but it is somebody's else's board
+# from your point of view -- check it before running this against a device.
 MISTER="${MISTER:-192.168.1.105}"
 MUSER="${MUSER:-root}"
 RBF="$ROOT/build/quartus/Kaneko16.rbf"
