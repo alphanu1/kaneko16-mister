@@ -5944,3 +5944,41 @@ was first added it was committed alongside a revert, so reverting the revert
 silently took the guard with it -- caught only by checking the Makefile after
 the build printed no slack line, which is the same "verify the artefact
 changed" rule this repository keeps relearning.
+
+### Magical Crystals' input words, and the bits that are not there
+
+Magical Crystals has never booted. It has no MCU -- its machine config is an
+EEPROM and nothing else -- so a black screen is a bug in what already exists,
+not missing silicon, and the frame gate renders it at 99.48% from MAME's own
+state, so the video path can draw it.
+
+The input words were still being assembled from Explosive Breaker's shape, and
+every difference between the two is in the bits that are NOT declared:
+
+```
+                     Explosive Breaker            Magical Crystals
+  c00000/e00000  bits 2-7 absent      -> 0    bits 2-7 absent      -> 0
+  c00002/e00002  low byte  absent     -> 0    low byte IPT_UNKNOWN -> ff
+  c00004/e00004  low byte  absent     -> 0    low byte IPT_UNKNOWN -> ff
+  c00006         port exists, empty   -> 0    NO SUCH PORT
+```
+
+A bit MAME never mentions in `INPUT_PORTS_START` reads **zero**. A bit declared
+`IPT_UNKNOWN` with `IP_ACTIVE_LOW` reads **one**. The two are a line apart in a
+listing and opposite on the bus.
+
+The core drove all of them high: `6'b111111` in the P1 word, `8'hff` in the
+low byte of P2 and SYSTEM, and `16'hffff` on the fourth word. Explosive Breaker
+plainly never tests any of them, since it has run correctly throughout with all
+of them wrong.
+
+This is the same fault, in the same shape, that parked Blaze On for a session
+-- its SYSTEM word is 0xFF00 idle, not 0xFFFF -- and the reading that fixed it
+was never carried across to these two games. The rule from that incident is
+already in CLAUDE.md and it is worth restating as an instruction rather than an
+observation: **take every input word bit by bit from INPUT_PORTS_START,
+including the bits that are not there.**
+
+Whether this is what has kept Magical Crystals dark is not yet known. It is one
+confirmed difference from the hardware, corrected; the black screen may have
+more than one cause.

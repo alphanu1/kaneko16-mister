@@ -641,7 +641,10 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	// Nothing pressed. The EEPROM is not implemented yet, so anything the game
 	// reads from it comes back as an unwritten device.
 	.in_p1(in_p1), .in_p2(in_p2),
-	.in_system(in_system), .in_unk(16'hffff),
+	// The fourth word: Explosive Breaker has a port at e00006 that MAME
+	// declares and leaves entirely empty, so it reads 0x0000, not 0xffff.
+	// Magical Crystals has no such port at all.
+	.in_system(in_system), .in_unk(16'h0000),
 
 	.unmapped_hit(unmapped_hit), .unmapped_addr(unmapped_addr)
 );
@@ -1786,10 +1789,29 @@ wire [5:0] p1_bits = { ~p1_b2, ~p1_b1, ~p1_right, ~p1_left, ~p1_down, ~p1_up };
 wire [5:0] p2_bits = { ~p2_b2, ~p2_b1, ~p2_right, ~p2_left, ~p2_down, ~p2_up };
 
 // ---- Explosive Breaker / Magical Crystals
-wire [15:0] in_p1_eb = { 2'b11, p1_bits, 6'b111111, dip_service, dip_flip };
-wire [15:0] in_p2_eb = { 2'b11, p2_bits, 8'hff };
+//
+// THESE TWO ARE NOT THE SAME WORDS, and every difference is in the bits that
+// are NOT there. A bit MAME never mentions in INPUT_PORTS_START reads ZERO; a
+// bit declared IPT_UNKNOWN with IP_ACTIVE_LOW reads ONE. The two look
+// identical in a listing and are opposite on the bus. This is the fault that
+// parked Blaze On for a session -- its SYSTEM word is 0xFF00 idle, not
+// 0xFFFF -- and the same reading was never applied to these two games.
+//
+//                       Explosive Breaker            Magical Crystals
+//   c00000/e00000  bits 2-7 absent      -> 0    bits 2-7 absent      -> 0
+//   c00002/e00002  low byte  absent     -> 0    low byte IPT_UNKNOWN -> ff
+//   c00004/e00004  low byte  absent     -> 0    low byte IPT_UNKNOWN -> ff
+//   c00006         port exists, empty   -> 0    NO SUCH PORT
+//
+// Explosive Breaker plainly never tests any of them, since it has run
+// correctly all along with all of them driven high. Magical Crystals has never
+// booted.
+wire [7:0]  eb_lo   = (game_id == 8'd1) ? 8'hff : 8'h00;   // 1 = mgcrystl
+
+wire [15:0] in_p1_eb  = { 2'b11, p1_bits, 6'b000000, dip_service, dip_flip };
+wire [15:0] in_p2_eb  = { 2'b11, p2_bits, eb_lo };
 wire [15:0] in_sys_eb = { 1'b1, ~svc_coin, ~pause, 1'b1,
-                          ~coin2, ~coin1, ~start2, ~start1, 8'hff };
+                          ~coin2, ~coin1, ~start2, ~start1, eb_lo };
 
 // ---- Blaze On board. The DIPs are OSD switches; default all ones, which is
 // every setting at its factory position because they are active low.
