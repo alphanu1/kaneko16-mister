@@ -62,10 +62,27 @@ says where.
 
 | Sub-row | y | Shows |
 |---|---|---|
-| 1st | 40-45 | Last acknowledged bus address, **high half** `a[23:16]` — `0030` work RAM, `0050` palette, `00c0` inputs |
-| 2nd | 46-51 | Last acknowledged bus address, **low half** `a[15:0]` |
-| 3rd | 52-57 | Last **unmapped** address, low half |
+| 1st | 40-45 | **IPL assertions this frame** — interrupt requests kaneko_irq RAISED, whether or not the CPU answered. Wants **3**. |
+| 2nd | 46-51 | Last acknowledged bus address, **high half** `a[23:16]` — `0030` work RAM, `0050` palette, `00c0` inputs |
+| 3rd | 52-57 | Last acknowledged bus address, **low half** `a[15:0]` |
 | 4th | 58-63 | Unmapped accesses per frame |
+
+### Reading sub-row 1 against the amber row
+
+These two together split the black screen in half, which neither does alone.
+The amber row counts what the CPU **accepted**; sub-row 1 counts what the
+interrupt logic **offered**.
+
+| sub-row 1 | amber | Meaning |
+|---|---|---|
+| 3 | 3 | Interrupts are working. Look elsewhere. |
+| 3 | 0 | The requests are there and the 68000 is ignoring them, so it is masked at level 7 — it never finished its self-test. **The fault is upstream, nowhere near the IRQ path.** |
+| 0 | 0 | kaneko_irq is not firing at all. The fault IS the interrupt path. |
+
+Magical Crystals reads amber 0 with ~46,800 bus cycles a frame, and MAME shows
+the game spinning in an idle loop at `01f820` — 2.7 million fetches in 600
+frames — doing all its work in the handlers. So "no interrupts" fully explains
+the black screen, and sub-row 1 says which half to work on.
 
 It has previously carried the OKI chain, the YM2151 register-write count, the
 exception vector and the VIEW2 scroll probe. Whenever it is repurposed, this

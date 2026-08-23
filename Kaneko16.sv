@@ -1056,6 +1056,33 @@ always @(posedge clk_sys) begin
 	else if (cpu_iack && !iack_d) irq_cnt <= irq_cnt + 16'd1;
 end
 
+// IPL ASSERTIONS, WHICH ARE NOT THE SAME THING AS ACKNOWLEDGEMENTS.
+//
+// irq_cnt above counts what the CPU ACCEPTED. Magical Crystals reads zero
+// there on hardware while its 68000 runs at a healthy ~46,800 bus cycles a
+// frame, and zero is ambiguous in exactly the way that matters:
+//
+//   kaneko_irq never asserts        -> the fault is in the interrupt path
+//   it asserts and the CPU ignores  -> the 68000 is masked at level 7, so it
+//                                      never got through its self-test and the
+//                                      fault is upstream, nowhere near the IRQ
+//
+// Those want opposite work, and no counter in the build could tell them apart.
+// MAME says the game spins in an idle loop at 01f820 -- 2.7 million fetches in
+// 600 frames -- and does all of its work in the handlers, so "no interrupts"
+// is a complete explanation of the black screen either way.
+//
+// Counts the FALLING edge of "all three IPL lines high", i.e. each new request
+// kaneko_irq raises, whether or not the CPU ever answers it. Wants 3 per frame.
+reg [15:0] ipl_cnt, ipl_cnt_lat;
+reg        ipl_any_d;
+wire       ipl_any = (cpu_ipl_n != 3'b111);
+always @(posedge clk_sys) begin
+	ipl_any_d <= ipl_any;
+	if (vbl_rise) begin ipl_cnt_lat <= ipl_cnt; ipl_cnt <= 16'd0; end
+	else if (ipl_any && !ipl_any_d) ipl_cnt <= ipl_cnt + 16'd1;
+end
+
 // OKI TELEMETRY: where does the sound path stop?
 //
 // The YM2149s are correctly silent (the game zeroes their volumes) and the OKI
@@ -2007,9 +2034,9 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 //   row 6  last UNMAPPED address, low half
 //   row 7  unmapped accesses per frame -- zero means it is not lost, it is
 //          waiting for something that never comes
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? bus_a_hi_lat
-                        : (screen_y < 9'd52) ? bus_a_lo_lat
-                        : (screen_y < 9'd58) ? unmap_a_lat
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? ipl_cnt_lat
+                        : (screen_y < 9'd52) ? bus_a_hi_lat
+                        : (screen_y < 9'd58) ? bus_a_lo_lat
                                              : unmap_cnt_lat;
 wire       oki_set = oki_row_val[oki_bit];
 
