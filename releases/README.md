@@ -93,6 +93,13 @@ over the top-left of the picture — 68000 bus cycles, interrupts acknowledged,
 video fetch overruns, sprite overruns, the live pad word and the last unmapped
 address.
 
+**The tall yellow block is a scratch area** and changes between builds. In this
+one it is the **Z80 sound-port census**: writes to the OKI, writes to the
+YM2151, reads of the sound latch, and writes to the OKI bank, one sub-row each,
+top to bottom. It is pointed there because Wing Force plays its in-game music
+and no sound effects, and the top two sub-rows separate "our Z80 never reaches
+the effect code" from "it writes the chip and nothing comes out".
+
 It is a diagnostic instrument, not something you need to play the games. If you
 are reporting a fault it is worth photographing, because it says a great deal
 in one frame. The rows are documented one by one — width, colour and meaning —
