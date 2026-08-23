@@ -13,6 +13,13 @@ Copy to the SD card:
 ROMs are supplied by you and must be in `/media/fat/games/mame/` as the MRA
 names them. Nothing here contains ROM data.
 
+**SDRAM:** all four games fit a 32 MB module. Blaze On needs 4.12 MB, Magical
+Crystals 5.25 MB, Wing Force 5.56 MB and Explosive Breaker 5.75 MB — the ROM
+stream is the whole requirement, because the MRA describes one contiguous
+image and the loader maps it as the identity. Later titles are much larger and
+some will need a 128 MB module; `README.md` in the source repository carries
+the per-game table.
+
 **Do not rename the core.** MiSTer resolves `<rbf>Kaneko16</rbf>` by scanning
 for names starting `Kaneko16` followed by `.` or `_`, and keeps the
 lexicographically greatest — so a spare copy called `Kaneko16_GOOD.rbf` beats

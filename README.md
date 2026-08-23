@@ -95,6 +95,39 @@ mame 100000 accesses, 22898 after dropping instruction fetches
 MATCH over all 22897 compared accesses
 ```
 
+## SDRAM
+
+The MRA describes one contiguous stream and the loader maps it as the identity,
+so a game's SDRAM requirement is just the sum of its ROM regions. Measured for
+the shipped games, estimated from `ROM_REGION` sizes for the rest:
+
+| Game | SDRAM | Notes |
+|---|---|---|
+| Blaze On | 4.12 MB | |
+| Magical Crystals | 5.25 MB | |
+| Wing Force | 5.56 MB | |
+| Explosive Breaker | 5.75 MB | |
+| Bonk's Adventure | ~14.1 MB | Tier 3 |
+| B.Rap Boys | ~15.4 MB | Tier 2 |
+| Great 1000 Miles Rally | ~15.4 MB | Tier 3 |
+| Great 1000 Miles Rally 2 | ~19.1 MB | Tier 3 |
+| Shogun Warriors | ~23.4 MB | Tier 2 |
+| **Blood Warrior** | **~35.1 MB** | Tier 3 — **needs more than 32 MB** |
+
+**All four shipped games fit comfortably in a 32 MB module.** The largest is
+under 6 MB, and nothing in Tier 1 comes close to the limit.
+
+Later tiers do not all fit. Blood Warrior alone is 35 MB, mostly sprite ROM —
+30 MB of `kan_spr` — so it requires a 128 MB module. Shogun Warriors at 23 MB
+fits in 32 MB but leaves little margin once the sprite bitmap moves into SDRAM
+(see below).
+
+Tier 3 additionally needs about **1 MB** of SDRAM for the KC-002 sprite bitmap,
+which cannot live in block memory: 512x512x16 double-buffered is 8.39 Mbit
+against the device's 5.66 Mbit, so it does not fit even if the core held
+nothing else. `docs/00-decisions.md` D5 records that measurement and what it
+rules out.
+
 ## Building and testing
 
 `third_party/` is **not in the repository**, and neither is `sys/`. Both are
