@@ -110,15 +110,28 @@ credit without dropping one in.
 
 ## Sprite offscreen skip (OSD)
 
-A diagnostic toggle, on by default. It stops the sprite renderer walking
-records whose 16x16 box is entirely outside the visible area, which takes a
-full 1024-record pass from about 1,039,000 clocks to about 155,000 against a
-frame budget of 811,000 — the difference between overrunning every frame and
-not.
+A diagnostic toggle, **on by default**. It stops the sprite renderer walking
+records whose 16x16 box lies entirely outside the visible area.
+
+It exists because the sprite pass is the one part of the video path with no
+fixed upper bound: it clears the coverage mask, parses up to 1024 records and
+draws at a pixel per clock, and every pixel can miss a 2.25 MB ROM. The frame
+budget it has to fit inside is **811,008 core clocks** — 48 MHz divided by
+59.1856 Hz — and that number does not change with SDRAM speed, because it is
+the core clock over the frame rate.
+
+`tb_kaneko_spr_sys` times a pass both ways. With its on-screen sprite set a
+pass costs about **91,700 clocks**, roughly 11% of a frame, and enabling the
+skip changes nothing — which is the correct result, because there is nothing
+offscreen to skip. The saving only appears when a game parks sprites off the
+edge of the screen, and how large it is depends entirely on how many.
 
 Turn it **Off** if sprites are missing; leave it **On** otherwise. With the
-debug overlay on, the white row is the one to watch — it counts sprite passes
-that did not finish in time, and it should read zero.
+debug overlay on, the **white row** counts sprite passes that did not finish in
+time and should read zero.
+
+It is switchable because it reached hardware alongside another sprite change
+and one of the two stopped Explosive Breaker's laser from drawing.
 
 ## Save Backup RAM
 

@@ -481,10 +481,40 @@ int main(int argc, char** argv) {
     long period = 0;
     {   // Time one unobstructed pass, then run frames at 60%% of it so passes
         // genuinely overlap the next frame boundary.
+        //
+        // BOTH STATES ARE TIMED, because releases/README.md quotes a cost for
+        // the offscreen skip and nothing measured it. The figures there --
+        // 1,039,000 clocks without and 155,000 with -- predate the SDRAM going
+        // to 96 MHz and the arbiter changing to serve by deadline, and neither
+        // was reproducible from anything in the tree.
+        //
+        // The frame budget these are measured against is 48e6 / 59.1856 =
+        // 811,008 core clocks. That number does NOT move with SDRAM speed --
+        // it is the core clock over the frame rate -- but the pass duration
+        // does, because a shorter SDRAM round trip shortens every ROM miss.
+        // This harness models the round trip as a fixed LATENCY, so the ratio
+        // between the two readings is the honest part and the absolute values
+        // track whatever LATENCY is set to.
+        long t_off = 0;
+        dut->skip_en = 0;
+        dut->frame_start = 1; tick(); dut->frame_start = 0;
+        while (dut->busy && t_off < 4000000) { tick(); t_off++; }
+        long gq = 0; while (dut->busy && gq++ < 4000000) tick();
+
         long t0 = 0;
+        dut->skip_en = 1;
         dut->frame_start = 1; tick(); dut->frame_start = 0;
         while (dut->busy && t0 < 4000000) { tick(); t0++; }
         period = t0 * 3 / 5;
+        // These sprites are ON SCREEN, so the two readings SHOULD be equal:
+        // the skip only avoids work for records whose box is entirely outside
+        // the visible area, and there are none here. A large gap in this line
+        // would mean the skip is rejecting something it should be drawing,
+        // which is the failure that took Explosive Breaker's laser away.
+        printf("  one pass takes %ld clocks with the skip, %ld without"
+               " (%.2fx) of a 811008-clock frame -- these sprites are on"
+               " screen, so equal is correct\n",
+               t0, t_off, t_off ? (double)t_off / (double)t0 : 0.0);
         printf("  one pass takes %ld clocks; driving frames every %ld\n",
                t0, period);
     }
