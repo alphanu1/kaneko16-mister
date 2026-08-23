@@ -141,6 +141,41 @@ Reverses if: the M10K budget tightens once the tile fetch path is built and
 needs caching, in which case the fallback is a single buffer with drawing
 confined to vblank, not a line renderer.
 
+### Amended 2026-08-23 — the bitmap must move to SDRAM before Tier 3
+
+The paragraph above is right for VU-002 and wrong about what happens next.
+Measured against this device (553 M10K blocks, 5,662,720 bits):
+
+| | bits | blocks | of device |
+|---|---|---|---|
+| VU-002 320x256x16, one buffer | 1,310,720 | 128 | 23% |
+| VU-002 double-buffered (what we ship) | 2,621,440 | 256 | 46% |
+| **KC-002 512x512x16, one buffer** | 4,194,304 | 410 | **74%** |
+| **KC-002 double-buffered** | 8,388,608 | 819 | **148%** |
+
+`kaneko_spr.cpp`: "actually 256x256x12bit (VU002) / 512x512x16bit (KC002),
+double buffered". KC-002 is the Tier 3 chip — `gtmr`, and through it `gtmre`,
+`gtmr2`, `bloodwar` and `bonkadv`.
+
+**Its bitmap does not fit in this FPGA's block memory at all.** Not alongside
+anything else, and not on its own: a single buffer is 74% of the device before
+VRAM, palette, work RAM, the Z80 cache or ascal get a block.
+
+**This retires the "separate RBF for Tier 3" fallback.** A separate bitstream
+gives Tier 3 the whole device, and the whole device is still not enough — 819
+blocks against 553. The constraint is capacity, not sharing, so splitting the
+core cannot answer it. Moving the sprite bitmap into SDRAM is therefore a
+PREREQUISITE for Tier 3 rather than an optimisation, and if it cannot be made
+to work then Tier 3 is not reachable on this hardware by this design.
+
+Tier 2 is unaffected: `shogwarr` and, through it, `brapboys` both instantiate
+KANEKO_VU002_SPRITE, so they run on the bitmap we already have.
+
+Order follows from that: do the SDRAM move **before** Tier 2, while only four
+games depend on the sprite subsystem. Doing it afterwards means the same
+surgery re-verified across thirteen sets instead of four, and hard rule 9 says
+every one of them gets checked.
+
 ---
 
 ## D6 — The MRA owns the SDRAM layout; the loader maps it as the identity
