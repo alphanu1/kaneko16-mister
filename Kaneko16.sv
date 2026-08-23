@@ -1041,10 +1041,20 @@ reg [15:0] z80_stl_cnt,  z80_stl_lat;
 // delivery is one-shot and held for cen_p1 -- counting the CPU side would
 // count requests, not what the chip actually saw.
 reg  [7:0] ym_reg_addr;
-wire       ym_deliv = ~u_z80snd.ym_cs_n && ~u_z80snd.ym_wr_n && z80_ym_cen_p1;
-wire       ym_reg_wr = ym_deliv && u_z80snd.ym_a0;      // the data half
+// The top-level wires, not a hierarchical reference into the instance. These
+// are kaneko_z80snd's OUTPUTS and are already brought out here, so reaching
+// inside was never necessary. Quartus does not resolve a hierarchical
+// reference the way the simulator does -- it said "can't resolve reference to
+// object ym_cs_n" and failed synthesis in seven seconds, which is at least a
+// loud failure rather than a misleading one.
+//
+// (A comment must not put the simulator's name at the start of a line: it is
+// parsed as a pragma. Recorded against kaneko_mixer.sv and walked into again
+// writing this one.)
+wire       ym_deliv  = ~z80_ym_cs_n && ~z80_ym_wr_n && z80_ym_cen_p1;
+wire       ym_reg_wr = ym_deliv && z80_ym_a0;           // the data half
 always @(posedge clk_sys)
-	if (ym_deliv && !u_z80snd.ym_a0) ym_reg_addr <= u_z80snd.ym_din;
+	if (ym_deliv && !z80_ym_a0) ym_reg_addr <= z80_ym_din;
 
 reg [15:0] ym_key_cnt,   ym_key_lat;     // writes to 0x08, KEY ON/OFF
 reg [15:0] ym_tmr_cnt,   ym_tmr_lat;     // writes to 0x14, timer control
