@@ -720,7 +720,25 @@ wire signed [16:0] snd_mix = {{3{ym_ctr[11]}}, ym_ctr, 2'd0}      // YM, scaled
 // doubling cannot reach +/-32767 -- but it is saturated rather than trusted,
 // because a silent overflow inverts the waveform and sounds like a broken
 // chip rather than a loud one.
-wire signed [18:0] snd_gain = {{2{snd_mix[16]}}, snd_mix} <<< 1;
+// TWO MORE DOUBLINGS THAN THE ARITHMETIC CALLS SAFE, DELIBERATELY.
+//
+// Equalising the two boards' theoretical full scale was the wrong target.
+// jt6295's sample is 14-bit and jt51's is 16-bit, so the YM2151 board is 4x
+// louder before any gain, and MAME widens that further: Blaze On routes its
+// YM2151 at 1.0 while Explosive Breaker routes everything at 0.5. Some of the
+// difference is therefore authentic.
+//
+// The rest is that the OKI's full scale is theoretical. ADPCM samples carry
+// their own volume attenuation and rarely approach +/-8192, while the YM2151
+// really does use its range -- so matching the peaks left EB obviously quieter
+// by ear. This scales past the point where the sum can be proven not to clip
+// and relies on the saturation below, which is a judgement rather than a
+// derivation: a rare clipped peak is a better trade than a soundtrack nobody
+// can hear.
+//
+// If loud effects distort, back this off to <<< 1 -- that is the largest shift
+// that cannot clip.
+wire signed [18:0] snd_gain = {{2{snd_mix[16]}}, snd_mix} <<< 2;
 wire [15:0] ym_mix = (snd_gain >  19'sd32767) ? 16'h7fff
                    : (snd_gain < -19'sd32768) ? 16'h8000
                                               : snd_gain[15:0];
