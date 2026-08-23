@@ -255,7 +255,28 @@ the bandwidth to move it off-chip does not exist. Both routes are closed.
 instantiate KANEKO_VU002_SPRITE and run on the bitmap already built. Nothing
 about this measurement touches them.
 
-### THE ANSWER FOR TIER 3 IS THE SDRAM CLOCK
+### THE SDRAM CLOCK IS THE LEVER, BUT 144 MHz IS NOT FREE
+
+**Corrected 2026-08-23, hours after the paragraph below was written.** The
+bandwidth arithmetic is right and 144 MHz would fit. What the arithmetic did
+not check is whether the controller can RUN at 144 MHz, and as built it cannot.
+
+From the timing report at 96 MHz:
+
+| clock | period | slack | critical path | ceiling |
+|---|---|---|---|---|
+| SDRAM, `general[0]` | 10.417 ns | 1.126 | **9.291 ns** | **107.6 MHz** |
+| core, `general[1]` | 20.833 ns | 1.880 | 18.953 ns | 52.8 MHz |
+
+144 MHz needs the SDRAM path under 6.944 ns — a **2.35 ns cut, a quarter of
+it**. 120 MHz needs 0.96 ns, which is far more plausible, but 120 is 2.5x the
+core clock and that breaks the exact 2:1 integer ratio the crossing adapter is
+built on. The core cannot move up to restore the ratio either: its own ceiling
+is 52.8 MHz and the pixel clock is 48/8.
+
+So the honest position is that the clock raise is the right lever and its cost
+is unknown until someone finds what the 9.291 ns path actually is and whether
+it pipelines. That is the next question, not an assumption.
 
 **Raise it to 144 MHz, three times the core clock, and the bitmap fits.**
 
