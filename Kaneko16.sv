@@ -1053,8 +1053,10 @@ reg  [7:0] ym_reg_addr;
 // writing this one.)
 wire       ym_deliv  = ~z80_ym_cs_n && ~z80_ym_wr_n && z80_ym_cen_p1;
 wire       ym_reg_wr = ym_deliv && z80_ym_a0;           // the data half
-always @(posedge clk_sys)
-	if (ym_deliv && !z80_ym_a0) ym_reg_addr <= z80_ym_din;
+always @(posedge clk_sys) begin
+	if (rst_sys)                     ym_reg_addr <= 8'd0;
+	else if (ym_deliv && !z80_ym_a0) ym_reg_addr <= z80_ym_din;
+end
 
 reg [15:0] ym_key_cnt,   ym_key_lat;     // writes to 0x08, KEY ON/OFF
 reg [15:0] ym_tmr_cnt,   ym_tmr_lat;     // writes to 0x14, timer control
@@ -1065,7 +1067,9 @@ always @(posedge clk_sys) begin
 		z80_ymw_cnt <= 0; z80_ymr_cnt <= 0; z80_okiw_cnt <= 0; z80_stl_cnt <= 0;
 		ym_nz_cnt <= 0; mix_nz_cnt <= 0; ym_nz_lat <= 0; mix_nz_lat <= 0;
 		ym_key_cnt <= 0; ym_tmr_cnt <= 0; ym_key_lat <= 0; ym_tmr_lat <= 0;
-		ym_reg_addr <= 8'd0;
+		// ym_reg_addr is NOT reset here: it has its own always block below,
+		// and driving one register from two of them is two constant drivers
+		// as far as Quartus is concerned -- eight errors, one per bit.
 		z80_ymw_lat <= 0; z80_ymr_lat <= 0; z80_okiw_lat <= 0; z80_stl_lat <= 0;
 	end else if (vbl_rise) begin
 		z80_ymw_lat  <= z80_ymw_cnt;  z80_ymw_cnt  <= 0;
