@@ -587,7 +587,8 @@ wire        ym0_we, ym1_we, eeprom_we, oki_we;
 wire [7:0]  oki_din, oki_dout;
 wire [3:0]  ym_addr;
 wire [7:0]  ym_din, eeprom_din;
-wire        v2r0_we, v2r1_we, sprreg_we;
+wire        v2r0_we, v2r1_we, sprreg_we, sprreg2_we;
+wire [15:0] q_sprreg2;
 wire [12:0] vmem_addr;
 wire [15:0] vmem_din;
 wire [3:0]  reg_addr;
@@ -623,6 +624,7 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.oki_we(oki_we), .oki_din(oki_din), .oki_dout(oki_dout),
 
 	.v2r0_we(v2r0_we), .v2r1_we(v2r1_we), .sprreg_we(sprreg_we),
+	.sprreg2_we(sprreg2_we), .sprreg2_q(q_sprreg2),
 	.reg_addr(reg_addr), .reg_din(reg_din),
 	.v2r0_q(q_v2r0), .v2r1_q(q_v2r1), .sprreg_q(q_sprreg),
 
@@ -1032,6 +1034,33 @@ kaneko_regs16 u_sprreg
 	.clk(clk_sys), .we(sprreg_we), .addr(reg_addr), .din(reg_din),
 	.uds(~UDSn), .lds(~LDSn),
 	.rd_addr(reg_addr), .rd_q(q_sprreg), .regs_flat(sprreg_flat)
+);
+
+// THE SECOND SPRITE REGISTER BLOCK AT 980000, ON THE BLAZE ON BOARD.
+//
+// blazeon_map declares it as plain RAM -- `map(0x980000, 0x98001f).ram()` --
+// because the board has two VU-002 chips and this is the second one's window.
+// MAME does not model that chip, but it does honour the RAM, so a read gives
+// back what was written.
+//
+// This core answered 0xffff, and the Wing Force bus trace caught it as the
+// FIRST divergence from the oracle, nineteen compared accesses in:
+//
+//     ours  980004 R ffff       mame  980004 R 0000
+//
+// The game writes 980000 and 980002 and then reads 980004 to 98001f expecting
+// what it wrote. Every decision it took afterwards was made on values the
+// hardware never produced, which is why nothing downstream of this was worth
+// trusting.
+//
+// A register file, not a device: driving a second sprite bitmap from it is the
+// open item in the design study, and storing the writes is the part that has
+// to be right first either way.
+kaneko_regs16 u_sprreg2
+(
+	.clk(clk_sys), .we(sprreg2_we), .addr(reg_addr), .din(reg_din),
+	.uds(~UDSn), .lds(~LDSn),
+	.rd_addr(reg_addr), .rd_q(q_sprreg2), .regs_flat()
 );
 
 // Scanline interrupts. vcnt comes from the video timing below; the reference

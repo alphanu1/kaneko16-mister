@@ -61,6 +61,21 @@ MAPS = {
         (0xa80000, 0xa80002, "watchdog  a80000"),
         (0xe00000, 0xe00008, "inputs    e00000-e00007"),
     ],
+    # blazeon_map, shared by blazeonj and wingforc. ROM is a full megabyte
+    # here, the third and fourth input words are UNK then SYSTEM (bakubrkr has
+    # them the other way round), and e00000 is the sound latch on write and an
+    # IRQ acknowledge on read.
+    "blazeon": [
+        (0x300000, 0x310000, "work ram  300000-30ffff"),
+        (0x500000, 0x501000, "palette   500000-500fff"),
+        (0x600000, 0x604000, "view2-0 v 600000-603fff"),
+        (0x700000, 0x701000, "spriteram 700000-700fff"),
+        (0x980000, 0x980020, "sprite r2 980000-98001f"),
+        (0xc00000, 0xc00008, "inputs    c00000-c00007"),
+        (0xe00000, 0xe00002, "sndlatch  e00000"),
+        (0xe40000, 0xe40002, "irq ack   e40000"),
+        (0xec0000, 0xec0002, "irq ack   ec0000"),
+    ],
     "mgcrystl": [
         (0x300000, 0x310000, "work ram  300000-30ffff"),
         (0x500000, 0x501000, "palette   500000-500fff"),
@@ -91,7 +106,12 @@ UNMAPPED = {
 }
 
 
+# Sets that share another set's map.
+ALIAS = {"blazeonj": "blazeon", "wingforc": "blazeon"}
+
+
 def region_for(setname):
+    setname = ALIAS.get(setname, setname)
     """Return a namer for this set. Raises rather than defaulting.
 
     A set with no map has no correct answer, and substituting another game's
@@ -108,8 +128,9 @@ def region_for(setname):
     unmapped = UNMAPPED.get(setname, ())
 
     def region(a):
-        if a < ROM_END:
-            return "rom       000000-07ffff"
+        rom_end = 0x100000 if setname == "blazeon" else ROM_END
+        if a < rom_end:
+            return f"rom       000000-{rom_end - 1:06x}"
         for lo, hi, name in windows:
             if lo <= a < hi:
                 return name

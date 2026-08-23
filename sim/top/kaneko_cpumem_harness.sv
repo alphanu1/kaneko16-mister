@@ -373,9 +373,9 @@ module kaneko_cpumem_harness #(
     // The game writes 0x0150 to the sprite register at 0x900006 and reads it
     // straight back. MAME returns it. This harness returned zero — not because
     // the core is wrong, but because the harness had no register file at all.
-    wire        h_v2r0_we, h_v2r1_we, h_sprreg_we;
+    wire        h_v2r0_we, h_v2r1_we, h_sprreg_we, h_sprreg2_we;
     wire [3:0]  h_reg_addr;
-    wire [15:0] h_reg_din, h_v2r0_q, h_v2r1_q, h_sprreg_q;
+    wire [15:0] h_reg_din, h_v2r0_q, h_v2r1_q, h_sprreg_q, h_sprreg2_q;
 
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -397,6 +397,18 @@ module kaneko_cpumem_harness #(
         .uds(~UDSn), .lds(~LDSn),
         .rd_addr(h_reg_addr), .rd_q(h_v2r1_q), .regs_flat()
     );
+    // The Blaze On board's SECOND sprite register window at 980000, which
+    // blazeon_map declares as plain RAM. Modelled with a real register file
+    // rather than left unconnected: an unconnected input reads as zero, which
+    // happens to be what MAME returns before anything is written, so the
+    // harness would have agreed with the oracle by accident and stopped
+    // agreeing the moment the game wrote a value and read it back.
+    kaneko_regs16 u_h_sprreg2 (
+        .clk(clk), .we(h_sprreg2_we), .addr(h_reg_addr), .din(h_reg_din),
+        .uds(~UDSn), .lds(~LDSn),
+        .rd_addr(h_reg_addr), .rd_q(h_sprreg2_q), .regs_flat()
+    );
+
     kaneko_regs16 u_h_sprreg (
         .clk(clk), .we(h_sprreg_we), .addr(h_reg_addr), .din(h_reg_din),
         .uds(~UDSn), .lds(~LDSn),
@@ -423,6 +435,7 @@ module kaneko_cpumem_harness #(
         .oki_we(oki_we), .oki_din(oki_din), .oki_dout(oki_dout),
 
         .v2r0_we(h_v2r0_we), .v2r1_we(h_v2r1_we), .sprreg_we(h_sprreg_we),
+        .sprreg2_we(h_sprreg2_we), .sprreg2_q(h_sprreg2_q),
         .reg_addr(h_reg_addr), .reg_din(h_reg_din),
         .v2r0_q(h_v2r0_q), .v2r1_q(h_v2r1_q), .sprreg_q(h_sprreg_q),
 
@@ -438,7 +451,19 @@ module kaneko_cpumem_harness #(
         // Both games declare bits 7..2 as PORT_DIPUNUSED_DIPLOC with default
         // equal to mask, i.e. pulled high; the SYSTEM low byte is defined on
         // mgcrystl (0xff) and absent on bakubrkr (0x00).
-        .in_p1(16'hffff), .in_p2({8'hff, CFG_SYS_LO}),
+        // P2's LOW BYTE IS PER BOARD, NOT PER GAME.
+        //
+        // On the Blaze On board c00002 is DSW1_P2 and its low byte is DIP
+        // switches, all defaulting high, so it reads 0xffff. On bakubrkr the
+        // low byte is not declared at all and reads 0x00; on mgcrystl it is
+        // IPT_UNKNOWN and reads 0xff.
+        //
+        // This drove {8'hff, CFG_SYS_LO} for every game, which gave Wing Force
+        // 0xff00 where the board gives 0xffff. The bus trace caught it as the
+        // first divergence from the oracle once a real fault ahead of it was
+        // fixed -- a wrong value in the instrument, masking whatever came next.
+        .in_p1(16'hffff),
+        .in_p2(INPUTS_BLAZEON ? 16'hffff : {8'hff, CFG_SYS_LO}),
         // EVERY window page comes from the game table, exactly as the top
         // level wires them. They used to be left unconnected, which ties them
         // to 0 — so every window decoded at page 0x00, where the ROM lives,

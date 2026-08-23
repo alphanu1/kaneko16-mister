@@ -115,10 +115,10 @@ module kaneko_bus #(
     output logic        snd_we,
     output wire  [7:0]  snd_din,
 
-    output logic        v2r0_we, v2r1_we, sprreg_we,
+    output logic        v2r0_we, v2r1_we, sprreg_we, sprreg2_we,
     output logic [3:0]  reg_addr,
     output logic [15:0] reg_din,
-    input  wire  [15:0] v2r0_q, v2r1_q, sprreg_q,
+    input  wire  [15:0] v2r0_q, v2r1_q, sprreg_q, sprreg2_q,
 
     // ---- inputs, active low as the hardware presents them
     input  wire [15:0]  in_p1, in_p2, in_system, in_unk,
@@ -191,6 +191,25 @@ module kaneko_bus #(
     wire sel_pal   = (a[23:16] == pg_pal)  && (a[15:12] == 4'd0);
     wire sel_v2r0  = (a[23:5]  == 19'h40000);                   // 800000-80001f
     wire sel_sprr  = (a[23:5]  == 19'h48000);                   // 900000-90001f
+    // THE SECOND SPRITE REGISTER BLOCK, 980000-98001f.
+    //
+    // blazeon_map has `map(0x980000, 0x98001f).ram()` -- plain RAM, no device
+    // behind it. The board carries two VU-002 chips and this is the second
+    // one's register window; MAME does not model the chip but it does honour
+    // the RAM, so a read returns what was written.
+    //
+    // We returned 0xffff, and the bus trace caught it as the FIRST divergence
+    // from the oracle on Wing Force, at compared access 19:
+    //
+    //     ours  980004 R ffff        mame  980004 R 0000
+    //
+    // The game writes 980000 and 980002, then reads 980004 through 98000a
+    // expecting zeros. Everything it does after that is running on values the
+    // hardware never produced.
+    //
+    // Blaze On board only. bakubrkr and mgcrystl have nothing at this address
+    // and a read there must stay unmapped, which is how it is caught.
+    wire sel_sprr2 = blazeon_io && (a[23:5] == 19'h4c000);      // 980000-98001f
     wire sel_wdog  = (a[23:16] == pg_wdog) && (a[15:1] == 15'd0);
     wire sel_v2r1  = (a[23:5]  == 19'h58000);                   // b00000-b0001f
     wire sel_ctrl  = (a[23:1]  == 23'h680000);                  // d00000/1
@@ -222,7 +241,7 @@ module kaneko_bus #(
     wire decoded = sel_rom | sel_wram | sel_ym0 | sel_ym1 | sel_oki | sel_v2w0
                  | sel_v2w1 | sel_spr | sel_pal | sel_v2r0 | sel_sprr | sel_wdog
                  | sel_v2r1 | sel_ctrl | sel_in  | sel_snd
-                 | sel_iack2 | sel_iack3;
+                 | sel_iack2 | sel_iack3 | sel_sprr2;
 
     // ---------------------------------------------------------- work RAM
     // 64 KB as 32k x 16, held as TWO BYTE-WIDE ARRAYS rather than one 16-bit
@@ -330,7 +349,7 @@ module kaneko_bus #(
 
     always_ff @(posedge clk) begin
         vram0_we <= 1'b0; vram1_we <= 1'b0; spr_we <= 1'b0; pal_we <= 1'b0;
-        v2r0_we  <= 1'b0; v2r1_we  <= 1'b0; sprreg_we <= 1'b0;
+        v2r0_we  <= 1'b0; v2r1_we  <= 1'b0; sprreg_we <= 1'b0; sprreg2_we <= 1'b0;
         ym0_we   <= 1'b0; ym1_we   <= 1'b0; eeprom_we <= 1'b0;
         oki_we   <= 1'b0; snd_we <= 1'b0;
         unmapped_hit <= 1'b0;
@@ -374,6 +393,7 @@ module kaneko_bus #(
                                 v2r0_we   <= sel_v2r0;
                                 v2r1_we   <= sel_v2r1;
                                 sprreg_we <= sel_sprr;
+                                sprreg2_we <= sel_sprr2;
                                 ym0_we    <= sel_ym0;
                                 ym1_we    <= sel_ym1;
                                 // Only the low byte of d00000/d00001 is the
@@ -463,6 +483,7 @@ module kaneko_bus #(
         else if (sel_v2r0) iEdb = v2r0_q;
         else if (sel_v2r1) iEdb = v2r1_q;
         else if (sel_sprr) iEdb = sprreg_q;
+        else if (sel_sprr2) iEdb = sprreg2_q;
         // A YM2149 register reads back as a byte. MAME promotes data_r() to
         // u16, so the high half is zero; the game only reads the low half, but
         // matching it keeps the bus traces comparable.
