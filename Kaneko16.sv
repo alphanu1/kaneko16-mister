@@ -1132,14 +1132,23 @@ wire       occ_g_any  = |sdr_dbg_grant;
 wire       occ_g_tile = |(sdr_dbg_grant & 9'b0_0001_1101);   // 0,2,3,4
 wire       occ_g_spr  = |(sdr_dbg_grant & 9'b0_1100_0000);   // 6,7
 
+// ONE CLOCK, ONE BLOCK. The first version updated occ_peak here and cleared it
+// from a clk_sys block on vbl_rise, which is two drivers on one register and
+// two different clocks driving it. Quartus refused it outright -- "Can't
+// resolve multiple constant drivers" -- and Verilator's lint did not, because
+// the top level is not verilated: it instantiates VHDL and vendor IP.
+//
+// vbl_rise is one slow clock wide, so it spans exactly two fast clocks at the
+// 2:1 ratio and an edge detector in this domain sees it once.
+reg vbl_f_d;
 always @(posedge clk_sdram) begin
+	vbl_f_d <= vbl_rise;
+
 	if (occ_div == 10'd767) begin
 		occ_div    <= 10'd0;
 		occ_any_l  <= occ_any;
 		occ_tile_l <= occ_tile;
 		occ_spr_l  <= occ_spr;
-		// Peak resets on the frame, not the line, so one busy scanline in a
-		// frame cannot hide behind an average.
 		occ_peak   <= (occ_any > occ_peak) ? occ_any : occ_peak;
 		occ_any    <= 16'd0;
 		occ_tile   <= 16'd0;
@@ -1150,12 +1159,14 @@ always @(posedge clk_sdram) begin
 		if (occ_g_tile) occ_tile <= occ_tile + 16'd1;
 		if (occ_g_spr)  occ_spr  <= occ_spr  + 16'd1;
 	end
-end
 
-// Frame boundary, sampled in the slow domain: vbl_rise is one slow clock wide
-// and the values it copies are stable between lines.
-always @(posedge clk_sys) begin
-	if (vbl_rise) begin occ_peak_l <= occ_peak; occ_peak <= 16'd0; end
+	// Peak resets on the FRAME, not the line, so one busy scanline cannot hide
+	// behind an average. Last in the block, so it wins over the line update
+	// when both land together.
+	if (vbl_rise && !vbl_f_d) begin
+		occ_peak_l <= occ_peak;
+		occ_peak   <= 16'd0;
+	end
 end
 
 // Z80 SOUND-PORT CENSUS, to diff against tools/mame_z80_ports.lua.
