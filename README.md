@@ -99,11 +99,22 @@ MATCH over all 22897 compared accesses
 
 ## Building and testing
 
-`third_party/` is **not in the repository**. Populate it first:
+`third_party/` is **not in the repository**, and neither is `sys/`. Both are
+gitignored, so a fresh clone has neither. Populate them first:
 
 ```
 ./tools/bootstrap.sh
 ```
+
+That fetches the five cores the bitstream is built from — `fx68k`, `jt49`,
+`jt51`, `jt6295` and `t80` — at the revisions pinned in `deps.lock`, and copies
+the MiSTer framework into `sys/`. Quartus reads `sys/sys.tcl` from the project
+file, so opening the QSF before bootstrapping fails on a missing file rather
+than on anything to do with this core. MAME is needed as well for the oracle
+gates below, but not to compile.
+
+**Playing the core needs none of this** — an `.rbf`, an `.mra` and your own
+ROMs, all described in `releases/README.md`.
 
 Then the simulation gate, which must be clean before any synthesis:
 
