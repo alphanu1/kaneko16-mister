@@ -406,6 +406,12 @@ wire              p5_ack  = p_ack_bus[5];
 wire [63:0]       p5_dout = p_dout_bus[5];
 assign p67_ack  = {p_ack_bus[7],  p_ack_bus[6]};
 assign p67_dout = {p_dout_bus[7], p_dout_bus[6]};
+// Port 9, the CALC3 board's second OKI. These were used by u_oki2rom and never
+// declared; Quartus caught it as an implicit net because Kaneko16.sv sets
+// `default_nettype none, which is the guard that makes the top level safe to
+// edit at all given it is outside the lint set.
+wire              p9_ack  = p_ack_bus[9];
+wire [63:0]       p9_dout = p_dout_bus[9];
 
 wire sd_dq_oe;
 wire [15:0] sd_dq_o;
@@ -966,17 +972,38 @@ kaneko_hit u_hit
 	.rnd(hit_lfsr)
 );
 
-// 64 KB shared with the CALC3 simulation, at 200000-20ffff. Byte-enabled and
-// held as two byte-wide arrays for the same reason the 68000's work RAM is:
-// writing a slice of a 16-bit array element is a pattern Quartus does not
-// recognise as a byte-enabled memory, and it infers registers instead.
-(* ramstyle = "M10K" *) reg [7:0] mcuram_hi [0:32767];
-(* ramstyle = "M10K" *) reg [7:0] mcuram_lo [0:32767];
+// SHARED WITH THE CALC3 SIMULATION, AND CURRENTLY 8 KB RATHER THAN 64.
+//
+// shogwarr_map declares 200000-20ffff, sixty-four kilobytes. That does not
+// fit, and the way it does not fit is the M10K cliff this core has hit before.
+//
+// The 64 KB version costs about 64 M10K blocks. Taking them leaves too few for
+// kaneko_vmem, whose sprite and palette memories are ONE WRITE TWO READS --
+// which an M10K cannot be, so Quartus duplicates them, silently, and only
+// while blocks are spare. With the spare gone it built registers instead:
+// vmem alone asked for 65,563 of them and the fitter wanted 6,773 LABs against
+// the device's 4,191. The same failure kaneko_z80rom.sv's header describes,
+// from a different direction.
+//
+// Eight kilobytes is a PLACEHOLDER so the design builds while CALC3 is
+// written. It is certainly too small -- the init command alone places an
+// EEPROM copy at an address the game chooses -- and the real fix is one of:
+//
+//   - free the 192 blocks the sprite bitmap holds, which is blocked on SDRAM
+//     bandwidth (D5) and is the same 192 blocks Tier 3 needs
+//   - put this RAM in SDRAM, at the cost of latency on every MCU access
+//   - establish how much of the 64 KB the games actually touch
+//
+// Whichever it is, it has to be settled before Tier 2 can run. Recorded in
+// HANDOFF as the blocker rather than left to be rediscovered by a build.
+localparam int MCURAM_WORDS = 4096;      // 8 KB
+(* ramstyle = "M10K" *) reg [7:0] mcuram_hi [0:MCURAM_WORDS-1];
+(* ramstyle = "M10K" *) reg [7:0] mcuram_lo [0:MCURAM_WORDS-1];
 reg [15:0] mcu_q;
 always @(posedge clk_sys) begin
-	if (mcu_we && ~UDSn) mcuram_hi[mcu_addr[14:0]] <= oEdb[15:8];
-	if (mcu_we && ~LDSn) mcuram_lo[mcu_addr[14:0]] <= oEdb[7:0];
-	mcu_q <= {mcuram_hi[mcu_addr[14:0]], mcuram_lo[mcu_addr[14:0]]};
+	if (mcu_we && ~UDSn) mcuram_hi[mcu_addr[11:0]] <= oEdb[15:8];
+	if (mcu_we && ~LDSn) mcuram_lo[mcu_addr[11:0]] <= oEdb[7:0];
+	mcu_q <= {mcuram_hi[mcu_addr[11:0]], mcuram_lo[mcu_addr[11:0]]};
 end
 assign mcu_dout = mcu_q;
 

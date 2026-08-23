@@ -84,6 +84,52 @@ looks like support and fails undiagnosably.
 
 ---
 
+## READ THIS FIRST — main does not close timing, 2026-08-24
+
+The Tier 2 work below is committed and the simulation gate is green, but
+**`make quartus` fails on timing**: worst-case setup slack -0.773 ns.
+
+Roll back to **`59b4c4b`** for a tree that builds, closes timing and matches
+the released bitstream's behaviour. Nothing in `releases/` is affected — it
+still holds `d301c878`, the build that was played.
+
+The failure is not in this core's logic. Its two clock domains actually
+IMPROVED: SDRAM went from +1.126 to +1.261 ns and the core from +1.880 to
++2.182. What fails is `pll_hdmi`, the framework's HDMI path, and it fails
+because the fitter has run out of room:
+
+| | before Tier 2 | with Tier 2 |
+|---|---|---|
+| ALMs | 16,670 (40%) | 21,456 (51%) |
+| **M10K blocks** | — | **522 / 553 (94%)** |
+
+## THE BLOCK MEMORY IS THE BLOCKER FOR TIER 2
+
+`shogwarr_map` wants 64 KB of MCU RAM at 200000. That costs about 64 M10K
+blocks, and taking them starves `kaneko_vmem`, whose sprite and palette
+memories are ONE WRITE TWO READS. An M10K cannot be that, so Quartus
+duplicates them -- silently, and only while blocks are spare. With the spare
+gone it builds registers instead: vmem alone asked for **65,563 registers** and
+the fitter wanted 6,773 LABs against the device's 4,191. The same cliff
+`kaneko_z80rom.sv`'s header describes, reached from the other side.
+
+The MCU RAM is currently a **placeholder 8 KB** so the design fits at all. It is
+certainly too small: the init command alone writes an EEPROM copy at an address
+the game chooses.
+
+Three ways out, and the awkward part is which:
+
+1. **Free the sprite bitmap's ~192 blocks.** Blocked on SDRAM bandwidth (D5),
+   and they are the same 192 blocks Tier 3 needs. Tier 2 and Tier 3 are
+   competing for one pool.
+2. **Put the MCU RAM in SDRAM**, at the cost of latency on every MCU access.
+3. **Find out how much of the 64 KB the games actually touch.** Cheapest to
+   answer -- a write tap in MAME over a few minutes of play -- and it should be
+   done before either of the others.
+
+Option 3 first. If the games use a few kilobytes, the placeholder becomes the
+answer and the problem disappears.
+
 ## Tier 2 — where it stands, 2026-08-24
 
 Shogun Warriors and B.Rap Boys. Both romsets verify, both MRAs match their
