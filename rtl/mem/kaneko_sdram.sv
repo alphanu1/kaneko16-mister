@@ -442,44 +442,55 @@ module kaneko_sdram #(
   logic [$clog2(NP)-1:0] rr_grant;
   logic                  rr_valid;
 
-  // ROTATION BY CONDITIONAL SUBTRACT, NOT BY MODULO.
+  // ROTATE THE REQUEST MASK ONCE, THEN PRIORITY-ENCODE.
   //
-  // This was `cand = (rr_next + j) % NP`, which is free when NP is a power of
-  // two -- the synthesiser drops the high bits -- and is a REAL DIVIDER when it
-  // is not. Adding the Z80's fetch took NP from 8 to 9 and turned eighteen of
-  // these (nine iterations, two passes) into hardware on one combinational
-  // path. It cost the 96 MHz build 3.023 ns of setup on
-  // rr_next[1] -> xfer_addr[23], which is the whole of the memory clock's
-  // failure.
+  // Two earlier forms of this loop both sat on the critical path at 96 MHz.
+  // The first indexed with `(rr_next + j) % NP`, which is free while NP is a
+  // power of two and a REAL DIVIDER once it is not -- eighteen of them, nine
+  // iterations across two passes, costing 3.023 ns the moment the Z80's fetch
+  // took NP from 8 to 9. Replacing the modulo with a compare and subtract
+  // bought 3.5 ns and left nine ADDERS in a priority chain, twice, which came
+  // back at -0.009 ns as soon as anything else was added to the design.
   //
-  // rr_next < NP and j < NP, so the sum is always below 2*NP and one compare
-  // and subtract is exactly equivalent, at the price of an adder.
-  int unsigned j, sum, cand;
+  // Both were the same mistake: doing the rotation per candidate. It only has
+  // to happen once. Rotate the pending mask right by rr_next so bit 0 is the
+  // port whose turn it is, take the lowest set bit, and rotate the index back
+  // -- one barrel shift, one priority encode over single bits, one adder,
+  // instead of eighteen adders in series.
+  //
+  // The behaviour is identical: urgent tier first, round-robin from rr_next
+  // within each tier, and kaneko_sdram's 133,020 checks say so.
+  function automatic [NP-1:0] rot_r(input [NP-1:0] m, input [PW-1:0] n);
+    logic [2*NP-1:0] dbl;
+    begin
+      dbl   = {m, m};
+      rot_r = dbl[n +: NP];
+    end
+  endfunction
+
+  // Lowest set bit. Written high-to-low so the last assignment wins and the
+  // result is the LOWEST index set, which is the nearest port in rotation
+  // order.
+  function automatic [PW-1:0] low_idx(input [NP-1:0] m);
+    int li;                      // not `i`: that name is taken further up
+    begin
+      low_idx = '0;
+      for (li = NP-1; li >= 0; li = li - 1) if (m[li]) low_idx = PW'(li);
+    end
+  endfunction
+
+  wire [NP-1:0] arb_ready = pend & ~inflight;
+  wire [NP-1:0] arb_urg   = rot_r(arb_ready &  URGENT, rr_next);
+  wire [NP-1:0] arb_slk   = rot_r(arb_ready & ~URGENT, rr_next);
+
+  wire          arb_urg_any = |arb_urg;
+  wire [PW-1:0] arb_off     = arb_urg_any ? low_idx(arb_urg) : low_idx(arb_slk);
+  wire [PW:0]   arb_sum     = {1'b0, arb_off} + {1'b0, rr_next};
+
   always_comb begin
-    rr_valid = 1'b0;
-    rr_grant = rr_next;
-    // TWO PASSES, URGENT FIRST. Within each pass the rotation still starts at
-    // rr_next, so ports of equal urgency keep taking turns and none can hold
-    // the bus. A loop rather than a case ladder per rotation position: the
-    // ladder form is NP copies of the same priority chain and every copy is a
-    // chance to mistype an index.
-    for (j = 0; j < NP; j = j + 1) begin
-      sum  = rr_next + j;
-      cand = (sum >= NP) ? (sum - NP) : sum;
-      if (URGENT[cand] && pend[cand] && !inflight[cand] && !rr_valid) begin
-        rr_valid = 1'b1;
-        rr_grant = ($clog2(NP))'(cand);
-      end
-    end
-    // Only once nothing with a deadline is waiting.
-    for (j = 0; j < NP; j = j + 1) begin
-      sum  = rr_next + j;
-      cand = (sum >= NP) ? (sum - NP) : sum;
-      if (!URGENT[cand] && pend[cand] && !inflight[cand] && !rr_valid) begin
-        rr_valid = 1'b1;
-        rr_grant = ($clog2(NP))'(cand);
-      end
-    end
+    rr_valid = arb_urg_any || (|arb_slk);
+    rr_grant = (arb_sum >= (PW+1)'(NP)) ? PW'(arb_sum - (PW+1)'(NP))
+                                        : PW'(arb_sum);
   end
 
   // ------------------------------------------------------------- transfer
