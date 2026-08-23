@@ -1844,7 +1844,7 @@ Every fetch landed at a quarter of its intended address, so adjacent pixels drew
 from overlapping wrong data. On screen: dense fine-grained hash with no clean
 tile boundaries.
 
-**Worth noting what that photo already proved**, before the fix: the core
+**That photo already proved something**, before the fix: the core
 loaded, the PLL and video timing produced a signal the monitor locked to, the
 loader moved 5.75 MB into SDRAM, and the controller returned *real ROM data* —
 because wrong-address ROM data looks like that, whereas a dead memory path gives
@@ -3302,7 +3302,7 @@ The fix is one line — freeze the back surface's mask read with `ce` — and th
 front surface is deliberately not frozen, because the mixer reads it every
 pixel and has nothing to do with the renderer's stalls.
 
-Worth noting what did **not** find this: the renderer's own stall-equivalence
+What did **not** find this: the renderer's own stall-equivalence
 test, which compares a stalled run against an unstalled one over 524,288 pixels
 and passes. It passes because its harness advances the held mask address only
 on `ce` — modelling the correct behaviour, and therefore unable to detect that
@@ -5650,7 +5650,7 @@ which is a good outcome. On hardware it would have been a black screen and a
 silent sound CPU with nothing pointing at the memory controller, and the last
 thing anybody would have suspected is the port they did not change.
 
-`PW` is `$clog2(NP)` now and every use derives from it. Worth noting the
+`PW` is `$clog2(NP)` now and every use derives from it. Note the
 guard that forced this into the open: `make quartus` refuses to build when a
 harness declares a different NP from `Kaneko16.sv`, because "a port the harness
 does not drive is a port nothing tests". Without it the tag bug would have

@@ -142,7 +142,7 @@ here that **requires** a 128 MB module rather than merely preferring one.
 Shogun Warriors, the largest Tier 2 game at 23 MB, fits 32 MB but leaves little
 margin once the sprite bitmap moves into SDRAM.
 
-Tier 3 additionally needs about **1 MB** of SDRAM for the KC-002 sprite bitmap,
+Tier 3 also needs about **1 MB** of SDRAM for the KC-002 sprite bitmap,
 which cannot live in block memory: 512x512x16 double-buffered is 8.39 Mbit
 against the device's 5.66 Mbit, so it does not fit even if the core held
 nothing else. `docs/00-decisions.md` D5 records that measurement and what it
