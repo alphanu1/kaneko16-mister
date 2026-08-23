@@ -1937,7 +1937,8 @@ wire pause  = joy[8];
 // momentary by nature and cannot be a toggle.
 wire svc_coin = joy[9];
 
-// Flip screen and service are DIPs, not buttons: held, and off by default.
+// Service is a DIP, not a button: held, and off by default. Flip screen is a
+// DIP too but is no longer offered -- see dip_flip below.
 // Active low, so 1 is "not set".
 // HELD AT THE FACTORY POSITION, and no longer an OSD option.
 //
