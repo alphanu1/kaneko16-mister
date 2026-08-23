@@ -209,6 +209,64 @@ the core is the next step, before any of `kaneko_spr_sys` is touched.
 The mask stays in block RAM regardless: 16 blocks against the bitmap's 256, and
 the renderer hits it randomly every clock, which is the worst pattern SDRAM has.
 
+### MEASURED ON HARDWARE 2026-08-23 — the bitmap cannot move to SDRAM
+
+Explosive Breaker, in play, counted in the 96 MHz domain. Every figure is
+clocks out of the 768 a scanline lasts.
+
+| | clocks | of the line |
+|---|---|---|
+| total occupancy | 565 | 73.6% |
+| of which tile feeders | 283 | 36.8% |
+| of which sprite ROM | 64 | 8.3% |
+| everything else — 68000, OKI, Z80 | 218 | 28.4% |
+| **peak on any line in the frame** | **757** | **98.6%** |
+
+Free on an average line: **203 clocks**. Free on the worst line: **11**.
+
+What the bitmap would need, per line, with four-word write combining:
+
+| | clocks |
+|---|---|
+| writes, row-hit | 257 |
+| sparse reads at 30% coverage, row-hit | 120 |
+| **best case total** | **377** |
+| typical total | 603 |
+
+**377 needed against 203 free, and 11 free on the worst line.** It does not
+fit, and the peak is the part that ends the argument: some scanlines are
+already at 98.6%, so any added traffic overruns them immediately rather than
+degrading gracefully.
+
+One estimate was badly wrong and is worth correcting: the tile feeders were
+predicted at 65% of the line and measure 36.8%. Bursts are far more efficient
+than the wandering-cursor benchmark suggested. That correction makes the result
+*worse*, not better — it means the 28.4% spent by the 68000, OKI and Z80 is
+larger than the entire tile path, and that is where any future headroom would
+have to come from.
+
+**Consequences.**
+
+Tier 3 is not reachable by this design. KC-002's 512x512x16 double-buffered
+surface is 148% of the device's block memory, so it cannot stay on-chip, and
+the bandwidth to move it off-chip does not exist. Both routes are closed.
+
+**Tier 2 is unaffected and should proceed.** `shogwarr` and `brapboys` both
+instantiate KANEKO_VU002_SPRITE and run on the bitmap already built. Nothing
+about this measurement touches them.
+
+If Tier 3 is wanted later, the routes worth investigating, in order of promise:
+
+1. **Find the 28.4%.** It is unattributed and larger than the tile path. If the
+   68000's ROM line cache is thrashing, recovering even half of it changes the
+   arithmetic. Measuring it needs per-port occupancy rather than the three
+   groups counted here.
+2. **Band rendering.** Keep a horizontal band of the surface on-chip and make
+   several passes over the sprite list. This is what the earlier core does. It
+   trades SDRAM bandwidth for repeated list walks and does not impose the
+   per-line sprite limit that D5 rejected.
+3. Neither, and Tier 3 stays out of scope.
+
 Order follows from that: do the SDRAM move **before** Tier 2, while only four
 games depend on the sprite subsystem. Doing it afterwards means the same
 surgery re-verified across thirteen sets instead of four, and hard rule 9 says
