@@ -6,7 +6,7 @@
   //
   // Hard rule 3: every clone added under third_party/ gets a line here in the
   // same change that adds it. Hard rule 5 routes local reference cores through
-  // the same path — a copy of sega-model1-mister or NMK16 pulled in for
+  // the same path — a copy of an earlier core by the same author or NMK16 pulled in for
   // reference is a clone like any other and belongs in this list.
   //
   // MAME additionally trips the "too many active changes" warning. Its index
@@ -31,7 +31,7 @@
 
     // Hard rule 5: a copy of a sibling core, taken so it is never read in
     // place. Pinned by deps.lock like any other dependency.
-    "third_party/model1-ref"
+    "third_party/ref-core"
   ],
 
   // Keep the file watcher off vendored source, its history, and Verilator

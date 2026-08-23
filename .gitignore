@@ -3,7 +3,7 @@
 # Hard rule 3: anything added under third_party/ must ALSO be listed in
 # git.ignoredRepositories in .vscode/settings.json — each clone carries its own
 # .git and otherwise shows up in Source Control as noise.
-# Hard rule 5: local reference cores (sega-model1-mister, NMK16, ...) are copied
+# Hard rule 5: local reference cores (an earlier core by the same author, NMK16, ...) are copied
 # in here rather than read in place. Same treatment.
 /third_party/
 

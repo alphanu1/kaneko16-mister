@@ -3,7 +3,7 @@
 // Kaneko 16-bit arcade core for MiSTer FPGA
 // Copyright (C) 2026 alphanu1
 //
-// PORTED from the Sega Model 2 core (same author), rtl/io/m2_rom_loader.sv, on
+// PORTED from an earlier core by the same author, rtl/io/the ROM loader, on
 // 2026-08-20. The TGP microcode path is REMOVED — that is a second download
 // index feeding the TGP's on-chip 32-bit program RAM, and this hardware has no
 // equivalent. Everything else is unchanged, including two lessons in the
@@ -111,7 +111,7 @@ module kaneko_rom_loader #(
   output logic        ioctl_wait,
 
   // SDRAM download write port. Contract is one transaction per rising edge of
-  // req, single outstanding — see m1_sdram.sv.
+  // req, single outstanding — see the SDRAM controller.
   output logic        sdr_wr_req,
   output logic [SDR_AW:1] sdr_wr_addr,
   output logic [15:0] sdr_wr_din,
@@ -178,7 +178,7 @@ module kaneko_rom_loader #(
                       (~mem_ready | (level >= (AW+1)'(FIFO_DEPTH - WAIT_MARGIN)));
 
   logic is_sdram;
-  // Routed by index, not by address. One stream here: Model 2 had a second
+  // Routed by index, not by address. One stream here: the later revision had a second
   // index for TGP microcode, which this hardware has no equivalent of.
   assign is_sdram = (ioctl_index == ROM_INDEX);
 

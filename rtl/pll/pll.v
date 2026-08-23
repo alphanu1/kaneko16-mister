@@ -3,7 +3,7 @@
 // Kaneko 16-bit arcade core for MiSTer FPGA
 // Copyright (C) 2026 alphanu1
 //
-// PORTED from the Sega Model 2 core (same author), rtl/pll/pll.v, with this
+// PORTED from an earlier core by the same author, rtl/pll/pll.v, with this
 // core's frequencies. Two things carried over unchanged because they are
 // hard-won and not obvious:
 //
@@ -11,7 +11,7 @@
 //     pll -> pll_inst -> altera_pll_i is LOAD-BEARING. sys/sys_top.sdc matches
 //     on that instance path; flatten it and the clock groups match nothing,
 //     timing passes vacuously and the build emits an .rbf with -36.5 ns of
-//     setup slack. See the note below, which is Model 2's, paid for once.
+//     setup slack. See the note below, which is the later core's, paid for once.
 //   - pll.qip carries the instance assignments the IP generator would write.
 //
 // THE MODULE MUST BE NAMED `pll`. MiSTer's `sys/sys_top.sdc` writes its
@@ -20,7 +20,7 @@
 // with no failing report to point at. This is a standing rule in
 // docs/mister-integration.md, paid for once already.
 //
-// Written by hand rather than generated, because Model 1's `pll_0002.v` shows
+// Written by hand rather than generated, because the earlier core's `pll_0002.v` shows
 // the IP tool emits a plain parameterised instantiation of `altera_pll` rather
 // than a Qsys black box. The parameter set below is that instantiation's, with
 // this core's frequencies. `rtl/pll/pll.qip` carries the instance assignments

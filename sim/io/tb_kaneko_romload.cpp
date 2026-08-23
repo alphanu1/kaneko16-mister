@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Sega Model 2 core for MiSTer FPGA — Copyright (C) 2026 alphanu1
+// Sega the later revision core for MiSTer FPGA — Copyright (C) 2026 alphanu1
 //
 // The hardware path on a desk: ioctl -> kaneko_rom_loader -> kaneko_sdram -> readback.
 //
@@ -66,7 +66,7 @@ int main(int argc, char **argv) {
   // Default 3 = CL+3, which is what the device MODEL wants. The BOARD wants
   // CL+2 (sel 1), because the real device is clocked on the inverse of the
   // controller clock and answers half a period away. Both are exercised below;
-  // sel 1 here produces exactly the one-16-bit-word shift the Model 1 core
+  // sel 1 here produces exactly the one-16-bit-word shift an earlier core by the same author
   // documented seeing on hardware, which is how that claim got corroborated.
   const int sel = (argc > 1) ? atoi(argv[1]) : 3;   // 3 = CL+3 after the range moved
   dut->rd_lat_sel = sel;

@@ -31,7 +31,7 @@ if {[llength $core_clks] == 0} {
 # THERE IS DELIBERATELY NO set_clock_groups FOR THE CORE PLL OUTPUTS.
 #
 # There used to be one, cutting general[0..2] as -asynchronous. It arrived with
-# this file from the Model 2 core and carried that core's comment: "80 MHz
+# this file from an earlier core by the same author and carried that core's comment: "80 MHz
 # SDRAM, 32 MHz video, 25 MHz i960 ... nothing crosses between them". Both
 # halves were false here, and Quartus said so on every build:
 #

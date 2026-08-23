@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Sega Model 1 core for MiSTer FPGA
+// Sega the earlier revision core for MiSTer FPGA
 // Copyright (C) 2026 alphanu1
 //
 // This program is free software: you can redistribute it and/or modify it

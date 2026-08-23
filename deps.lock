@@ -7,4 +7,4 @@ jt6295         jotego/jt6295 7d76b0be8cd8f85f3ae741178c9830b20e2071a1
 jt51           jotego/jt51 985a573dcfc1ff135553a39f7eae21d18ba57cbe
 t80            MiSTer-devel/T80 830fd0315f0af5cdbcb0e703f1cea3ce4e91f538
 mame           mamedev/mame 1ff7d66e66ac10ad0541af0cab3a47336ade5c47
-model1-ref     local/sega-model1-mister a5dc6b3e3d5f406b2fe6995aa824d676bb995c35
+ref-core     local/ref-core a5dc6b3e3d5f406b2fe6995aa824d676bb995c35

@@ -1405,7 +1405,7 @@ the documented interaction between them, which exists only in
 `kaneko16_v.cpp`. Everything else in the system is already available — fx68k,
 jt49, jt6295, jt51, T80, and the template's `arcade_video.v`, `hps_io.sv` (which
 is also the ROM loader), OSD and PLLs. The SDRAM controller is the one
-remaining non-novel gap, and `model1-ref/rtl/mem/m1_sdram.sv` is the same
+remaining non-novel gap, and `ref-core/rtl/mem/the SDRAM controller` is the same
 author's and can be ported rather than rewritten.
 
 ---
@@ -1540,7 +1540,7 @@ addresses, which is what an M10K simple-dual-port provides anyway.
 
 ## 2026-08-20 — SDRAM controller ported, not rewritten
 
-`rtl/mem/kaneko_sdram.sv` and `bw_monitor.sv` are ported from the Model 1 core
+`rtl/mem/kaneko_sdram.sv` and `bw_monitor.sv` are ported from an earlier core by the same author
 (same author, GPL-3.0-or-later), renamed and otherwise unchanged. Their
 verification came with them.
 
@@ -1551,7 +1551,7 @@ kaneko_sdram:       checks=74729 fails=0 violations=0 reads=95607 writes=6625
 ```
 
 **Why port rather than write.** The controller is generic — a parameterised
-array of ports with no Model-1-specific dependency — and its header records two
+array of ports with no project-specific dependency — and its header records two
 hazards found the hard way and invisible from a datasheet:
 
 - requests must be latched on the request **rising edge**, not sampled as a
@@ -1584,25 +1584,25 @@ Verilator warns when some modules have one and others do not.
 
 ---
 
-## 2026-08-20 — SDRAM re-ported from Model 2; the Model 1 version would fail on hardware
+## 2026-08-20 — SDRAM re-ported from the later revision; the earlier version would fail on hardware
 
-**Raised by the user**, who asked whether the Model 2 controller was better and
+**Raised by the user**, who asked whether the later revision controller was better and
 whether it was set up for 64 MB before trusting the port. Both halves of that
 question were worth asking.
 
-**Model 2 is configured for 64 MB**: `SDR_COL = 10` (8192 x 1024 x 4), 25-bit
-word address. Model 1 hardcodes `localparam COL_BITS = 9` and a `[24:1]`
+**The later core is configured for 64 MB**: `SDR_COL = 10` (8192 x 1024 x 4), 25-bit
+word address. the earlier revision hardcodes `localparam COL_BITS = 9` and a `[24:1]`
 address — 32 MB, and it cannot address a 64 MB module at all.
 
-**Model 2's controller is a later, hardware-corrected version of the same
+**the later core's controller is a later, hardware-corrected version of the same
 file.** Four differences, every one found on a real board and every one
 invisible in simulation:
 
-1. **Geometry fixed at 32 MB** in Model 1, parameterised in Model 2.
+1. **Geometry fixed at 32 MB** in the earlier revision, parameterised in the later revision.
 2. **A10 aliasing.** Column bits map to A0..A9 then A11, A12 — skipping A10,
    the auto-precharge flag. A straight `a[COL_BITS-1:0]` slice is correct only
    up to nine column bits; at ten it puts a column bit where the precharge flag
-   lives. Model 1 never reaches it because it is fixed at nine, so the bug is
+   lives. the earlier revision never reaches it because it is fixed at nine, so the bug is
    latent rather than absent. The device *model* had the same fault and it
    "made a correct 128 MB controller look broken: 3,965 data mismatches with
    ZERO protocol violations".
@@ -1611,20 +1611,20 @@ invisible in simulation:
    tRCD+1 cycles after activation — inside tRAS on a real device and tolerated
    by a behavioural model. On the board the CPU port read zero while other
    ports read correctly from the same SDRAM. All ports now burst four.
-4. **Capture depth range too late.** Model 1 offers CL+2..CL+5; the board needs
+4. **Capture depth range too late.** the earlier revision offers CL+2..CL+5; the board needs
    CL+1 or earlier. A write-then-read of AA55/5AA5/FF00/00FF came back shifted
    by exactly one 16-bit word, and no setting in the old range could correct
    it — which is why cycling the OSD option produced garbage at every position
    and was misread as "the phase is not involved".
 
-The Model 1 port would have passed every test here and failed on hardware.
+The earlier revision port would have passed every test here and failed on hardware.
 
 ---
 
 ## 2026-08-20 — the two SDRAM "failures" were a testbench race, not an RTL bug
 
-The Model 2 controller reported 2 failures out of 123,927 in its concurrent
-test. Building the **pristine, unmodified** Model 2 sources reproduced them
+The later revision controller reported 2 failures out of 123,927 in its concurrent
+test. Building the **pristine, unmodified** the later revision sources reproduced them
 exactly — same addresses, same values — so the port was faithful and the
 question was whether the controller or the test was wrong.
 
@@ -1669,13 +1669,13 @@ Clean at all three geometries:
 | 10 | **64 MB** | checks=103267 fails=0 violations=0 |
 | 11 | 128 MB | checks=95475 fails=0 violations=0 |
 
-**Worth feeding back to the Model 2 project**, where the same two failures are
+**Worth feeding back to the later revision project**, where the same two failures are
 live in its own suite. The fix is to the testbench's expectation, not to the
 controller.
 
 ---
 
-## 2026-08-20 — ROM loader ported from Model 2
+## 2026-08-20 — ROM loader ported from the later revision
 
 `rtl/io/kaneko_rom_loader.sv`, with the TGP microcode path removed (a second
 download index feeding an on-chip 32-bit program RAM; no equivalent here).
@@ -1707,7 +1707,7 @@ Two further lessons come with the file and are kept:
 ### The inherited test is narrow, and that is not yet fixed
 
 `kaneko_romload` passes, but it is a specific boot-readback scenario carried
-over from Model 2's context: 6 checks. It does exercise the real path — ioctl
+over from the later core's context: 6 checks. It does exercise the real path — ioctl
 through the loader through the SDRAM controller and back — which is worth
 having as a smoke test.
 
@@ -1777,7 +1777,7 @@ TimeQuest             successful   ZERO negative slack, 18 setup / 15 hold clock
 summaries, so `sys_top.sdc`'s clock groups matched and the SDC guard did not
 fire. That is the check the guard exists for: a core whose PLL hierarchy does
 not match gets timed against the HDMI and audio PLLs, reports SUCCESS, and
-emits an .rbf that fails on hardware. Model 2 paid -36.5 ns for it once.
+emits an .rbf that fails on hardware. the later revision paid -36.5 ns for it once.
 
 Worst setup slack on a core clock is **+0.251 ns** — positive but not
 comfortable, and worth watching as the CPU and the rest of the video path land.
@@ -5864,7 +5864,7 @@ Four things had to move with it, and three were already right:
     fabric inverter feeding a pin.
 
 **THE SDC WAS THE TRAP.** It cut the three PLL outputs as -asynchronous, with a
-comment inherited from the Model 2 core claiming nothing crossed between them.
+comment inherited from an earlier core by the same author claiming nothing crossed between them.
 Quartus reported the statement useless on every build:
 
 ```

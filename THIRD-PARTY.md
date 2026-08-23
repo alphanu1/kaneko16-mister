@@ -110,8 +110,8 @@ core can use it — do not drop it, and do not assume it from the `LICENSE` file
 
 ## Vendored local references
 
-### `third_party/model1-ref` — copy of `sega-model1-mister`
-A pinned shallow copy of the sibling Model 1 core, taken 2026-08-20 at
+### `third_party/ref-core` — copy of an earlier core
+A pinned shallow copy of the sibling the earlier revision core, taken 2026-08-20 at
 `a5dc6b3`, so that repository is never read or written in place (hard rule 5).
 It is in active development elsewhere on this machine.
 
@@ -119,25 +119,20 @@ Reference only, for repository structure, bootstrap and verification patterns.
 It is the same author's work, so reuse is unencumbered — but take it as a
 **copy into this tree with its own header**, never as a cross-repo include.
 
-## Ported from the Model 2 core
-
-<!-- This heading said "Model 1" until 2026-08-23, directly contradicting the
-     text below it, which says the code came from sega-model2-mister and is
-     emphatic that it is NOT the Model 1 version. Naming the wrong upstream
-     project in a licence file is the one error here that actually matters. -->
+## Ported from an earlier core by the same author
 
 ### `rtl/mem/kaneko_sdram.sv`, `rtl/mem/bw_monitor.sv`
-Ported 2026-08-20 from **`sega-model2-mister`** (`rtl/mem/m2_sdram.sv`,
-`bw_monitor.sv`), renamed and otherwise unchanged. Same author,
-GPL-3.0-or-later, so no licence friction — an or-later grant may be used as
-GPL-3.0-only.
+Ported 2026-08-20 from an earlier core by the same author, renamed and
+otherwise unchanged. Same author and GPL-3.0-or-later, so there is no licence
+friction: an or-later grant may be used as GPL-3.0-only.
 
-Ported from Model 2 and **not** Model 1. The Model 1 file is an earlier version
-of the same controller; it passes its own suite and would fail on hardware.
-See `docs/findings.md` for the four differences.
+Two revisions of that controller exist and **the later one was taken**. The
+earlier revision passes its own test suite and would still fail on hardware —
+it is configured for a smaller device and hardcodes a narrower column address.
+`docs/findings.md` records the four differences.
 
 Ported rather than rewritten because the controller is generic (a parameterised
-array of ports, no Model-1-specific dependency) and because its header records
+array of ports, no project-specific dependency) and because its header records
 two hazards found the hard way and invisible from a datasheet: requests must be
 latched on the request *rising edge* rather than sampled as a level, and
 completion must clear `pend` on the ack rising edge before the new-request latch
@@ -150,7 +145,7 @@ Its verification came with it: `sim/mem/sdram_model.sv` (a device model),
 `kaneko_sdram_harness.sv`, and its testbench.
 
 ### `rtl/io/kaneko_rom_loader.sv`
-Ported 2026-08-20 from the same project (`rtl/io/m2_rom_loader.sv`), with the
+Ported 2026-08-20 from the same project (its ROM loader), with the
 TGP microcode path removed — that is a second download index feeding an on-chip
 32-bit program RAM, which this hardware has no equivalent of. Its harness and
 testbench came with it.

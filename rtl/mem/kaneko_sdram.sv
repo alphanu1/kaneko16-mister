@@ -3,20 +3,20 @@
 // Kaneko 16-bit arcade core for MiSTer FPGA
 // Copyright (C) 2026 alphanu1
 //
-// PORTED from the Sega Model 2 core (same author), rtl/mem/m2_sdram.sv, on
+// PORTED from an earlier core by the same author, rtl/mem/the SDRAM controller, on
 // 2026-08-20. Renamed, otherwise unchanged.
 //
-// **Ported from Model 2, NOT Model 1, deliberately.** The Model 1 file is an
+// **Ported from the later revision, NOT the earlier revision, deliberately.** The earlier file is an
 // earlier version of the same controller and was ported here first. It passes
 // its simulation suite and would fail on hardware. Four differences, every one
 // of them found on a real board:
 //
-//   1. GEOMETRY IS FIXED AT 32 MB. Model 1 hardcodes `localparam COL_BITS = 9`
+//   1. GEOMETRY IS FIXED AT 32 MB. the earlier revision hardcodes `localparam COL_BITS = 9`
 //      and a [24:1] address. It cannot address a 64 MB module at all.
 //   2. A10 ALIASING. Column bits map to A0..A9 then A11, A12 — skipping A10,
 //      which is the auto-precharge flag. A straight slice is correct only up to
 //      nine column bits; at ten it puts a column bit where the precharge flag
-//      lives. Model 1 never hits this because it is fixed at nine, so the bug
+//      lives. the earlier revision never hits this because it is fixed at nine, so the bug
 //      is latent rather than absent.
 //   3. PORT 0 RETURNED A SINGLE WORD. A single-word read carries A10 on its
 //      FIRST command, because the first word is also the last, so the row
@@ -24,7 +24,7 @@
 //      tolerated by a behavioural model. On the board the CPU port read zero
 //      while the other ports read correctly from the same SDRAM. All ports now
 //      burst four.
-//   4. CAPTURE DEPTH RANGE WAS TOO LATE. Model 1 offers CL+2..CL+5; the board
+//   4. CAPTURE DEPTH RANGE WAS TOO LATE. the earlier revision offers CL+2..CL+5; the board
 //      needs CL+1 or earlier. A write-then-read of AA55/5AA5/FF00/00FF came
 //      back shifted by exactly one 16-bit word, and NO setting in the old range
 //      could correct it — which is why cycling the option produced garbage at
