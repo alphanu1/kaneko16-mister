@@ -20,4 +20,7 @@
         <part name="ts002e.u36" crc="611271e6" />
         <part name="ts030.u5" crc="1d68e9d1" />
     </rom>
+    <rom index="1" md5="none">
+        <part>00 00</part>
+    </rom>
 </misterromdescription>

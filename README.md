@@ -42,11 +42,14 @@ Miles Rally 1/2.
 | Inputs | two players, 2 buttons each, start/coin/service, and the board's DIPs — assembled per board, because the two boards wire the words differently, not just relocate them |
 | Game configuration table | `rtl/io/kaneko_gamecfg.sv` — one bitstream, four games; memory-map pages, ROM bases, video geometry, layer count, sprite list size and input wiring all selected by the MRA's game-id byte |
 | Z80 + YM2151 sound (Blaze On board) | **working on Blaze On** — music and effects. T80 at 4 MHz, jt51, and a 256-byte cache over SDRAM for the program ROM; a 48 KB copy in block RAM did not fit. Wing Force is still silent and open: its Z80 writes the YM at MAME's rate while jt51 produces nothing |
-| Screen rotation | **not implemented** — Explosive Breaker is ROT90 and Wing Force ROT270, and both currently output unrotated |
+| Screen rotation | **not implemented** — Explosive Breaker is ROT90 and Wing Force ROT270, and both currently output unrotated. Next on the list |
 
-Explosive Breaker is playable on hardware with sound. The 68000 completes its
+Three of the four games are playable on hardware. The 68000 completes its
 self-test, formats a blank EEPROM, enables interrupts and runs its main loop;
-tilemaps, sprites, inputs and the OKI all work.
+tilemaps, sprites, inputs and sound all work on Explosive Breaker and Blaze On,
+and Wing Force is complete apart from its OKI effects.
+
+Magical Crystals has never booted and is not shipped.
 
 ## Games
 
@@ -57,10 +60,10 @@ in a way a player cannot diagnose.
 
 | Game | State |
 |---|---|
-| Explosive Breaker | playable on hardware, with sound |
-| Blaze On (Japan) | **runs on hardware** — renders and takes input. Sound path built, unconfirmed. A tilemap layer draws wrong |
-| Wing Force (prototype) | **runs on hardware** — renders and takes input. Sound path built, unconfirmed. Same tilemap fault |
-| Magical Crystals | held back — an unexplained 298-pixel line-scroll difference |
+| Explosive Breaker | **playable**, with sound |
+| Blaze On (Japan) | **playable**, with music and effects |
+| Wing Force (prototype) | **playable**, graphics and input correct. No OKI effects and no music in the attract demo; the YM2151 register census is chasing it |
+| Magical Crystals | **held back — has never booted.** Black screen from the start; the frame gate also shows a 298-pixel line-scroll difference |
 
 The debug overlay (OSD: Debug) puts seven rows of per-frame telemetry over the
 picture, each a binary count with the MSB at the left:

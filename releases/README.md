@@ -6,21 +6,33 @@ Copy to the SD card:
 |---|---|
 | `Kaneko16_20260822.rbf` | `/media/fat/_Arcade/cores/` |
 | `Explosive Breaker (World).mra` | `/media/fat/_Arcade/` |
+| `Blaze On (Japan).mra` | `/media/fat/_Arcade/` |
+| `Wing Force (Japan, prototype).mra` | `/media/fat/_Arcade/` |
 
 ROMs are supplied by you and must be in `/media/fat/games/mame/` as the MRA
 names them. Nothing here contains ROM data.
 
+**Do not rename the core.** MiSTer resolves `<rbf>Kaneko16</rbf>` by scanning
+for names starting `Kaneko16` followed by `.` or `_`, and keeps the
+lexicographically greatest — so a spare copy called `Kaneko16_GOOD.rbf` beats
+`Kaneko16.rbf` and is loaded instead, silently. Keep fallbacks out of
+`cores/` entirely.
+
 ## What works
 
-**Explosive Breaker only.** The 68000, memory system, interrupts, EEPROM, the
-VIEW2 tilemap path, VU-002 sprites, OKI M6295 sound and the controls all run.
+**Three of the four games.** One bitstream covers them all; the MRA hands the
+core a game-id byte and `rtl/io/kaneko_gamecfg.sv` selects the memory map, ROM
+bases, screen geometry, layer count, sprite list size and input wiring.
 
-Everything game-specific is still compiled in for this one title — the memory
-map is `bakubrkr_map`, and the screen offsets, colour base, sprite priorities
-and layer count are constants. The other three Tier 1 games (Magical Crystals,
-Blaze On, Wing Force) are **not** shipped as MRAs, because loading one would
-produce a broken picture rather than a game. They arrive when the per-game
-configuration table does.
+| Game | State |
+|---|---|
+| Explosive Breaker | playable, with sound |
+| Blaze On (Japan) | playable, with music and effects |
+| Wing Force (prototype) | playable; **no OKI effects, and no music in the attract demo** |
+| Magical Crystals | **not shipped — has never booted.** Black screen from the start |
+
+An MRA for a game the core cannot run is deliberately not shipped: it looks
+supported and then fails in a way a player cannot diagnose.
 
 ## Not finished, as of `Kaneko16_20260822.rbf`
 
