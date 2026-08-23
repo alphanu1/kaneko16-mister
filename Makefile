@@ -179,13 +179,6 @@ quartus: qsf-check nports-check lint test quartus-check
 	    tools/check_ports.py build/quartus/Kaneko16.map.rpt || exit 1; \
 	  fi; \
 	done
-	@# A DANGLING INPUT READS AS GND AND THE BUILD SAYS NOTHING.
-	@# The per-game memory map shipped for eleven commits with pg_wram and its
-	@# neighbours left off the instance, tied to zero, one game working and
-	@# another black. Quartus reports it as a warning in the map report and
-	@# nothing reads that by hand. Scoped to kaneko_* because ascal, hps_io,
-	@# sysmem_lite and the PLL leave 48 inputs open by design.
-	@tools/check_ports.py build/quartus/Kaneko16.map.rpt
 	@# quartus_sta takes neither settings flag — it is a different front end.
 	@echo "== quartus_sta"
 	@$(QUARTUS_BIN)/quartus_sta Kaneko16 -c Kaneko16 > build/quartus_sta.log 2>&1 \
