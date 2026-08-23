@@ -705,7 +705,25 @@ wire [10:0] ym_sum = {1'b0, ym0_snd} + {1'b0, ym1_snd};
 wire signed [11:0] ym_ctr = $signed({1'b0, ym_sum}) - 12'sd1024;
 wire signed [16:0] snd_mix = {{3{ym_ctr[11]}}, ym_ctr, 2'd0}      // YM, scaled
                            + {{3{oki_snd[13]}}, oki_snd};         // OKI
-wire [15:0] ym_mix = snd_mix[16:1];
+// SCALED UP, BECAUSE THE HEADROOM IS FOR A SUM THAT NEVER HAPPENS.
+//
+// This was snd_mix[16:1] -- a straight halving -- which reserves room for both
+// chips at full tilt. Explosive Breaker keeps BOTH YM2149 volumes at zero and
+// plays its entire soundtrack through the OKI, so in practice the sum is just
+// the OKI at +/-8192, halved to +/-4096: 18 dB below full scale, and 12 dB
+// below the Blaze On board's +/-16384. That went unnoticed until Blaze On had
+// any sound at all to compare against.
+//
+// The real bound is tighter than the widths suggest. jt49's two 10-bit
+// unsigned levels sum to 0..2046, so ym_ctr is about +/-1024 and its shift by
+// two is +/-4096; jt6295's sample is +/-8192. The worst case is +/-12288, so
+// doubling cannot reach +/-32767 -- but it is saturated rather than trusted,
+// because a silent overflow inverts the waveform and sounds like a broken
+// chip rather than a loud one.
+wire signed [18:0] snd_gain = {{2{snd_mix[16]}}, snd_mix} <<< 1;
+wire [15:0] ym_mix = (snd_gain >  19'sd32767) ? 16'h7fff
+                   : (snd_gain < -19'sd32768) ? 16'h8000
+                                              : snd_gain[15:0];
 
 // Blaze On board: the YM2151 in stereo, plus the OKI on Wing Force, which puts
 // it on the Z80's I/O ports rather than the 68000's bus. Halved, because
