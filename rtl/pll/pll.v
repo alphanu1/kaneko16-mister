@@ -79,9 +79,22 @@
 // PCB capture or a same-era reference settles the real timing, this is the one
 // number that changes.
 //
-//   outclk_0   48 MHz   SDRAM — same rate as the core clock, deliberately
+//   outclk_0   96 MHz   SDRAM controller
 //   outclk_1   48 MHz   core: ce_pix /8 = 6 MHz, ce_cpu /4 = 12 MHz
-//   outclk_2   48 MHz   spare, currently unused
+//   outclk_2   96 MHz   SDRAM_CLK pin, 180 degrees from outclk_0
+//
+// THE THREE OUTPUTS MUST NOT ALL CARRY THE SAME SETTINGS. They did until
+// 2026-08-23 -- 48 MHz, 0 ps, 50% duty, three times -- and the IP responded by
+// giving all three ONE output counter, so the whole core was a single clock
+// domain. The timing netlist contained exactly one `emu|pll` clock and its
+// Fmax was 54.74 MHz: the 68000, the video path and the memory controller all
+// held down to the slowest path among them.
+//
+// The VCO runs at 480 MHz (50 x 48/5), so 96 (/5) and 48 (/10) are both exact
+// integer divides and the two clocks stay phase-aligned -- every clk_sys edge
+// coincides with an even clk_sdram edge. That is what makes the crossing
+// synchronous rather than a CDC problem, and it is why Kaneko16.sdc must TIME
+// the two against each other instead of cutting them apart.
 //                       (study §5.5), so this is the reference speed and not a
 //                       limit we are pushing against.
 
@@ -90,9 +103,9 @@
 module pll (
     input  wire  refclk,     // 50 MHz from the board
     input  wire  rst,
-    output wire  outclk_0,   // 48 MHz  SDRAM
+    output wire  outclk_0,   // 96 MHz  SDRAM controller
     output wire  outclk_1,   // 48 MHz  core (ce_pix /8 = 6 MHz, ce_cpu /4 = 12 MHz)
-    output wire  outclk_2,   // 48 MHz  spare
+    output wire  outclk_2,   // 96 MHz  SDRAM_CLK pin, 180 deg from outclk_0
     output wire  locked
   );
 
@@ -122,14 +135,21 @@ module pll_core (
     .reference_clock_frequency("50.0 MHz"),
     .operation_mode("direct"),
     .number_of_clocks(3),
-    .output_clock_frequency0("48.000000 MHz"),
+    .output_clock_frequency0("96.000000 MHz"),
     .phase_shift0("0 ps"),
     .duty_cycle0(50),
     .output_clock_frequency1("48.000000 MHz"),
     .phase_shift1("0 ps"),
     .duty_cycle1(50),
-    .output_clock_frequency2("48.000000 MHz"),
-    .phase_shift2("0 ps"),
+    // 5208 ps is half of 96 MHz's 10416.67 ps period: the same 180-degree
+    // relationship the board has always run, since `SDRAM_CLK = ~clk_sdram` is
+    // what rd_lat_sel was characterised against. The difference is the ROUTE.
+    // An inverter feeding an output pin goes through general fabric and
+    // arrives with whatever skew the fitter leaves; a PLL output takes the
+    // dedicated clock path. Tune against the board with rd_lat_sel, which the
+    // OSD already exposes.
+    .output_clock_frequency2("96.000000 MHz"),
+    .phase_shift2("5208 ps"),
     .duty_cycle2(50),
     .pll_type("General"),
     .pll_subtype("General")

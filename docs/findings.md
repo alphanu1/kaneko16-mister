@@ -5825,3 +5825,67 @@ A `flush` input was added to clear the pipeline at line start and then REMOVED:
 before the line ends, so there is nothing left to contaminate the next one. The
 test that would have justified it shows no difference either way, and untested
 RTL is not worth carrying.
+
+### The SDRAM clock, and why it could not simply be raised
+
+The memory ran at 48 MHz where a typical MiSTer core runs 96-100, halving every
+bandwidth figure in this document. The obvious move is to raise the PLL, and
+the measurement says why that never worked.
+
+`rtl/pll/pll.v` declared three outputs -- clk_sdram, clk_sys, clk_spare -- at
+identical settings: 48 MHz, 0 ps, 50% duty. The IP gave all three ONE output
+counter, so the timing netlist contained exactly one `emu|pll` clock:
+
+```
+$ grep -oE "general\[[0-9]\]" Kaneko16.sta.rpt | sort -u
+emu|pll|pll_inst|altera_pll_i|general[0]
+```
+
+**The whole core was a single clock domain, and its Fmax was 54.74 MHz.** Not
+the memory controller's -- the 68000's, the video path's and the controller's
+together, all held to the slowest path among them. Raising the PLL would have
+dragged everything up with it and missed by 8 ns.
+
+So the clocks are SPLIT rather than raised: clk_sdram 96, clk_sys 48, both from
+the 480 MHz VCO by integer divides (/5 and /10), so they stay phase-aligned and
+only the memory controller has to meet 10.42 ns.
+
+Four things had to move with it, and three were already right:
+
+  * `kaneko_sdram` was written for this ratio. Its ACK_HOLD is documented as
+    "2 for a clk/2 requester" and already defaulted to 2, and its device
+    timings (T_RCD 2, T_RP 2, T_RC 7, T_RAS 5, CL 2) are the ~100 MHz defaults
+    it shipped with. Only T_REFI, overridden to 300 for 48 MHz, was wrong; it
+    is 700 now.
+  * `kaneko_sdram_x2` sits between the domains. It was committed as "does not
+    pass yet" and now does -- see the entry above about its dout bypass.
+  * `SDRAM_CLK` comes from a phase-shifted PLL output instead of
+    `~clk_sdram`. Same 180 degrees, but a dedicated clock route rather than a
+    fabric inverter feeding a pin.
+
+**THE SDC WAS THE TRAP.** It cut the three PLL outputs as -asynchronous, with a
+comment inherited from the Model 2 core claiming nothing crossed between them.
+Quartus reported the statement useless on every build:
+
+```
+Warning (332049): Ignored set_clock_groups at Kaneko16.sdc(36): Argument
+-group with value [get_clocks {*|...|general[1].*|divclk}] contains zero
+elements
+```
+
+Groups 1 and 2 matched nothing because those counters did not exist. Harmless
+while there was one clock; after the split it would have told the fitter to
+ignore precisely the paths the change depends on, and the build would have
+passed. The cut is gone and a guard errors if the two counters ever collapse
+back into one.
+
+**The capture depth default was the other trap.** tb_kaneko_sdram_x2 measures
+that at 96 MHz only rd_lat_sel=3 reads correct data; 0, 1 and 2 fail all 6402
+checks. `status` defaults to zero, so the OSD's first position now maps to 3.
+Left alone it would have read garbage from every port on first boot and looked
+exactly like the clock change failing. The menu labels were wrong too --
+CL+1,CL+0,CL+2,CL+3 matched none of the four values they selected.
+
+Worth stating plainly: there was no symptom driving this. The overrun counters
+read zero after the arbitration tiering, so bandwidth was adequate. This is
+headroom for rotation, Blaze On's second VU-002 and the wider games, not a fix.
