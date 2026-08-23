@@ -766,7 +766,21 @@ wire signed [16:0] z80_sum_l = {{3{oki_snd[13]}}, oki_snd} + {ym2151_l[15], ym21
 wire signed [16:0] z80_sum_r = {{3{oki_snd[13]}}, oki_snd} + {ym2151_r[15], ym2151_r};
 wire [15:0] z80_mix_l = z80_sum_l[16:1];
 wire [15:0] z80_mix_r = z80_sum_r[16:1];
-wire [7:0] ym1_ioa_in = {7'h7f, eeprom_do};
+// ZERO IN THE UPPER BITS, NOT ONES. MAME's read handler is
+//
+//     u8 kaneko16_state::eeprom_r() { return m_eeprom->do_read(); }
+//
+// and do_read() returns 0 or 1, so the byte the game sees is 0x00 or 0x01 --
+// the other seven bits are not "unused and pulled high", they are zero. Both
+// boards read the EEPROM this way: bakubrkr and mgcrystl each wire
+// m_ym2149[1]->port_a_read_callback() to it, with MAME's own comment reading
+// "inputs A: 0,EEPROM bit read".
+//
+// This is the third time today the same mistake has surfaced -- the P1/P2/
+// SYSTEM words, the fourth input word, and now here. A bit that is not there
+// reads ZERO, and driving it high is invisible on a game that tests only the
+// bit it wants and fatal on one that compares the byte.
+wire [7:0] ym1_ioa_in = {7'h00, eeprom_do};
 wire [7:0] ym1_iob_out;
 
 jt49 u_ym0
