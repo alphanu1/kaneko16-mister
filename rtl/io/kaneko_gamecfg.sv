@@ -96,6 +96,17 @@ module kaneko_gamecfg #(
     // difference between two games that share a PCB.
     output wire [2:0]  oki_max_bank,
     output wire        oki_on_z80,
+    // The fourth input word, PER GAME. It is not a constant and it is not zero.
+    //
+    //   bakubrkr  e00006  high byte IPT_UNKNOWN, low byte NOT DECLARED -> ff00
+    //   blazeon   c00004  PORT_BIT(0xffff, IP_ACTIVE_LOW, IPT_UNKNOWN) -> ffff
+    //   wingforc  c00004  the same declaration                         -> ffff
+    //   mgcrystl          NO SUCH PORT -- its map stops at c00004/SYSTEM
+    //
+    // The core drove 0x0000 for all four. Undefined bits in a MAME port read
+    // zero, which is where that came from, but these bits are NOT undefined --
+    // they are declared IPT_UNKNOWN and active low, so they read as ones.
+    output wire [15:0] in_unk_val,
 
     // The OKI's input clock, which is also per-game: 12MHz/6 = 2 MHz on the
     // bakubrkr and mgcrystl boards, 16MHz/16 = 1 MHz on Wing Force. PIN7 is
@@ -218,6 +229,12 @@ module kaneko_gamecfg #(
     //   wingforc  oki1 0x080000 -> 3      blazeonj  no OKI at all
     assign oki_max_bank = is_wf ? 3'd3 : is_mg ? 3'd1 : 3'd7;
     assign oki_on_z80   = is_wf;
+    // mgcrystl has no fourth input word at all, so nothing it reads can be
+    // right or wrong here; it keeps the value it has always been given rather
+    // than being handed a new one that might disturb a game that now works.
+    assign in_unk_val   = blazeon_board ? 16'hffff
+                        : is_mg         ? 16'h0000
+                                        : 16'hff00;
     assign oki_cen_half = is_wf;
 
     // ROT90 is clockwise, ROT270 is the same thing counter-clockwise, which is

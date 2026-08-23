@@ -176,6 +176,7 @@ wire [SDR_AW-1:0] BASE_Z80;
 wire        HAS_Z80;
 wire [2:0]  OKI_MAX_BANK;
 wire        OKI_ON_Z80;
+wire [15:0] IN_UNK_VAL;
 wire        OKI_CEN_HALF;
 
 // THE MRA's GAME-ID BYTE DOES NOT ARRIVE, AND THIS IS BOTH THE PROBE AND THE
@@ -238,6 +239,7 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 	.inputs_blazeon(INPUTS_BLAZEON),
 	.base_z80(BASE_Z80), .has_z80(HAS_Z80),
 	.oki_max_bank(OKI_MAX_BANK), .oki_on_z80(OKI_ON_Z80),
+	.in_unk_val(IN_UNK_VAL),
 	.oki_cen_half(OKI_CEN_HALF),
 	.rot_en(ROT_EN), .rot_ccw(ROT_CCW)
 );
@@ -644,7 +646,7 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	// The fourth word: Explosive Breaker has a port at e00006 that MAME
 	// declares and leaves entirely empty, so it reads 0x0000, not 0xffff.
 	// Magical Crystals has no such port at all.
-	.in_system(in_system), .in_unk(16'h0000),
+	.in_system(in_system), .in_unk(IN_UNK_VAL),
 
 	.unmapped_hit(unmapped_hit), .unmapped_addr(unmapped_addr)
 );

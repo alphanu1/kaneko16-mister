@@ -55,14 +55,17 @@ struct Cfg {
     bool     rom1mb;                         // 68000 program window size
     bool     z80;
     uint32_t z80base;                        // word address of audiocpu
+    // The fourth input word, transcribed from INPUT_PORTS_START. NOT a
+    // constant across games and NOT zero: see kaneko_gamecfg.sv.
+    uint16_t in_unk;
 };
 
 const Cfg GAMES[] = {
-  // name        id  wram v2w0 v2w1 spr  pal wdog  in    dx   dy  2pri 2chip wide   pri  count  xoffs min_y   geometry     rot ccw  okimb okiz80  snd  1mb  z80  z80base
-  { "explbrkr",  0, 0x10,0x50,0x58,0x60,0x70,0xa8,0xe0,  91,  -8, true , true , false,0x8888,1024,0x0000, 16, 256,224,16,296, true ,false,7,false,0xff,false,false,0x200000 },
-  { "mgcrystl",  1, 0x30,0x60,0x68,0x70,0x50,0xa0,0xc0,  91,  -8, false, true , false,0x7532,1024,0x0000, 16, 256,224,16,296, false,false,1,false,0xff,false,false,0x200000 },
-  { "blazeonj",  2, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   8, false, false, true ,0x8821, 512,0xf980,  0, 320,232, 0,336, false,false,7,false,0xe0,true ,true ,0x200000 },
-  { "wingforc",  3, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   9, false, false, true ,0x8821, 512,0xf980,  0, 320,224, 0,336, true ,true ,3,true ,0xe0,true ,true ,0x2c0000 },
+  // name        id  wram v2w0 v2w1 spr  pal wdog  in    dx   dy  2pri 2chip wide   pri  count  xoffs min_y   geometry     rot ccw  okimb okiz80  snd  1mb  z80  z80base   unk
+  { "explbrkr",  0, 0x10,0x50,0x58,0x60,0x70,0xa8,0xe0,  91,  -8, true , true , false,0x8888,1024,0x0000, 16, 256,224,16,296, true ,false,7,false,0xff,false,false,0x200000, 0xff00 },
+  { "mgcrystl",  1, 0x30,0x60,0x68,0x70,0x50,0xa0,0xc0,  91,  -8, false, true , false,0x7532,1024,0x0000, 16, 256,224,16,296, false,false,1,false,0xff,false,false,0x200000, 0x0000 },
+  { "blazeonj",  2, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   8, false, false, true ,0x8821, 512,0xf980,  0, 320,232, 0,336, false,false,7,false,0xe0,true ,true ,0x200000, 0xffff },
+  { "wingforc",  3, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   9, false, false, true ,0x8821, 512,0xf980,  0, 320,224, 0,336, true ,true ,3,true ,0xe0,true ,true ,0x2c0000, 0xffff },
 };
 
 void verify(const Cfg& g) {
@@ -72,6 +75,14 @@ void verify(const Cfg& g) {
         check(expr, msg); } while (0)
 
     CK(d->game_id == g.id,            "game_id");
+    // FOURTH INCIDENT OF THIS CLASS, so it is checked here now.
+    //
+    // The core drove this word as a hardcoded 0x0000 for every game while
+    // MAME reads 0xff00 on bakubrkr and 0xffff on both Blaze On board games.
+    // It could only ever fail on hardware, because kaneko_cpumem_harness fed
+    // the CORRECT value -- the same shape as the DSW bits that kept Magical
+    // Crystals from booting and the SYSTEM word that kept Blaze On black.
+    CK(d->in_unk_val == g.in_unk,     "in_unk_val");
     CK(d->pg_wram == g.wram,          "pg_wram");
     CK(d->pg_v2w0 == g.v2w0,          "pg_v2w0");
     CK(d->pg_v2w1 == g.v2w1,          "pg_v2w1");
