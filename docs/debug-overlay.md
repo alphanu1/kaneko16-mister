@@ -55,57 +55,28 @@ diagnosis. Screen `y` is given because it is the one thing that cannot drift.
 ## The tall yellow block is a scratch area
 
 It gets repurposed for whatever is under investigation. **It currently shows
-where the 68000 is**, which is the Magical Crystals question: that game runs
-with a healthy bus-cycle count and zero interrupts acknowledged, so it is
-looping somewhere before it ever enables them and the address it keeps touching
-says where.
+the Z80's sound-port census**, for Wing Force: that game plays its in-game
+music and nothing else — no OKI effects, no attract music — and two plausible
+causes were checked and were both wrong, so the question moved to what the Z80
+actually writes.
 
-| Sub-row | y | Shows |
-|---|---|---|
-| 1st | 40-45 | **Clocks with IPL asserted this frame**, saturating at `ffff`. All dark = never asserted. **All sixteen lit = asserted and HELD**, i.e. the CPU is ignoring it. A small number = asserted and promptly acknowledged, which is normal. |
-| 2nd | 46-51 | Bus address sampled ONCE per frame at vblank, **high half** `a[23:16]` — `0030` work RAM, `0050` palette, `00c0` inputs |
-| 3rd | 52-57 | The same sample, **low half** `a[15:0]` |
+| Sub-row | y | Shows | MAME's wingforc, per frame |
+|---|---|---|---|
+| 1st | 40-45 | Z80 writes to the **OKI**, port `0a` | up to ~1, **only during the attract demo** |
+| 2nd | 46-51 | Z80 writes to the **YM2151**, ports `02`/`03` | 4-9, continuously, attract AND game |
+| 3rd | 52-57 | Z80 **reads of the latch**, port `06` — i.e. NMI handler entries | rare, a handful per run |
+| 4th | 58-63 | Z80 writes to the **OKI bank**, port `0c` | occasional |
 
-Sub-rows 2 and 3 are sampled once per frame on purpose. They used to update on
-every acknowledged access — thousands of times while the screen is scanned —
-so a phone camera's rolling shutter smeared several values down the block and
-it photographed as noise. Two Magical Crystals photographs were unreadable for
-that reason before it was noticed.
-| 4th | 58-63 | Unmapped accesses per frame |
+Compare against `tools/mame_z80_ports.lua` on the same title. Its per-second
+figures are `w02/w03 = 232-564`, `r03 = 6300-7200`, `w0a` only in the demo, and
+`r06 = 1-2`; divide by 60 for these rows.
 
-### Reading sub-row 1 against the amber row
+What the first two rows separate: if the OKI row is dark while the YM row is
+busy, our Z80 is running its music driver and never reaching the code that
+plays effects, and the fault is upstream of the chip. If the OKI row counts
+and there is still no sound, the fault is in jt6295 or the mixing behind it.
+Nothing in the build could tell those apart before.
 
-These two together split the black screen in half, which neither does alone.
-The amber row counts what the CPU **accepted**; sub-row 1 counts what the
-interrupt logic **offered**.
-
-| sub-row 1 | amber | Meaning |
-|---|---|---|
-| small | 3 | Interrupts are working. Look elsewhere. |
-| **all lit** | 0 | The request is raised and HELD and the 68000 is ignoring it, so it is masked at level 7 — it never finished its self-test. **The fault is upstream, nowhere near the IRQ path.** |
-| **all dark** | 0 | kaneko_irq is not firing at all. The fault IS the interrupt path. |
-
-This row counts a LEVEL because counting edges could not answer the question.
-`kaneko_irq` holds a request until it is acknowledged, so one the CPU never
-answers asserts once and then stays asserted: no further edges, a per-frame
-count of zero, and a reading identical to never asserting at all. The first
-version of this row counted edges and both cases read dark, which cost a
-build and a round trip to the board.
-
-Magical Crystals reads amber 0 with ~46,800 bus cycles a frame, and MAME shows
-the game spinning in an idle loop at `01f820` — 2.7 million fetches in 600
-frames — doing all its work in the handlers. So "no interrupts" fully explains
-the black screen, and sub-row 1 says which half to work on.
-
-It has previously carried the OKI chain, the YM2151 register-write count, the
-exception vector and the VIEW2 scroll probe. Whenever it is repurposed, this
-table is updated in the same commit.
-
-### Known redundancy
-
-Sub-rows 3 and 4 duplicate the orange and blue rows, from **different capture
-points**: `unmap_a_lat` / `unmap_cnt_lat` are latched near the bus decode,
-`unmapped_addr_lat` / `unmapped_cnt_lat` in the game-map decode. The address
-views differ usefully — sub-row 3 is the low half, the blue row the high half —
-but the **count is drawn twice**. If the two counts ever disagree, that is
-information about where the access is being classified, not a rendering fault.
+The block has previously carried the 68000's bus-address probe, the IPL
+counter, the OKI chain, the YM2151 register count and the VIEW2 scroll probe.
+Whenever it is repurposed, this table is updated in the same commit.

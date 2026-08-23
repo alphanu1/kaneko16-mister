@@ -975,6 +975,8 @@ kaneko_z80snd u_z80snd
 	.rd_n(z80_rd_n), .wr_n(z80_wr_n), .nmi_n(z80_nmi_n),
 	.rom_addr(z80_rom_addr), .rom_data(z80_rom_data),
 	.has_oki(OKI_ON_Z80),
+	.dbg_oki_wr(z80_dbg_oki_wr), .dbg_ym_wr(z80_dbg_ym_wr),
+	.dbg_latch_rd(z80_dbg_latch_rd), .dbg_bank_wr(z80_dbg_bank_wr),
 	.oki_we(z80_oki_we), .oki_din(z80_oki_din), .oki_dout(oki_dout),
 	.oki_bank(z80_oki_bank),
 	.ym_cen(z80_ym_cen), .ym_cen_p1(z80_ym_cen_p1),
@@ -1056,6 +1058,39 @@ always @(posedge clk_sys) begin
 	iack_d <= cpu_iack;
 	if (vbl_rise) begin irq_cnt_lat <= irq_cnt; irq_cnt <= 16'd0; end
 	else if (cpu_iack && !iack_d) irq_cnt <= irq_cnt + 16'd1;
+end
+
+// Z80 SOUND-PORT CENSUS, to diff against tools/mame_z80_ports.lua.
+//
+// Wing Force plays its in-game music and nothing else -- no OKI effects and no
+// attract music -- and two plausible causes were checked and were both wrong:
+// the fourth input word (real bug, fixed, changed nothing here) and jt6295
+// missing the write because its clock enable is slower than the Z80's strobe
+// (jt6295_ctrl samples wrn on the bare clock, so it cannot).
+//
+// MAME's census on wingforc, per second, is the thing to compare against:
+//
+//   w02/w03  232-564   YM2151, continuously, in attract AND in game
+//   r03      6300-7200 YM2151 status polled
+//   w0a      up to 54  OKI, ONLY during the attract demo
+//   r06      1-2       the latch, read only inside the NMI handler
+//
+// Divide by 60 for the per-frame numbers these rows show.
+wire z80_dbg_oki_wr, z80_dbg_ym_wr, z80_dbg_latch_rd, z80_dbg_bank_wr;
+reg [15:0] zoki_cnt, zoki_lat, zym_cnt, zym_lat;
+reg [15:0] zlat_cnt, zlat_lat, zbank_cnt, zbank_lat;
+always @(posedge clk_sys) begin
+	if (vbl_rise) begin
+		zoki_lat  <= zoki_cnt;  zoki_cnt  <= 16'd0;
+		zym_lat   <= zym_cnt;   zym_cnt   <= 16'd0;
+		zlat_lat  <= zlat_cnt;  zlat_cnt  <= 16'd0;
+		zbank_lat <= zbank_cnt; zbank_cnt <= 16'd0;
+	end else begin
+		if (z80_dbg_oki_wr   && !(&zoki_cnt))  zoki_cnt  <= zoki_cnt  + 16'd1;
+		if (z80_dbg_ym_wr    && !(&zym_cnt))   zym_cnt   <= zym_cnt   + 16'd1;
+		if (z80_dbg_latch_rd && !(&zlat_cnt))  zlat_cnt  <= zlat_cnt  + 16'd1;
+		if (z80_dbg_bank_wr  && !(&zbank_cnt)) zbank_cnt <= zbank_cnt + 16'd1;
+	end
 end
 
 // IPL ASSERTIONS, WHICH ARE NOT THE SAME THING AS ACKNOWLEDGEMENTS.
@@ -2087,10 +2122,12 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 //   row 6  last UNMAPPED address, low half
 //   row 7  unmapped accesses per frame -- zero means it is not lost, it is
 //          waiting for something that never comes
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? ipl_cnt_lat
-                        : (screen_y < 9'd52) ? bus_a_hi_frm
-                        : (screen_y < 9'd58) ? bus_a_lo_frm
-                                             : unmap_cnt_lat;
+// The scratch block, pointed at the Z80 sound ports for Wing Force. The 68000
+// probe it carried is no longer needed: Magical Crystals boots.
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? zoki_lat
+                        : (screen_y < 9'd52) ? zym_lat
+                        : (screen_y < 9'd58) ? zlat_lat
+                                             : zbank_lat;
 wire       oki_set = oki_row_val[oki_bit];
 
 // Row 9, magenta: the RAW joystick word for pad 1, live — not a per-frame

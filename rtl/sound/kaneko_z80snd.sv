@@ -62,6 +62,21 @@ module kaneko_z80snd (
     input  wire        wr_n,
     output logic       nmi_n,
 
+    // TELEMETRY, for diffing against tools/mame_z80_ports.lua on the same
+    // title. Wing Force plays its in-game music and nothing else, and two
+    // plausible explanations for that -- a wrong input word, and jt6295
+    // missing the write because its clock enable is slower than the Z80's
+    // strobe -- were both checked and both wrong. jt6295_ctrl samples wrn on
+    // the bare clock, not on cen, so it cannot miss an edge.
+    //
+    // These are the same four things the oracle counts, so "our Z80 never
+    // writes the OKI" and "our Z80 writes it and nothing comes out" stop
+    // looking alike.
+    output wire        dbg_oki_wr,     // port 0a written
+    output wire        dbg_ym_wr,      // port 02/03 written
+    output wire        dbg_latch_rd,   // port 06 read -- the NMI handler ran
+    output wire        dbg_bank_wr,    // port 0c written
+
     // ---- sound ROM, one byte, data one clock after the address
     output wire [15:0] rom_addr,
     input  wire [7:0]  rom_data,
@@ -152,6 +167,30 @@ module kaneko_z80snd (
     end
 
     assign nmi_n = ~pending;
+
+    // Strobes, not levels: each is asserted for the cycle the access starts,
+    // so a counter on them counts ACCESSES and not clocks. The Z80 holds a
+    // port cycle for about 24 clk_sys cycles at 4 MHz, and counting the level
+    // would report that number instead of 1.
+    logic oki_wr_d, ym_wr_d, latch_rd_d, bank_wr_d;
+    wire  oki_wr_lvl   = sel_oki      && ~wr_n;
+    wire  ym_wr_lvl    = sel_ym       && ~wr_n;
+    wire  bank_wr_lvl  = sel_okibank  && ~wr_n;
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            oki_wr_d <= 1'b0; ym_wr_d <= 1'b0;
+            latch_rd_d <= 1'b0; bank_wr_d <= 1'b0;
+        end else begin
+            oki_wr_d   <= oki_wr_lvl;
+            ym_wr_d    <= ym_wr_lvl;
+            latch_rd_d <= latch_rd;
+            bank_wr_d  <= bank_wr_lvl;
+        end
+    end
+    assign dbg_oki_wr   = oki_wr_lvl  && !oki_wr_d;
+    assign dbg_ym_wr    = ym_wr_lvl   && !ym_wr_d;
+    assign dbg_latch_rd = latch_rd    && !latch_rd_d;
+    assign dbg_bank_wr  = bank_wr_lvl && !bank_wr_d;
 
     // ------------------------------------------------------- OKI on the Z80
     // The bank register is three bits, as kaneko_oki_bank takes it. MAME's
