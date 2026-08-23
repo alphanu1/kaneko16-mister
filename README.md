@@ -114,8 +114,14 @@ the shipped games, estimated from `ROM_REGION` sizes for the rest:
 | Shogun Warriors | ~23.4 MB | Tier 2 |
 | **Blood Warrior** | **~35.1 MB** | Tier 3 — **needs more than 32 MB** |
 
-**All four shipped games fit comfortably in a 32 MB module.** The largest is
-under 6 MB, and nothing in Tier 1 comes close to the limit.
+**All four shipped games fit comfortably in a 32 MB module** by size — the
+largest is under 6 MB, and nothing in Tier 1 comes close to the limit.
+
+**Development and testing here is on a 128 MB module**, so that is the only
+configuration anything has actually run on. A 32 MB board should be fine for
+the shipped games on these numbers, but "fits by arithmetic" is not the same
+statement as "has been played", and nobody has played it. If you run one,
+saying so is useful.
 
 Later tiers do not all fit. Blood Warrior alone is 35 MB, mostly sprite ROM —
 30 MB of `kan_spr` — so it requires a 128 MB module. Shogun Warriors at 23 MB
