@@ -500,9 +500,19 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(700),
 );
 
 
+// ON clk_sys, NOT clk_sdram, AND THIS MATTERS NOW.
+//
+// Every input here comes from hps_io, which runs on clk_sys: ioctl_download,
+// ioctl_wr, ioctl_addr, ioctl_dout. While the two clocks were the same signal
+// that was invisible. Splitting the memory to 96 MHz made it a real crossing
+// AND put the loader on the wrong side of kaneko_sdram_x2 -- it drives the
+// adapter's SLOW port while being clocked fast, so ACK_HOLD's two-cycle
+// acknowledge, which is exactly one edge for a 48 MHz requester, became two
+// edges for it. Every write would be counted twice and the ROM image would
+// load corrupt, which is every game broken at once and no clue as to why.
 kaneko_rom_loader #(.SDR_AW(SDR_AW)) u_loader
 (
-	.clk(clk_sdram), .rst(~pll_locked), .mem_ready(mem_ready),
+	.clk(clk_sys), .rst(~pll_locked), .mem_ready(mem_ready),
 	.ioctl_download(ioctl_download), .ioctl_index(ioctl_index),
 	.ioctl_wr(ioctl_wr), .ioctl_addr(ioctl_addr), .ioctl_dout(ioctl_dout),
 	.ioctl_wait(ioctl_wait),
