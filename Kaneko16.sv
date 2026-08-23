@@ -88,7 +88,7 @@ localparam CONF_STR = {
 	"O[17],Tilemaps,On,Off;",
 	"O[20:19],Game override,Off(MRA),1 Magical Crystals,2 Blaze On,3 Wing Force;",
 	"O[23:21],Layer1 dx,+2 (MAME),0,-2,+4;",
-	"O[25:24],Rotation,Auto (per game),Off,CW,CCW;",
+	"O[25:24],Rotation,Off,Auto (per game),CW,CCW;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
@@ -2082,11 +2082,19 @@ end
 // core would have displayed, writes each frame into DDR3 with the axes
 // swapped, and raises FB_EN so the scaler reads that instead.
 wire       ROT_EN, ROT_CCW;
+// OFF IS THE DEFAULT, DELIBERATELY. status defaults to zero, so position 0 is
+// what a fresh boot gets, and rotation is not the right thing to hand somebody
+// unasked: on an ordinary landscape monitor a turned game is a tall strip down
+// the middle, and the framebuffer path costs a frame of latency that the
+// direct video path does not. It is opt-in.
+//
+//   0 Off              1 Auto, from the game table
+//   2 CW               3 CCW
 wire [1:0] rot_sel = status[25:24];
-wire       rot_off = (rot_sel == 2'd1);
-wire       rot_ccw = (rot_sel == 2'd0) ? ROT_CCW      // per game
+wire       rot_ccw = (rot_sel == 2'd1) ? ROT_CCW      // per game
                    : (rot_sel == 2'd3);               // 2 = CW, 3 = CCW
-wire       no_rot  = rot_off || ((rot_sel == 2'd0) && !ROT_EN);
+wire       no_rot  = (rot_sel == 2'd0)                // explicitly off
+                  || ((rot_sel == 2'd1) && !ROT_EN);  // auto, game is ROT0
 wire       video_rotated;
 
 screen_rotate u_rotate
