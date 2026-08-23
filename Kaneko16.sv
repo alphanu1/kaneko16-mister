@@ -176,6 +176,9 @@ wire [SDR_AW-1:0] BASE_Z80;
 wire        HAS_Z80;
 wire [2:0]  OKI_MAX_BANK;
 wire        OKI_ON_Z80;
+wire        CALC3_IO;
+wire [SDR_AW:1] OKI2_BASE;
+wire [2:0]  OKI2_MAX_BANK;
 wire [15:0] IN_UNK_VAL;
 wire        OKI_CEN_HALF;
 
@@ -239,6 +242,7 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 	.inputs_blazeon(INPUTS_BLAZEON),
 	.base_z80(BASE_Z80), .has_z80(HAS_Z80),
 	.oki_max_bank(OKI_MAX_BANK), .oki_on_z80(OKI_ON_Z80),
+	.calc3_io(CALC3_IO), .base_oki2(OKI2_BASE), .oki2_max_bank(OKI2_MAX_BANK),
 	.in_unk_val(IN_UNK_VAL),
 	.oki_cen_half(OKI_CEN_HALF),
 	.rot_en(ROT_EN), .rot_ccw(ROT_CCW)
@@ -335,7 +339,11 @@ localparam int unsigned SDR_AW  = 2 + 13 + SDR_COL;   // 25
 // elaborate. Five is also the configuration its testbench covers, so this build
 // runs the arrangement that is actually verified. Port 0 is the tile fetch;
 // 1..4 are tied idle and cost nothing but arbiter slots.
-localparam int unsigned NPORTS  = 9;
+// TEN. The tenth is the CALC3 board's second OKI, which fetches its own
+// samples from its own region. It was going to be the sprite bitmap; that move
+// is blocked on SDRAM bandwidth (D5), and this is a better use of the port
+// meanwhile.
+localparam int unsigned NPORTS  = 10;
 
 wire              mem_ready;
 wire              ldr_wr_req, ldr_wr_ack;
@@ -357,6 +365,9 @@ wire [SDR_AW:1]   p5_addr;
 // a slope. It reads through a 256-byte cache now, like the 68000 does.
 wire              p8_req;
 wire [SDR_AW:1]   p8_addr;
+// Second OKI sample fetch, CALC3 board only. Idle on every other game.
+wire              p9_req;
+wire [SDR_AW:1]   p9_addr;
 // Two ports for the sprite ROM, not one: a sprite row needs a block from each
 // half of its address space and they are fetched CONCURRENTLY. See the header
 // of kaneko_sprrom for the derivation of that pattern.
@@ -456,9 +467,9 @@ kaneko_sdram_x2 #(.NP(NPORTS), .AW(SDR_AW)) u_sdr_x2
 (
 	.clk_fast(clk_sdram),
 
-	.s_req  (rom_loaded ? {p8_req, p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}
+	.s_req  (rom_loaded ? {p9_req, p8_req, p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}
 	                    : {NPORTS{1'b0}}),
-	.s_addr ({p8_addr, p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
+	.s_addr ({p9_addr, p8_addr, p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
 	// No port writes yet: the sprite bitmap will be the first, and until it
 	// exists every master is a reader. Driven explicitly rather than left off
 	// the instance -- an omitted input is tied to GND without an error, which
@@ -483,7 +494,9 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(700),
                // tiny share of the bandwidth -- one eight-byte line per eight
                // opcode bytes at 4 MHz -- because everything behind it is the
                // sound CPU stalled with its clock enable held low.
-               .URGENT(9'b1_0011_1111)) u_sdram
+               // Bit 9 is the second OKI, urgent for the same reason bit 5
+               // is: a starved sample fetch is audible.
+               .URGENT(10'b11_0011_1111)) u_sdram
 (
 	.clk(clk_sdram), .rst_n(pll_locked), .ready(mem_ready),
 	// THE FIRST OSD POSITION IS THE DEFAULT AND MUST WORK ON THE BOARD.
@@ -609,6 +622,7 @@ fx68k u_cpu
 wire        vram0_we, vram1_we, spr_we, pal_we;
 wire        ym0_we, ym1_we, eeprom_we, oki_we;
 wire [7:0]  oki_din, oki_dout;
+wire        oki2_we, okibk_we;
 wire [3:0]  ym_addr;
 wire [7:0]  ym_din, eeprom_din;
 wire        v2r0_we, v2r1_we, sprreg_we, sprreg2_we;
@@ -646,6 +660,8 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.ym0_q(ym0_q), .ym1_q(ym1_q),
 	.eeprom_we(eeprom_we), .eeprom_din(eeprom_din),
 	.oki_we(oki_we), .oki_din(oki_din), .oki_dout(oki_dout),
+	.oki2_we(oki2_we), .okibk_we(okibk_we), .oki2_dout(oki2_dout),
+	.calc3_io(CALC3_IO),
 
 	.v2r0_we(v2r0_we), .v2r1_we(v2r1_we), .sprreg_we(sprreg_we),
 	.sprreg2_we(sprreg2_we), .sprreg2_q(q_sprreg2),
@@ -746,8 +762,13 @@ wire [10:0] ym_sum = {1'b0, ym0_snd} + {1'b0, ym1_snd};
 // Both parts made signed before mixing. jt49's level is unsigned around a
 // midpoint; jt6295's sample is already signed. AUDIO_S is 1 accordingly.
 wire signed [11:0] ym_ctr = $signed({1'b0, ym_sum}) - 12'sd1024;
+// The CALC3 board has no YM2149 and two OKIs; every other board has two
+// YM2149s and one OKI. Summing all three unconditionally is right for both:
+// the parts that do not exist are held silent by their own reset, and MAME
+// routes both OKIs at the same level on shogwarr.
 wire signed [16:0] snd_mix = {{3{ym_ctr[11]}}, ym_ctr, 2'd0}      // YM, scaled
-                           + {{3{oki_snd[13]}}, oki_snd};         // OKI
+                           + {{3{oki_snd[13]}}, oki_snd}          // OKI 1
+                           + {{3{oki2_snd[13]}}, oki2_snd};       // OKI 2
 // SCALED UP, BECAUSE THE HEADROOM IS FOR A SUM THAT NEVER HAPPENS.
 //
 // This was snd_mix[16:1] -- a straight halving -- which reserves room for both
@@ -913,6 +934,55 @@ kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_okirom
 	.port_ready(oki_rom_ok),
 	.sdr_req(p5_req), .sdr_addr(p5_addr),
 	.sdr_ack(p5_ack), .sdr_dout(p5_dout)
+);
+
+// ---------------------------------------------------- second OKI (Tier 2)
+// The CALC3 board carries two M6295s, at 400001 and 480001, both clocked
+// 16 MHz/8 = 2 MHz with PIN7 LOW. Everything about the second is a copy of the
+// first except its sample region and its half of the bank register.
+//
+// shogwarr_oki_bank_w writes one byte at e00001 holding BOTH banks: the low
+// nibble selects chip 0's bank and the high nibble chip 1's. One register,
+// two consumers, which is why the write strobe is shared.
+reg [7:0] okibk_q;
+always @(posedge clk_sys) begin
+	if (rst_sys)      okibk_q <= 8'd0;
+	else if (okibk_we) okibk_q <= oki_din;
+end
+
+wire [17:0] oki2_rom_addr;
+wire [7:0]  oki2_rom_data;
+wire [0:0]  oki2_rom_ok;
+wire signed [13:0] oki2_snd;
+wire [7:0]  oki2_dout;
+wire [23:0] oki2_region_addr;
+
+kaneko_oki_bank u_okibank2
+(
+	.chip_addr(oki2_rom_addr),
+	.max_bank(OKI2_MAX_BANK),
+	.bank(okibk_q[6:4]),
+	.region_addr(oki2_region_addr)
+);
+
+kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_oki2rom
+(
+	.clk(clk_sys), .rst(rst_sys),
+	.req_addr(oki2_region_addr),
+	.base_addr(OKI2_BASE),
+	.req_data(oki2_rom_data),
+	.port_ready(oki2_rom_ok),
+	.sdr_req(p9_req), .sdr_addr(p9_addr),
+	.sdr_ack(p9_ack), .sdr_dout(p9_dout)
+);
+
+jt6295 u_oki2
+(
+	.rst(rst_sys), .clk(clk_sys), .cen(oki_cen),
+	.ss(1'b0),                       // PIN7_LOW: divide by 165
+	.wrn(~oki2_we), .din(oki_din), .dout(oki2_dout),
+	.rom_addr(oki2_rom_addr), .rom_data(oki2_rom_data), .rom_ok(oki2_rom_ok[0]),
+	.sound(oki2_snd), .sample()
 );
 
 // -------------------------------------------------------- Z80 sound CPU

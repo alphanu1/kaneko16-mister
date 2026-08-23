@@ -104,6 +104,9 @@ module kaneko_bus #(
     // OKI M6295 at 400401 — an 8-bit device on the ODD byte of a 16-bit word,
     // so the write is qualified by LDS and never by UDS.
     output logic        oki_we,
+    // Second OKI and the shared sample-bank write, CALC3 board only.
+    output logic        oki2_we,
+    output logic        okibk_we,
     output wire  [7:0]  oki_din,
     input  wire  [7:0]  oki_dout,
 
@@ -119,6 +122,7 @@ module kaneko_bus #(
     output logic [3:0]  reg_addr,
     output logic [15:0] reg_din,
     input  wire  [15:0] v2r0_q, v2r1_q, sprreg_q, sprreg2_q,
+    input  wire  [7:0]  oki2_dout,
 
     // ---- inputs, active low as the hardware presents them
     input  wire [15:0]  in_p1, in_p2, in_system, in_unk,
@@ -131,6 +135,10 @@ module kaneko_bus #(
     // 0xe40000 is not an acknowledge on the other boards and decoding it there
     // would answer an address their code may use for something else.
     input  wire         blazeon_io,
+    // The CALC3 board's decode: two OKIs at 400001/480001, a sample bank at
+    // e00001, and the hit calculator at a00000. Gated so no Tier 1 board
+    // answers at those addresses.
+    input  wire         calc3_io,
 
     // Observability. An unmapped access is acknowledged so the CPU cannot hang
     // on it, but it must not pass silently.
@@ -185,6 +193,13 @@ module kaneko_bus #(
     wire sel_ym0   = (a[23:8]  == 16'h4000) && (a[7:5] == 3'd0);
     wire sel_ym1   = (a[23:8]  == 16'h4002) && (a[7:5] == 3'd0);
     wire sel_oki   = (a[23:1]  == 23'h200200);                  // 400401 byte
+    // THE CALC3 BOARD HAS TWO OKIs. shogwarr_map puts the first at 400001 and
+    // the second at 480001 -- note 400001, not 400401 as every Tier 1 board
+    // uses. Both are byte ports on the odd lane.
+    wire sel_oki_a = calc3_io && (a[23:1] == 23'h200000);       // 400001 byte
+    wire sel_oki_b = calc3_io && (a[23:1] == 23'h240000);       // 480001 byte
+    // Sample bank, written at e00001 on this board.
+    wire sel_okibk = calc3_io && (a[23:1] == 23'h700000);       // e00001 byte
     wire sel_v2w0  = (a[23:16] == pg_v2w0) && (a[15:14] == 2'd0);
     wire sel_v2w1  = (a[23:16] == pg_v2w1) && (a[15:14] == 2'd0);
     wire sel_spr   = (a[23:16] == pg_spr)  && (a[15:13] == 3'd0);
@@ -241,7 +256,8 @@ module kaneko_bus #(
     wire decoded = sel_rom | sel_wram | sel_ym0 | sel_ym1 | sel_oki | sel_v2w0
                  | sel_v2w1 | sel_spr | sel_pal | sel_v2r0 | sel_sprr | sel_wdog
                  | sel_v2r1 | sel_ctrl | sel_in  | sel_snd
-                 | sel_iack2 | sel_iack3 | sel_sprr2;
+                 | sel_iack2 | sel_iack3 | sel_sprr2
+                 | sel_oki_a | sel_oki_b | sel_okibk;
 
     // ---------------------------------------------------------- work RAM
     // 64 KB as 32k x 16, held as TWO BYTE-WIDE ARRAYS rather than one 16-bit
@@ -352,6 +368,7 @@ module kaneko_bus #(
         v2r0_we  <= 1'b0; v2r1_we  <= 1'b0; sprreg_we <= 1'b0; sprreg2_we <= 1'b0;
         ym0_we   <= 1'b0; ym1_we   <= 1'b0; eeprom_we <= 1'b0;
         oki_we   <= 1'b0; snd_we <= 1'b0;
+        oki2_we  <= 1'b0; okibk_we <= 1'b0;
         unmapped_hit <= 1'b0;
 
         if (rst) begin
@@ -399,7 +416,12 @@ module kaneko_bus #(
                                 // Only the low byte of d00000/d00001 is the
                                 // EEPROM; the high byte is coin lockout.
                                 eeprom_we <= sel_ctrl && ~LDSn;
-                                oki_we    <= sel_oki  && ~LDSn;
+                                // On the CALC3 board the first OKI answers at
+                                // 400001, not 400401, so both selects feed the
+                                // same strobe.
+                                oki_we    <= (sel_oki || sel_oki_a) && ~LDSn;
+                                oki2_we   <= sel_oki_b && ~LDSn;
+                                okibk_we  <= sel_okibk && ~LDSn;
                                 snd_we    <= sel_snd  && ~UDSn;
                             end
                             // Everything else answers in one cycle, INCLUDING
@@ -484,6 +506,12 @@ module kaneko_bus #(
         else if (sel_v2r1) iEdb = v2r1_q;
         else if (sel_sprr) iEdb = sprreg_q;
         else if (sel_sprr2) iEdb = sprreg2_q;
+        // Both OKIs are readable: the game polls their status the same way
+        // the Blaze On board's Z80 does.
+        // High byte 0x00, matching the sel_oki read below: the OKI is a byte
+        // port on the odd lane and nothing drives the even half.
+        else if (sel_oki_a) iEdb = {8'h00, oki_dout};
+        else if (sel_oki_b) iEdb = {8'h00, oki2_dout};
         // A YM2149 register reads back as a byte. MAME promotes data_r() to
         // u16, so the high half is zero; the game only reads the low half, but
         // matching it keeps the bus traces comparable.

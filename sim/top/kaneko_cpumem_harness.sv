@@ -349,8 +349,14 @@ module kaneko_cpumem_harness #(
         .pg_spr(PG_SPR), .pg_pal(PG_PAL), .pg_wdog(PG_WDOG),
         .pg_snd(PG_SND), .pg_in(PG_IN),
         .rom_1mb(ROM_1MB), .blazeon_io(BLAZEON_IO),
+        // The CALC3 board's decode. Driven from the game table like every
+        // other per-board fact, not tied off: an omitted input reads as GND
+        // and the board would silently answer at no address.
+        .calc3_io(CFG_CALC3_IO),
+        .oki2_we(), .okibk_we(), .oki2_dout(8'h00),
         .base_trom0(), .base_trom1(), .base_spr(),
         .base_oki(CFG_OKI_BASE), .oki_max_bank(CFG_OKI_MAX_BANK),
+        .calc3_io(CFG_CALC3_IO), .base_oki2(), .oki2_max_bank(),
         // Needed to build the input words, which are per GAME and not per
         // board -- see the in_p1/in_system comment below.
         .game_id(CFG_GAME_ID),
@@ -555,6 +561,7 @@ module kaneko_cpumem_harness #(
     wire [SDR_AW:1] CFG_OKI_BASE;
     wire [2:0]      CFG_OKI_MAX_BANK;
     wire [7:0]      CFG_GAME_ID;
+    wire            CFG_CALC3_IO;
     // mgcrystl declares the SYSTEM/P2 low byte as IPT_UNKNOWN, so it reads
     // 0xff; bakubrkr does not declare it at all, so it reads 0x00. Undefined
     // bits in a MAME port read ZERO -- that is the whole rule, and it has now
