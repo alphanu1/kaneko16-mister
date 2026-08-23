@@ -50,6 +50,19 @@ module kaneko_sdram_x2 #(
     output wire [NP-1:0]          s_ack,
     output wire [NP-1:0][63:0]    s_dout,
 
+    // PER-PORT WRITES. The controller has always had these; this adapter did
+    // not carry them, so every port above the loader was read-only however the
+    // controller was configured.
+    //
+    // The sprite bitmap needs a master that both reads and writes during a
+    // frame, which is what forced the gap open. Nothing here has to be careful
+    // with them for the same reason the address does not: a requester holds
+    // them for as long as it holds `req`, so they are stable across the whole
+    // fast-domain transaction.
+    input  wire [NP-1:0]          s_we,
+    input  wire [NP-1:0][15:0]    s_din,
+    input  wire [NP-1:0][1:0]     s_be,
+
     input  wire                   s_wr_req,
     input  wire [AW:1]            s_wr_addr,
     input  wire [15:0]            s_wr_din,
@@ -61,6 +74,10 @@ module kaneko_sdram_x2 #(
     output wire [NP-1:0][AW:1]    f_addr,
     input  wire [NP-1:0]          f_ack,
     input  wire [NP-1:0][63:0]    f_dout,
+
+    output wire [NP-1:0]          f_we,
+    output wire [NP-1:0][15:0]    f_din,
+    output wire [NP-1:0][1:0]     f_be,
 
     output wire                   f_wr_req,
     output wire [AW:1]            f_wr_addr,
@@ -90,6 +107,10 @@ module kaneko_sdram_x2 #(
             // chance for it to look like a new one.
             assign f_req[g]  = s_req[g] & ~done & ~f_ack[g];
             assign f_addr[g] = s_addr[g];
+            // Stable for the whole transaction, exactly like the address.
+            assign f_we[g]   = s_we[g];
+            assign f_din[g]  = s_din[g];
+            assign f_be[g]   = s_be[g];
             assign s_ack[g]  = f_ack[g];      // already two fast cycles wide
 
             // BYPASSED ON THE ACKNOWLEDGE CYCLE, not just registered.

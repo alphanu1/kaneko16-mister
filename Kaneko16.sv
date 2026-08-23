@@ -364,6 +364,9 @@ wire [1:0]            p67_req;
 wire [1:0][SDR_AW:1]  p67_addr;
 wire [1:0]            p67_ack;
 wire [1:0][63:0]      p67_dout;
+wire [NPORTS-1:0]       f_we;
+wire [NPORTS-1:0][15:0] f_din;
+wire [NPORTS-1:0][1:0]  f_be;
 wire [NPORTS-1:0]       p_ack_bus;
 wire [NPORTS-1:0][63:0] p_dout_bus;
 wire              p0_ack  = p_ack_bus[0];
@@ -444,6 +447,13 @@ kaneko_sdram_x2 #(.NP(NPORTS), .AW(SDR_AW)) u_sdr_x2
 	.s_req  (rom_loaded ? {p8_req, p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}
 	                    : {NPORTS{1'b0}}),
 	.s_addr ({p8_addr, p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
+	// No port writes yet: the sprite bitmap will be the first, and until it
+	// exists every master is a reader. Driven explicitly rather than left off
+	// the instance -- an omitted input is tied to GND without an error, which
+	// is how the per-game memory map shipped broken for eleven commits.
+	.s_we   ({NPORTS{1'b0}}),
+	.s_din  ({NPORTS{16'd0}}),
+	.s_be   ({NPORTS{2'b11}}),
 	.s_ack  (p_ack_bus),
 	.s_dout (p_dout_bus),
 
@@ -451,6 +461,7 @@ kaneko_sdram_x2 #(.NP(NPORTS), .AW(SDR_AW)) u_sdr_x2
 	.s_wr_be(ldr_wr_be),   .s_wr_ack(ldr_wr_ack),
 
 	.f_req(f_req), .f_addr(f_addr), .f_ack(f_ack), .f_dout(f_dout),
+	.f_we(f_we), .f_din(f_din), .f_be(f_be),
 	.f_wr_req(f_wr_req), .f_wr_addr(f_wr_addr), .f_wr_din(f_wr_din),
 	.f_wr_be(f_wr_be),   .f_wr_ack(f_wr_ack)
 );
@@ -518,9 +529,9 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(700),
 	// it was written. The core never had the equivalent.
 	.p_req  (f_req),
 	.p_addr (f_addr),
-	.p_din  ({NPORTS{16'd0}}),
-	.p_be   ({NPORTS{2'b11}}),
-	.p_we   ({NPORTS{1'b0}}),
+	.p_din  (f_din),
+	.p_be   (f_be),
+	.p_we   (f_we),
 	.p_ack  (f_ack),
 	.p_dout (f_dout)
 );

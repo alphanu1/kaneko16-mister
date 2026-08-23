@@ -91,6 +91,10 @@ module kaneko_sdram_x2_harness #(
     kaneko_sdram_x2 #(.NP(NP), .AW(AW)) u_x2 (
         .clk_fast(clk),
         .s_req(p_req), .s_addr({a8, a7, a6, a5, a4, a3, a2, a1, a0}),
+        // Reads only in this harness; the adapter's write pass-through is
+        // exercised by tb_kaneko_sdram, which has the writing port.
+        .s_we({NP{1'b0}}), .s_din({NP{16'd0}}), .s_be({NP{2'b11}}),
+        .f_we(), .f_din(), .f_be(),
         .s_ack(p_ack), .s_dout({d8, d7, d6, d5, d4, d3, d2, d1, d0}),
         .s_wr_req(wr_req), .s_wr_addr(wr_addr), .s_wr_din(wr_din),
         .s_wr_be(wr_be), .s_wr_ack(wr_ack),
