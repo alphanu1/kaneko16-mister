@@ -354,6 +354,12 @@ module kaneko_cpumem_harness #(
         // and the board would silently answer at no address.
         .calc3_io(CFG_CALC3_IO),
         .oki2_we(), .okibk_we(), .oki2_dout(8'h00),
+        // The hit calculator and MCU RAM are not modelled here: this harness
+        // exists to compare the 68000's bus trace against MAME during boot,
+        // and neither is touched before the game runs. Outputs left open,
+        // inputs driven to a defined value rather than omitted.
+        .hit_we(), .hit_addr(), .hit_dout(16'h0000),
+        .mcu_we(), .mcu_addr(), .mcu_dout(16'h0000),
         .base_trom0(), .base_trom1(), .base_spr(),
         .base_oki(CFG_OKI_BASE), .oki_max_bank(CFG_OKI_MAX_BANK),
         .calc3_io(CFG_CALC3_IO), .base_oki2(), .oki2_max_bank(),

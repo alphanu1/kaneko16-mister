@@ -661,6 +661,8 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.eeprom_we(eeprom_we), .eeprom_din(eeprom_din),
 	.oki_we(oki_we), .oki_din(oki_din), .oki_dout(oki_dout),
 	.oki2_we(oki2_we), .okibk_we(okibk_we), .oki2_dout(oki2_dout),
+	.hit_we(hit_we), .hit_addr(hit_addr), .hit_dout(hit_dout),
+	.mcu_we(mcu_we), .mcu_addr(mcu_addr), .mcu_dout(mcu_dout),
 	.calc3_io(CALC3_IO),
 
 	.v2r0_we(v2r0_we), .v2r1_we(v2r1_we), .sprreg_we(sprreg_we),
@@ -935,6 +937,48 @@ kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_okirom
 	.sdr_req(p5_req), .sdr_addr(p5_addr),
 	.sdr_ack(p5_ack), .sdr_dout(p5_dout)
 );
+
+// ------------------------------------------- hit calculator and MCU RAM
+// The CALC3 board only. Both are inert on every other game: the decode is
+// gated by calc3_io, so nothing else can reach them, and the MCU RAM's block
+// memory is the only cost they carry when idle.
+wire        hit_we, mcu_we;
+wire [5:0]  hit_addr;
+wire [15:0] hit_dout;
+wire [15:0] mcu_addr, mcu_dout;
+
+// A free-running LFSR for the calculator's random register. The oracle returns
+// machine().rand() there, so there is nothing to agree with -- only a
+// requirement that it not be constant, which a tie to zero would make it.
+// Maximal-length 16-bit, taps 16,14,13,11.
+reg [15:0] hit_lfsr;
+always @(posedge clk_sys) begin
+	if (rst_sys) hit_lfsr <= 16'hace1;
+	else hit_lfsr <= {hit_lfsr[14:0],
+	                  hit_lfsr[15] ^ hit_lfsr[13] ^ hit_lfsr[12] ^ hit_lfsr[10]};
+end
+
+kaneko_hit u_hit
+(
+	.clk(clk_sys), .rst(rst_sys),
+	.addr(hit_addr), .din(oEdb), .we(hit_we),
+	.uds(~UDSn), .lds(~LDSn), .dout(hit_dout),
+	.rnd(hit_lfsr)
+);
+
+// 64 KB shared with the CALC3 simulation, at 200000-20ffff. Byte-enabled and
+// held as two byte-wide arrays for the same reason the 68000's work RAM is:
+// writing a slice of a 16-bit array element is a pattern Quartus does not
+// recognise as a byte-enabled memory, and it infers registers instead.
+(* ramstyle = "M10K" *) reg [7:0] mcuram_hi [0:32767];
+(* ramstyle = "M10K" *) reg [7:0] mcuram_lo [0:32767];
+reg [15:0] mcu_q;
+always @(posedge clk_sys) begin
+	if (mcu_we && ~UDSn) mcuram_hi[mcu_addr[14:0]] <= oEdb[15:8];
+	if (mcu_we && ~LDSn) mcuram_lo[mcu_addr[14:0]] <= oEdb[7:0];
+	mcu_q <= {mcuram_hi[mcu_addr[14:0]], mcuram_lo[mcu_addr[14:0]]};
+end
+assign mcu_dout = mcu_q;
 
 // ---------------------------------------------------- second OKI (Tier 2)
 // The CALC3 board carries two M6295s, at 400001 and 480001, both clocked

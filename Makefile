@@ -58,6 +58,7 @@ HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_vuspr:kaneko_vuspr:sim/video/tb_kaneko_vuspr.cpp \
              kaneko_tmap_fetch:kaneko_tmap_fetch:sim/video/tb_kaneko_tmap_fetch.cpp \
              kaneko_vuspr_draw:kaneko_vuspr_draw:sim/video/tb_kaneko_vuspr_draw.cpp \
+             kaneko_hit:kaneko_hit:sim/io/tb_kaneko_hit.cpp \
              kaneko_sdram:kaneko_sdram_harness:sim/mem/tb_kaneko_sdram.cpp \
              kaneko_romload:kaneko_romload_harness:sim/io/tb_kaneko_romload.cpp \
              kaneko_romstream:kaneko_romstream_harness:sim/io/tb_kaneko_romstream.cpp \

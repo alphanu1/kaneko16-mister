@@ -107,6 +107,11 @@ module kaneko_bus #(
     // Second OKI and the shared sample-bank write, CALC3 board only.
     output logic        oki2_we,
     output logic        okibk_we,
+    // Hit calculator and MCU RAM, CALC3 board only.
+    output logic        hit_we,
+    output wire  [5:0]  hit_addr,
+    output logic        mcu_we,
+    output wire  [15:0] mcu_addr,
     output wire  [7:0]  oki_din,
     input  wire  [7:0]  oki_dout,
 
@@ -123,6 +128,7 @@ module kaneko_bus #(
     output logic [15:0] reg_din,
     input  wire  [15:0] v2r0_q, v2r1_q, sprreg_q, sprreg2_q,
     input  wire  [7:0]  oki2_dout,
+    input  wire  [15:0] hit_dout, mcu_dout,
 
     // ---- inputs, active low as the hardware presents them
     input  wire [15:0]  in_p1, in_p2, in_system, in_unk,
@@ -200,6 +206,11 @@ module kaneko_bus #(
     wire sel_oki_b = calc3_io && (a[23:1] == 23'h240000);       // 480001 byte
     // Sample bank, written at e00001 on this board.
     wire sel_okibk = calc3_io && (a[23:1] == 23'h700000);       // e00001 byte
+    // The hit calculator, a00000-a0007f. 64 words, so a[23:7] selects it and
+    // a[6:1] picks the register.
+    wire sel_hit   = calc3_io && (a[23:7] == 17'h14000);
+    // 64 KB of MCU RAM at 200000-20ffff, shared with the CALC3 simulation.
+    wire sel_mcu   = calc3_io && (a[23:16] == 8'h20);
     wire sel_v2w0  = (a[23:16] == pg_v2w0) && (a[15:14] == 2'd0);
     wire sel_v2w1  = (a[23:16] == pg_v2w1) && (a[15:14] == 2'd0);
     wire sel_spr   = (a[23:16] == pg_spr)  && (a[15:13] == 3'd0);
@@ -257,7 +268,7 @@ module kaneko_bus #(
                  | sel_v2w1 | sel_spr | sel_pal | sel_v2r0 | sel_sprr | sel_wdog
                  | sel_v2r1 | sel_ctrl | sel_in  | sel_snd
                  | sel_iack2 | sel_iack3 | sel_sprr2
-                 | sel_oki_a | sel_oki_b | sel_okibk;
+                 | sel_oki_a | sel_oki_b | sel_okibk | sel_hit | sel_mcu;
 
     // ---------------------------------------------------------- work RAM
     // 64 KB as 32k x 16, held as TWO BYTE-WIDE ARRAYS rather than one 16-bit
@@ -301,6 +312,8 @@ module kaneko_bus #(
     assign ym_din    = ~LDSn ? oEdb[7:0] : oEdb[15:8];
     assign eeprom_din = oEdb[7:0];
     assign oki_din    = oEdb[7:0];
+    assign hit_addr   = a[6:1];
+    assign mcu_addr   = a[16:1];
     // The EVEN byte of the word, which on a big-endian 68000 is the UPPER half.
     assign snd_din    = oEdb[15:8];
 
@@ -369,6 +382,7 @@ module kaneko_bus #(
         ym0_we   <= 1'b0; ym1_we   <= 1'b0; eeprom_we <= 1'b0;
         oki_we   <= 1'b0; snd_we <= 1'b0;
         oki2_we  <= 1'b0; okibk_we <= 1'b0;
+        hit_we   <= 1'b0; mcu_we   <= 1'b0;
         unmapped_hit <= 1'b0;
 
         if (rst) begin
@@ -422,6 +436,8 @@ module kaneko_bus #(
                                 oki_we    <= (sel_oki || sel_oki_a) && ~LDSn;
                                 oki2_we   <= sel_oki_b && ~LDSn;
                                 okibk_we  <= sel_okibk && ~LDSn;
+                                hit_we    <= sel_hit;
+                                mcu_we    <= sel_mcu;
                                 snd_we    <= sel_snd  && ~UDSn;
                             end
                             // Everything else answers in one cycle, INCLUDING
@@ -512,6 +528,8 @@ module kaneko_bus #(
         // port on the odd lane and nothing drives the even half.
         else if (sel_oki_a) iEdb = {8'h00, oki_dout};
         else if (sel_oki_b) iEdb = {8'h00, oki2_dout};
+        else if (sel_hit)   iEdb = hit_dout;
+        else if (sel_mcu)   iEdb = mcu_dout;
         // A YM2149 register reads back as a byte. MAME promotes data_r() to
         // u16, so the high half is zero; the game only reads the low half, but
         // matching it keeps the bus traces comparable.
