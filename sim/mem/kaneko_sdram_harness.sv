@@ -41,14 +41,21 @@ module kaneko_sdram_harness #(
 
   // p0 V60 (read/write), p1 tile char, p2 polygon/TGP, p3 sound 68000,
   // p4 MultiPCM. See docs/00-decisions.md D8.
-  input  logic        p0_req, p1_req, p2_req, p3_req, p4_req, p5_req, p6_req, p7_req, p8_req,
+  // p9 is the SPRITE BITMAP, the candidate tenth master. Unlike every other
+  // port it both reads and writes, which is why it carries its own we/din/be
+  // rather than sharing p0's.
+  input  logic        p0_req, p1_req, p2_req, p3_req, p4_req, p5_req, p6_req, p7_req, p8_req, p9_req,
+  input  logic        p9_we,
+  input  logic [15:0] p9_din,
+  input  logic [1:0]  p9_be,
   input  logic        p0_we,
+  input  logic [COL_BITS+15:1] p9_addr,
   input  logic [COL_BITS+15:1] p0_addr, p1_addr, p2_addr, p3_addr, p4_addr,
                                p5_addr, p6_addr, p7_addr, p8_addr,
   input  logic [15:0] p0_din,
   input  logic [1:0]  p0_be,
-  output logic [63:0] p0_dout, p1_dout, p2_dout, p3_dout, p4_dout, p5_dout, p6_dout, p7_dout, p8_dout,
-  output logic        p0_ack, p1_ack, p2_ack, p3_ack, p4_ack, p5_ack, p6_ack, p7_ack, p8_ack,
+  output logic [63:0] p0_dout, p1_dout, p2_dout, p3_dout, p4_dout, p5_dout, p6_dout, p7_dout, p8_dout, p9_dout,
+  output logic        p0_ack, p1_ack, p2_ack, p3_ack, p4_ack, p5_ack, p6_ack, p7_ack, p8_ack, p9_ack,
 
   // Device model observability
   output int unsigned violations,
@@ -57,7 +64,7 @@ module kaneko_sdram_harness #(
   output int unsigned writes_served,
 
   // Telemetry readback
-  input  logic [2:0]  mon_sel,
+  input  logic [3:0]  mon_sel,
   input  logic        mon_snap,
   output logic [23:0] mon_req,
   output logic [23:0] mon_grant,
@@ -66,7 +73,18 @@ module kaneko_sdram_harness #(
   output logic [23:0] mon_total
 );
 
-  localparam int unsigned NP    = 9;   // matches Kaneko16.sv NPORTS
+  // NPORTS-AHEAD-BY-ONE
+  //
+  // TEN, not nine: the tenth is the sprite-bitmap candidate being measured.
+  // The core still has one fewer and will until the move lands, so
+  // nports-check allows exactly this file to run one port ahead. The marker
+  // above is what it looks for; delete it when the core catches up and the
+  // guard goes back to demanding an exact match.
+  //
+  // The allowance is deliberately +1 and not "any number": a harness with
+  // FEWER ports than the core is a port nothing tests, which is what the
+  // guard exists to catch and is still an error.
+  localparam int unsigned NP    = 10;
   localparam int unsigned T_RCD = 2;
   localparam int unsigned T_RP  = 2;
   localparam int unsigned T_RC  = 7;
@@ -85,13 +103,17 @@ module kaneko_sdram_harness #(
   logic [NP-1:0][63:0] p_dout;
   logic [NP-1:0]       dbg_req, dbg_grant;
 
-  assign p_req  = {p8_req, p7_req, p6_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req};
-  assign p_we   = {4'b0000, p0_we};
-  assign p_addr = {p8_addr, p7_addr, p6_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr};
-  assign p_din  = {64'd0, p0_din};
-  assign p_be   = {8'd0, p0_be};
+  assign p_req  = {p9_req, p8_req, p7_req, p6_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req};
+  // WIDTH-CORRECT, and it was not. This read {4'b0000, p0_we} -- five bits
+  // driving a nine-bit signal, left behind when NP went from 5 to 9. It worked
+  // by zero-extension and would have silently mis-wired the moment a port
+  // above the fifth needed to write.
+  assign p_we   = {p9_we, 9'b0};
+  assign p_addr = {p9_addr, p8_addr, p7_addr, p6_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr};
+  assign p_din  = {p9_din, {9{16'd0}}};
+  assign p_be   = {p9_be, {9{2'b11}}};
 
-  assign {p8_ack, p7_ack, p6_ack, p5_ack, p4_ack, p3_ack, p2_ack, p1_ack, p0_ack} = p_ack;
+  assign {p9_ack, p8_ack, p7_ack, p6_ack, p5_ack, p4_ack, p3_ack, p2_ack, p1_ack, p0_ack} = p_ack;
   assign p0_dout = p_dout[0];
   assign p1_dout = p_dout[1];
   assign p2_dout = p_dout[2];
@@ -101,6 +123,7 @@ module kaneko_sdram_harness #(
   assign p6_dout = p_dout[6];
   assign p7_dout = p_dout[7];
   assign p8_dout = p_dout[8];
+  assign p9_dout = p_dout[9];
 
   logic        cke, cs_n, ras_n, cas_n, we_n;
   logic [1:0]  ba, dqm;
@@ -118,7 +141,17 @@ module kaneko_sdram_harness #(
     // hardware within minutes: it consumes a sample every 66us with nothing
     // buffering it. The harness must test the arbitration the core actually
     // ships, not the default.
-    .URGENT(8'b0011_1111)
+    // WIDTH-CORRECT AND MATCHING THE CORE'S INTENT. This was 8'b0011_1111 --
+    // eight bits for what is now a ten-port controller -- so it zero-extended
+    // and every port above the fifth became slack, including the sprite
+    // bitmap being measured. A scanout read has a per-line deadline and
+    // cannot be a slack master.
+    //
+    // Kaneko16.sv uses 9'b1_0011_1111: tile feeders, 68000, OKI and the Z80
+    // urgent, the two sprite ROM ports slack because they have a whole frame.
+    // Port 9 joins the urgent set for the same reason the tile feeders are in
+    // it -- it must finish before the line it feeds is displayed.
+    .URGENT(10'b11_0011_1111)
   ) dut (
     .clk(clk), .rst_n(rst_n), .ready(ready),
     // CL+3, what the device MODEL needs, and after the selector range moved
@@ -163,7 +196,7 @@ module kaneko_sdram_harness #(
   bw_monitor #(.MASTERS(NP), .CW(24), .BW(8)) mon (
     .clk(clk), .rst_n(rst_n),
     .req(dbg_req), .grant(dbg_grant),
-    .snap(mon_snap), .sel(mon_sel[2:0]),
+    .snap(mon_snap), .sel(mon_sel),
     .req_count(mon_req), .grant_count(mon_grant), .wait_count(mon_wait),
     .burst_max(mon_bmax), .total_cycles(mon_total)
   );

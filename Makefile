@@ -144,13 +144,16 @@ nports-check:
 	bad=""; \
 	for f in $$(grep -rlE '\bNP(ORTS)? *= *[0-9]' sim/ 2>/dev/null); do \
 	  n=$$(sed -nE 's/.*\bNP(ORTS)? *= *([0-9]+).*/\2/p' "$$f" | head -1); \
-	  [ "$$n" = "$$core" ] || bad="$$bad $$f:$$n"; done; \
+	  if grep -q 'NPORTS-AHEAD-BY-ONE' "$$f"; then \
+	    [ "$$n" = "$$((core + 1))" ] || bad="$$bad $$f:$$n"; \
+	  else \
+	    [ "$$n" = "$$core" ] || bad="$$bad $$f:$$n"; fi; done; \
 	if [ -n "$$bad" ]; then \
 	  echo "nports: Kaneko16.sv has NPORTS=$$core, but:"; \
 	  for b in $$bad; do echo "        $${b%%:*} has NP=$${b##*:}"; done; \
 	  echo "        a port the harness does not drive is a port nothing tests."; \
 	  exit 1; fi
-	@echo "nports: NPORTS=$$(sed -n 's/^localparam int unsigned NPORTS *= *\([0-9]*\);.*/\1/p' Kaneko16.sv) everywhere"
+	@echo "nports: NPORTS=$$(sed -n 's/^localparam int unsigned NPORTS *= *\([0-9]*\);.*/\1/p' Kaneko16.sv) everywhere (NPORTS-AHEAD-BY-ONE files: +1)"
 
 qsf-check:
 	@miss=""; for f in $(RTL); do \

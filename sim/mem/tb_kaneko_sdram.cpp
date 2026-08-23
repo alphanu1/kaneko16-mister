@@ -39,7 +39,12 @@
 // tested five, so the OKI's port was the one port never arbitrated in a test —
 // and it was also the one port blen() forgot, which is how a single-word burst
 // reached hardware and made the sound path silent.
-static const int NP = 9;
+// NPORTS-AHEAD-BY-ONE
+//
+// One more than the core has today: the extra is the sprite-bitmap candidate
+// being measured. nports-check allows this file to run a single port ahead
+// while the move is in progress; remove the marker when the core catches up.
+static const int NP = 10;
 
 // Burst length per port. This mirrored a per-port blen() in kaneko_sdram.sv and
 // got it wrong twice — once claiming ports 1 and 2 burst four where the RTL said
@@ -103,6 +108,7 @@ struct Harness {
       case 4: d->p4_req = v; break; case 5: d->p5_req = v; break;
       case 6: d->p6_req = v; break; case 7: d->p7_req = v; break;
       case 8: d->p8_req = v; break;
+      case 9: d->p9_req = v; break;
       default: abortPort(p);
     }
   }
@@ -113,6 +119,7 @@ struct Harness {
       case 4: d->p4_addr = a; break; case 5: d->p5_addr = a; break;
       case 6: d->p6_addr = a; break; case 7: d->p7_addr = a; break;
       case 8: d->p8_addr = a; break;
+      case 9: d->p9_addr = a; break;
       default: abortPort(p);
     }
   }
@@ -122,7 +129,7 @@ struct Harness {
       case 2: return d->p2_ack; case 3: return d->p3_ack;
       case 4: return d->p4_ack; case 5: return d->p5_ack;
       case 6: return d->p6_ack; case 7: return d->p7_ack;
-      case 8: return d->p8_ack;
+      case 8: return d->p8_ack; case 9: return d->p9_ack;
       default: abortPort(p); return false;
     }
   }
@@ -132,7 +139,7 @@ struct Harness {
       case 2: return d->p2_dout; case 3: return d->p3_dout;
       case 4: return d->p4_dout; case 5: return d->p5_dout;
       case 6: return d->p6_dout; case 7: return d->p7_dout;
-      case 8: return d->p8_dout;
+      case 8: return d->p8_dout; case 9: return d->p9_dout;
       default: abortPort(p); return 0;
     }
   }
@@ -218,7 +225,12 @@ struct Harness {
     port[p].write = write; port[p].wdata = data; port[p].be = be;
     port[p].issued_at = cyc;
     setAddr(p, addr);
-    if (p == 0) { d->p0_we = write; d->p0_din = data; d->p0_be = be; }
+    // Port 9 is the only one that writes. p0's write signals were the
+    // harness's original single write path and are gone; a write issued on any
+    // other port would silently become a read, which is the sort of thing a
+    // throughput number hides completely.
+    if (write && p != 9) { printf("  BUG: write issued on port %d\n", p); fails++; }
+    if (p == 9) { d->p9_we = write; d->p9_din = data; d->p9_be = be; }
     setReq(p, 1);
     port[p].req_held = true;
     if (write) {
@@ -322,7 +334,10 @@ int main(int argc, char** argv) {
         // which is what the real board presents.
         unsigned thresh = (p == 0) ? 40 : (p == 2) ? 30 : 12;
         if ((rng() % 100) >= thresh) continue;
-        bool write = (p == 0) && ((rng() & 7) == 0);
+        // Port 9 is the writer now -- the sprite bitmap is the only master
+        // that writes during a frame. This said p == 0, which was the
+        // harness's write path before that port existed.
+        bool write = (p == 9) && ((rng() & 7) == 0);
         uint8_t be = 3;
         if (write && (rng() & 7) == 0) be = (rng() & 1) ? 1 : 2;  // byte writes
         h.issue(p, pick_addr(rng), write, (uint16_t)rng(), be);
@@ -370,8 +385,11 @@ int main(int argc, char** argv) {
       uint32_t rbase = (1u << 22) | (3u << 9);
       uint32_t wbase = (2u << 22) | (5u << 9);
       if (!h.port[1].busy) h.issue(1, rbase + ((n * 4) & 0x1fc), false, 0);
-      if (!h.port[0].busy)
-        h.issue(0, wbase + (n & 0x1ff), true, (uint16_t)(0x5a00 + (n & 0xff)));
+      // Writes go on port 9, the only port wired to write. This used port 0,
+      // which was the harness's single write path before the sprite-bitmap
+      // port existed.
+      if (!h.port[9].busy)
+        h.issue(9, wbase + (n & 0x1ff), true, (uint16_t)(0x5a00 + (n & 0xff)));
       h.step();
     }
     h.drain();
@@ -459,6 +477,148 @@ int main(int argc, char** argv) {
     h.checks++;
   }
 
+  // ------------------------------------------------ sprite bitmap in SDRAM
+  // CAN THE SPRITE BITMAP LIVE IN SDRAM? This is the measurement that decides
+  // it, and Tier 3 depends on the answer: KC-002's 512x512x16 double-buffered
+  // surface is 8.39 Mbit against this device's 5.66 Mbit of block RAM, so it
+  // does not fit on-chip even if the core held nothing else. See D5.
+  //
+  // The traffic has two halves with very different deadlines.
+  //
+  //   SCANOUT READ is hard real time. The mixer consumes one pixel per core
+  //   clock across a 320-pixel active line. Reading just in time would need a
+  //   4-word burst every 8 SDRAM clocks with no slack at all, so the real
+  //   design reads a line AHEAD into a small cache: 80 bursts have a whole
+  //   line period, 384 core clocks = 768 SDRAM clocks, to arrive. That is the
+  //   deadline modelled here, and missing it is a visible defect.
+  //
+  //   RENDERER WRITE is soft. It has the whole frame, and the coverage mask
+  //   rejects most of it -- tb_kaneko_vuspr_draw measures 1,175,090 of
+  //   1,543,770 mask writes rejected, so about a quarter of the worst case
+  //   reaches memory. Modelled as scattered single-word writes alongside.
+  //
+  // The other nine masters stream throughout, because a number measured with
+  // an idle bus would be worthless.
+  printf("test: sprite bitmap as a tenth master, against a scanline deadline\n");
+  {
+    const long LINE_SDCLK = 768;     // 384 core clocks at 2x
+    const int  BURSTS     = 80;      // 320 pixels / 4 per burst
+    const int  LINES      = 224;
+    uint32_t cursor[NP];
+    for (int p = 0; p < NP; p++) cursor[p] = (uint32_t)(p % 4) << 22;
+    uint32_t bmp_rd = 3u << 22, bmp_wr = (3u << 22) | (1u << 20);
+
+    long missed = 0, worst_left = LINE_SDCLK, writes_done = 0;
+    long fewest = BURSTS, total_got = 0;
+    for (int line = 0; line < LINES; line++) {
+      long t0 = h.cyc, got = 0;
+      int  wr_budget = 15;           // ~a quarter of worst case, per line
+      while (h.cyc - t0 < LINE_SDCLK) {
+        for (int p = 0; p < NP - 1; p++) {          // the nine existing masters
+          if (h.port[p].busy) continue;
+          h.issue(p, cursor[p], false, 0);
+          cursor[p] += burst_of(p);
+        }
+        if (!h.port[9].busy) {
+          if (got < BURSTS) {                        // scanout read, deadline
+            h.issue(9, bmp_rd, false, 0);
+            bmp_rd += 4; got++;
+          } else if (wr_budget > 0) {                // renderer write, slack
+            h.issue(9, bmp_wr + (uint32_t)(line * 7 + wr_budget), true,
+                    (uint16_t)(0x1000 + wr_budget));
+            wr_budget--; writes_done++;
+          }
+        }
+        h.step();
+      }
+      if (got < BURSTS) missed++;
+      if (line == 0 || got < fewest) fewest = got;
+      total_got += got;
+      long left = LINE_SDCLK - (h.cyc - t0);
+      if (got >= BURSTS && left < worst_left) worst_left = left;
+    }
+    h.drain();
+    printf("  %d lines, %ld missed the deadline, %ld renderer writes served\n",
+           LINES, missed, writes_done);
+    printf("  bursts served per line: %ld average, %ld worst, of %d needed\n",
+           total_got / LINES, fewest, BURSTS);
+    printf("  worst line finished its %d bursts with %ld of %ld clocks to spare\n",
+           BURSTS, worst_left, LINE_SDCLK);
+    // NOT A FAILURE. This measures the FULL-WIDTH scheme, which is now known
+    // not to fit and is recorded as such in D5: 320 words a line for the
+    // bitmap on top of 320 for the tile feeders, against about 490 the bus
+    // delivers in a line. The number above is the evidence for that, and it
+    // is kept because an arbiter change that made it better or worse should
+    // be visible.
+    printf("  full-width scanout does NOT fit, as expected -- see D5\n");
+    h.checks++;
+  }
+
+  // The scheme that has to work: read the bitmap ONLY where the coverage mask
+  // says a sprite was drawn. The mask stays in block RAM, so it costs no
+  // bandwidth to consult, and sprites are 16 pixels wide, so coverage comes in
+  // runs of at least four bursts and stays burst-efficient.
+  //
+  // This also removes the frame clear. Nothing reads a pixel the mask does not
+  // claim, so stale data is never seen and the 81,920 words a frame of zeroing
+  // never happen.
+  //
+  // Asserted at 30% coverage, which is generous for these games -- a shooter
+  // with a full screen of sprites is nothing like a third of the pixels.
+  printf("test: sprite bitmap read sparsely, gated by the coverage mask\n");
+  {
+    const long LINE_SDCLK = 768;
+    const int  BURSTS     = 24;        // 30% of 80
+    const int  LINES      = 224;
+    uint32_t cursor[NP];
+    for (int p = 0; p < NP; p++) cursor[p] = (uint32_t)(p % 4) << 22;
+    uint32_t bmp_rd = 3u << 22, bmp_wr = (3u << 22) | (1u << 20);
+    long missed = 0, fewest = BURSTS, total_got = 0, writes_done = 0;
+
+    for (int line = 0; line < LINES; line++) {
+      long t0 = h.cyc, got = 0;
+      int  wr_budget = 15;
+      while (h.cyc - t0 < LINE_SDCLK) {
+        for (int p = 0; p < NP - 1; p++) {
+          if (h.port[p].busy) continue;
+          h.issue(p, cursor[p], false, 0);
+          cursor[p] += burst_of(p);
+        }
+        if (!h.port[9].busy) {
+          if (got < BURSTS) { h.issue(9, bmp_rd, false, 0); bmp_rd += 4; got++; }
+          else if (wr_budget > 0) {
+            h.issue(9, bmp_wr + (uint32_t)(line * 7 + wr_budget), true,
+                    (uint16_t)(0x2000 + wr_budget));
+            wr_budget--; writes_done++;
+          }
+        }
+        h.step();
+      }
+      if (got < BURSTS) missed++;
+      if (got < fewest) fewest = got;
+      total_got += got;
+    }
+    h.drain();
+    printf("  %d lines, %ld missed, %ld average of %d needed, %ld worst\n",
+           LINES, missed, total_got / LINES, BURSTS, fewest);
+    printf("  renderer writes served alongside: %ld\n", writes_done);
+    // REPORTED, NOT ASSERTED, until the load model is validated against the
+    // real core. The nine other masters here are issued flat out, which is
+    // far more than the board presents: p0 alone requests on 83% of cycles.
+    // A number measured against a saturated bus bounds the problem, it does
+    // not settle it.
+    //
+    // What it does establish, with the arithmetic in D5, is that the headroom
+    // is small. Tile feeders want 320 words a line of about 490 the bus
+    // delivers, so the bitmap is competing for what is left rather than
+    // moving into empty space. The measurement that would settle it is real
+    // per-master utilisation from the board, which needs bw_monitor in the
+    // core rather than only in this harness.
+    if (missed)
+      printf("  does not fit under a saturated-bus model; see D5\n");
+    h.checks++;
+  }
+
   // ------------------------------------------------------------- telemetry
   printf("test: bandwidth telemetry reports the traffic that actually ran\n");
   {
@@ -511,15 +671,21 @@ int main(int argc, char** argv) {
       h.step();
       for (int i = 0; i < NP; i++)
         if (!h.port[i].busy) {
-          (i < 6 ? urgent : slack)++;
+          // Classification MUST match the harness's URGENT mask, which is
+          // 10'b11_0011_1111: ports 0-5 and 8-9 have deadlines, 6-7 are the
+          // sprite ROM and have a whole frame. This counted i < 6 as urgent
+          // and everything above as slack, so once ports 8 and 9 became
+          // urgent the test was scoring urgent traffic as slack and failing
+          // on its own arithmetic.
+          ((i < 6 || i >= 8) ? urgent : slack)++;
           h.issue(i, 0x2000 + i * 0x400 + ((c * 8) & 0x3ff), false, 0);
         }
     }
     for (int i = 0; i < NP; i++) h.port[i].busy = false;
     h.drain();
     h.checks++;
-    printf("  arbitration under full load: urgent(0-5) served %ld, slack(6-7) served %ld\n",
-           urgent, slack);
+    printf("  arbitration under full load: urgent(0-5,8-9) served %ld, "
+           "slack(6-7) served %ld\n", urgent, slack);
     if (urgent == 0 || slack > urgent / 4) {
       printf("  FAIL deadline ports did not get priority\n");
       h.fails++;

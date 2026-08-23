@@ -171,6 +171,44 @@ to work then Tier 3 is not reachable on this hardware by this design.
 Tier 2 is unaffected: `shogwarr` and, through it, `brapboys` both instantiate
 KANEKO_VU002_SPRITE, so they run on the bitmap we already have.
 
+### Measured 2026-08-23 — the bandwidth is the constraint, not the capacity
+
+Capacity was never the question: 1 MB of bitmap in 128 MB of SDRAM is 0.8%.
+Bandwidth is, and the first measurement says the obvious scheme does not fit.
+
+`tb_kaneko_sdram` now carries a tenth port modelling the bitmap against a
+per-line deadline, with the other nine streaming. A scanline is 384 core clocks
+= 768 SDRAM clocks, and the bus delivers about **490 words** in that time at the
+measured 0.638 words/clk.
+
+| per line | words | |
+|---|---|---|
+| tile feeders, 4 layers x 320 px x 4bpp | 320 | already spent |
+| sprite bitmap, full-width scanout | 320 | |
+| **total** | **640** | **131% of the line — does not fit** |
+
+Reading the bitmap only where the coverage mask claims a pixel changes the
+arithmetic: 352 words at 10% sprite coverage, 416 at 30%, 480 at 50%. That
+fits, and it removes the frame clear as well — nothing reads a pixel the mask
+does not claim, so stale data is never seen and the 81,920 words a frame of
+zeroing never happen. Sprites are 16 pixels wide, so coverage arrives in runs
+of at least four bursts and stays burst-efficient.
+
+**The headroom is small either way**, and that is the part to be careful about.
+The tile feeders alone want two thirds of the line. The bitmap is competing for
+what is left rather than moving into empty space, which is a different and much
+tighter proposition than the capacity figures suggest.
+
+The saturated-bus model in the harness has all nine masters requesting flat out
+— port 0 alone on 83% of cycles — which is far more than the board presents. It
+bounds the problem; it does not settle it. **What would settle it is real
+per-master utilisation measured on hardware**, and `bw_monitor` exists for
+exactly that but is instantiated only in the simulation harness. Putting it in
+the core is the next step, before any of `kaneko_spr_sys` is touched.
+
+The mask stays in block RAM regardless: 16 blocks against the bitmap's 256, and
+the renderer hits it randomly every clock, which is the worst pattern SDRAM has.
+
 Order follows from that: do the SDRAM move **before** Tier 2, while only four
 games depend on the sprite subsystem. Doing it afterwards means the same
 surgery re-verified across thirteen sets instead of four, and hard rule 9 says
