@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Sega the later revision core for MiSTer FPGA — Copyright (C) 2026 alphanu1
+// Kaneko 16-bit arcade core for MiSTer FPGA — Copyright (C) 2026 alphanu1
 //
 // THE HARDWARE PATH, ON A DESK: ioctl -> kaneko_rom_loader -> kaneko_sdram -> readback.
 //

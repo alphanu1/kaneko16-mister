@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Sega the earlier revision core for MiSTer FPGA
+// Kaneko 16-bit arcade core for MiSTer FPGA
 // Copyright (C) 2026 alphanu1
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -10,19 +10,18 @@
 //
 // Per-master SDRAM bandwidth telemetry.
 //
-// docs/m1-m4-plan.md: "Instrument the arbiter now. Per-master cycle counters
-// dumped to the HPS. This is how D2 and D3 get validated with numbers instead
-// of arithmetic, and it costs almost nothing to add at this stage versus
-// retrofitting during M3."
+// Ported with the SDRAM controller. The rationale it carried referred to
+// another project's plan and decision numbers and has been replaced with this
+// core's, which is the same argument about the same instrument: an arbiter
+// serving masters with different deadlines needs measuring rather than
+// reasoning about, and the counters cost almost nothing next to retrofitting
+// them later.
 //
-// This is that instrument, and the numbers it produces decide two open
-// decisions rather than merely being interesting:
-//
-//   D2  single SDRAM module is a hard requirement. Reverses only if M3 shows
-//       the band renderer cannot close — which is a bandwidth measurement.
-//   D3  band renderer keeps framebuffer traffic off external RAM. The estimate
-//       is 130-160 MB/s naive against ~120-140 MB/s usable, falling to 55-75
-//       with banding. Those are arithmetic; this makes them observations.
+// The open question here is whether the VU-002 sprite bitmap can live in SDRAM
+// instead of block RAM. It has to: KC-002's 512x512x16 double-buffered surface
+// is 8.39 Mbit against this device's 5.66 Mbit, so Tier 3 does not fit at all
+// without the move. See D5 in docs/00-decisions.md. Whether the bandwidth is
+// there is a measurement, and this is what takes it.
 //
 // WHAT IS COUNTED, AND WHY EACH ONE
 //
