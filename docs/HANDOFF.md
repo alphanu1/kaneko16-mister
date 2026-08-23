@@ -88,7 +88,9 @@ looks like support and fails undiagnosably.
 
 0. **Magical Crystals boots and runs but takes no interrupts on hardware.**
    Its bus trace matches MAME over all 138,246 compared accesses out of a
-   million, it reaches its self-test on the board, and it then sits at roughly
+   million, it DRAWS ITS SELF-TEST SCREEN on the board -- so the tilemap,
+   palette and tile-ROM fetch all work for this game -- and it then sits at
+   roughly
    46,800 bus cycles a frame with the interrupt counter reading **zero**. MAME
    shows the game spinning in an idle loop at `01f820` — 2,731,366 fetches over
    600 frames — with every drawing operation in the interrupt handlers, so no

@@ -29,7 +29,7 @@ bases, screen geometry, layer count, sprite list size and input wiring.
 | Explosive Breaker | playable, with sound |
 | Blaze On (Japan) | playable, with music and effects |
 | Wing Force (prototype) | playable, with in-game music; **no OKI sound effects, and no music in the attract demo** |
-| Magical Crystals | **not shipped — boots but draws nothing.** The missing program ROM is fixed and the CPU now runs correctly; the screen stays black because the game never takes an interrupt, and it does all its drawing in the interrupt handlers |
+| Magical Crystals | **not shipped — draws its self-test, then goes black.** The missing program ROM is fixed and the CPU now runs correctly. The self-test screen appears, so the graphics path works; the picture then goes black because the game never takes an interrupt, and it does all of its drawing in the interrupt handlers |
 
 An MRA for a game the core cannot run is deliberately not shipped: it looks
 supported and then fails in a way a player cannot diagnose.
@@ -43,9 +43,10 @@ exactly that reason — if they disagree, trust neither and check.**
 
 - **Magical Crystals is not shipped.** It boots now — the earlier fault, an
   MRA that carried no 68000 program ROM, is fixed — and its bus trace matches
-  MAME exactly over a million accesses. It reaches its self-test and then goes
-  black, because it never takes an interrupt and the game does all of its
-  drawing inside the interrupt handlers. The core takes those interrupts
+  MAME exactly over a million accesses. **Its self-test screen draws
+  correctly**, which is as far as it gets: the picture then goes black because
+  the game never takes an interrupt, and it does all of its drawing inside the
+  interrupt handlers. The core takes those interrupts
   correctly in simulation, so the disagreement is between simulation and
   hardware and is still being chased.
 
