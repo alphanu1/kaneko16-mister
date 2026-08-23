@@ -66,6 +66,20 @@ module kaneko_video_timing #(
     input  wire [9:0]  v_vis,
     input  wire [9:0]  v_start,
     input  wire [9:0]  h_sync_start,
+    // WHERE THE VISIBLE WINDOW STARTS IN X, the counterpart of the raw
+    // screen_y below. Zero for every Tier 1 game, whose visarea starts at 0.
+    //
+    // Shogun Warriors is the first that does not: set_visarea(40, 295, 16,
+    // 239) inside a 320-wide screen, so its picture is a 256-pixel window
+    // beginning 40 pixels in. The tilemap and sprite maths expect the
+    // coordinate MAME uses, so screen_x has to start there too -- exactly the
+    // reason screen_y carries v_start rather than counting from the top of
+    // the window.
+    // NINE BITS, not ten, to match screen_x. The window origin cannot exceed
+    // the horizontal total and screen_x is [8:0], so a tenth bit would be
+    // silently discarded -- which Verilator says out loud rather than leaving
+    // to be discovered.
+    input  wire [8:0]  h_start,
 
     output logic [9:0] hcnt,         // 0 .. H_TOTAL-1
     output logic [9:0] vcnt,         // 0 .. V_TOTAL-1
@@ -112,7 +126,7 @@ module kaneko_video_timing #(
     assign vsync  = (vcnt >= 10'(V_SYNC_START)) &&
                     (vcnt <  10'(V_SYNC_START + V_SYNC_WIDTH));
 
-    assign screen_x = hcnt[8:0];
+    assign screen_x = hcnt[8:0] + h_start;
     // screen_y is the RAW scanline, not an offset from the top of the visible
     // window. The tilemap maths adds the per-game dy and expects the same
     // coordinate MAME uses, where visarea starts at 16 rather than 0.

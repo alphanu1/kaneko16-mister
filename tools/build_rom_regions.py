@@ -113,6 +113,74 @@ SETS = {
         ],
         "oki1": [("pcm.u5", 0x000000, 0x080000, [])],
     },
+    # ---------------------------------------------------------------- Tier 2
+    # CALC3 board. One VIEW2 chip, VU-002 sprites, and TWO OKIs -- the second
+    # is new to this core. calc3_rom is the MCU's external DATA rom; its
+    # internal program rom is not dumped, so the MCU is a simulation and this
+    # region is what that simulation reads.
+    "shogwarr": {
+        "maincpu": [
+            ("fb030e.u61", 0x000000, 0x020000, [], "16le", 0),
+            ("fb031e.u62", 0x000000, 0x020000, [], "16le", 1),
+        ],
+        "calc3_rom": [("fb040e.u33", 0x000000, 0x020000, [])],
+        # ROMREGION_ERASEFF over 0x1000000 with 0x700000 loaded: the tail is
+        # 0xff on the board, not zero, and the region is sized by MAME rather
+        # than by the files.
+        "kan_spr": [
+            ("fb-020a.u1", 0x000000, 0x100000, []),
+            ("fb020b.u2",  0x100000, 0x100000, []),
+            ("fb021a.u3",  0x200000, 0x100000, []),
+            ("fb021b.u4",  0x300000, 0x100000, []),
+            ("fb-22a.u5",  0x400000, 0x100000, []),
+            ("fb-22b.u6",  0x500000, 0x100000, []),
+            ("fb023.u7",   0x600000, 0x100000, []),
+        ],
+        "view2_0": [
+            ("fb010.u65", 0x000000, 0x100000, []),
+            ("fb011.u66", 0x100000, 0x080000, []),
+        ],
+        "oki1": [
+            ("fb001e.u43", 0x000000, 0x080000, []),
+            ("fb000e.u42", 0x080000, 0x080000, []),
+        ],
+        "oki2": [
+            ("fb-002.u45", 0x000000, 0x100000, []),
+            ("fb-003.u44", 0x100000, 0x100000, []),
+        ],
+    },
+    # Same board as shogwarr. rb-024 is ROM_RELOADed once -- the dump is half
+    # the size of the space it fills and MAME loads it twice, which a naive
+    # concatenation would get wrong above 0x480000.
+    "brapboys": {
+        "maincpu": [
+            ("rb-030.01.u61", 0x000000, 0x020000, [], "16le", 0),
+            ("rb-031.01.u62", 0x000000, 0x020000, [], "16le", 1),
+        ],
+        "calc3_rom": [("rb-040.00.u33", 0x000000, 0x020000, [])],
+        "kan_spr": [
+            ("rb-020.u100",   0x000000, 0x100000, []),
+            ("rb-021.u76",    0x100000, 0x100000, []),
+            ("rb-022.u77",    0x200000, 0x100000, []),
+            ("rb-023.u78",    0x300000, 0x100000, []),
+            ("rb-024.u79",    0x400000, 0x080000, [0x480000]),
+            ("rb-025.01.u80", 0x500000, 0x040000, []),
+        ],
+        "view2_0": [
+            ("rb-010.u65", 0x000000, 0x100000, []),
+            ("rb-011.u66", 0x100000, 0x100000, []),
+            ("rb-012.u67", 0x200000, 0x100000, []),
+            ("rb-013.u68", 0x300000, 0x100000, []),
+        ],
+        "oki1": [
+            ("rb-000.u43",     0x000000, 0x080000, []),
+            ("rb-003.00.u101", 0x080000, 0x080000, []),
+        ],
+        "oki2": [
+            ("rb-001.u44", 0x000000, 0x100000, []),
+            ("rb-002.u45", 0x100000, 0x100000, []),
+        ],
+    },
     "explbrkr": {
         # 68000 program, ROM_LOAD16_BYTE: u18 on even bytes, u19 on odd.
         "maincpu": [
@@ -140,6 +208,8 @@ GAME_ID = {
     "mgcrystl": 1,
     "blazeonj": 2,
     "wingforc": 3,
+    "shogwarr": 4,
+    "brapboys": 5,
 }
 
 # ROM_REGION fill byte, where it is not zero.
@@ -161,6 +231,11 @@ GAME_ID = {
 # assumption — check ROM_START before adding a game.
 FILL = {
     ("blazeonj", "maincpu"): 0xFF,
+    # ROM_REGION( 0x1000000, "kan_spr", ROMREGION_ERASEFF ) with 0x700000
+    # loaded. Nine megabytes of this region read 0xff on the board, and a
+    # sprite whose code lands up there fetches 0xff rather than 0x00 -- which
+    # is a solid colour in a 4bpp tile, not transparency.
+    ("shogwarr", "kan_spr"): 0xFF,
 }
 
 
@@ -284,6 +359,32 @@ SDRAM_MAPS = {
         ("oki1",     0x500000, 0x080000),
         ("audiocpu", 0x580000, 0x010000),
     ],
+    # ---------------------------------------------------------------- Tier 2
+    # The CALC3 board. Much larger than Tier 1: shogwarr alone is 20 MB, and
+    # its sprite region is 16 MB of which 9 read 0xff. calc3_rom is the MCU's
+    # external data and is fetched by the MCU simulation, not by a video
+    # engine, but it lives in the same stream because the loader only knows
+    # how to fill one.
+    #
+    # Ordered largest-last so the regions the video path fetches sit low, which
+    # keeps their row addresses short and the arithmetic in the feeders the
+    # same shape as Tier 1's.
+    "shogwarr": [
+        ("maincpu",   0x0000000, 0x0040000),
+        ("calc3_rom", 0x0040000, 0x0020000),
+        ("view2_0",   0x0060000, 0x0400000),
+        ("oki1",      0x0460000, 0x0100000),
+        ("oki2",      0x0560000, 0x0200000),
+        ("kan_spr",   0x0760000, 0x1000000),
+    ],
+    "brapboys": [
+        ("maincpu",   0x0000000, 0x0040000),
+        ("calc3_rom", 0x0040000, 0x0020000),
+        ("view2_0",   0x0060000, 0x0400000),
+        ("oki1",      0x0460000, 0x0100000),
+        ("oki2",      0x0560000, 0x0200000),
+        ("kan_spr",   0x0760000, 0x0800000),
+    ],
 }
 
 def print_game_id(setname):
@@ -306,6 +407,17 @@ def sdram_end(setname):
     return max(b + n for _, b, n in sdram_map(setname))
 
 REGION_SIZE = {
+    # Tier 2. shogwarr's sprite region is 0x1000000 with ROMREGION_ERASEFF and
+    # only 0x700000 loaded, so nine megabytes of it read 0xff on the board.
+    # Sized as MAME sizes it rather than as the files fill it: the sprite code
+    # is 16 bits and a 256-byte record, so the address space genuinely reaches
+    # there and a shorter region would alias reads that should return 0xff.
+    "shogwarr": {"maincpu": 0x040000, "calc3_rom": 0x020000,
+                 "kan_spr": 0x1000000, "view2_0": 0x400000,
+                 "oki1": 0x100000, "oki2": 0x200000},
+    "brapboys": {"maincpu": 0x040000, "calc3_rom": 0x020000,
+                 "kan_spr": 0x800000, "view2_0": 0x400000,
+                 "oki1": 0x100000, "oki2": 0x200000},
     # maincpu is 0x040000*2 in ROM_START, with ROMREGION_ERASE: the even bytes
     # of the upper half are genuinely zero, not absent.
     "mgcrystl": {"maincpu": 0x080000,

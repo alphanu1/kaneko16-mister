@@ -66,6 +66,11 @@ const Cfg GAMES[] = {
   { "mgcrystl",  1, 0x30,0x60,0x68,0x70,0x50,0xa0,0xc0,  91,  -8, false, true , false,0x7532,1024,0x0000, 16, 256,224,16,296, false,false,1,false,0xff,false,false,0x200000, 0x0000 },
   { "blazeonj",  2, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   8, false, false, true ,0x8821, 512,0xf980,  0, 320,232, 0,336, false,false,7,false,0xe0,true ,true ,0x200000, 0xffff },
   { "wingforc",  3, 0x30,0x60,0xff,0x70,0x50,0xff,0xc0,  51,   9, false, false, true ,0x8821, 512,0xf980,  0, 320,224, 0,336, true ,true ,3,true ,0xe0,true ,true ,0x2c0000, 0xffff },
+  // Tier 2, the CALC3 board. One VIEW2 chip like Blaze On, VU-002 sprites and
+  // 1024 of them like Tier 1, and a memory map that shares no page with
+  // either. Its visible window is the first that does not start at x=0.
+  { "shogwarr",  4, 0x10,0x60,0xff,0x58,0x38,0xa8,0xb8,  51,  -8, false, false, true ,0x7531,1024,0x0a00, 16, 256,224,16,296, false,false,7,false,0xff,false,false,0x200000, 0xff00 },
+  { "brapboys",  5, 0x10,0x60,0xff,0x58,0x38,0xa8,0xb8,  51,  -8, false, false, true ,0x7531,1024,0x0a00, 16, 256,224,16,296, false,false,7,false,0xff,false,false,0x200000, 0xff00 },
 };
 
 void verify(const Cfg& g) {

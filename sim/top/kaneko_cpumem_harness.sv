@@ -253,7 +253,7 @@ module kaneko_cpumem_harness #(
     (
         .clk(clk), .rst(rst), .ce_pix(ce_pix_h),
         .h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
-        .v_start(CFG_V_START), .h_sync_start(CFG_HSYNC),
+        .v_start(CFG_V_START), .h_sync_start(CFG_HSYNC), .h_start(CFG_H_START),
         .hcnt(), .vcnt(vcnt), .screen_x(), .screen_y(),
         .hsync(), .vsync(), .hblank(), .vblank(), .de(), .vblank_rise()
     );
@@ -339,6 +339,7 @@ module kaneko_cpumem_harness #(
     // area of zero height and a vblank_rise that never fires — the harness
     // then disagrees with hardware about the one thing being debugged.
     wire [9:0] CFG_H_VIS, CFG_V_VIS, CFG_V_START, CFG_HSYNC;
+    wire [8:0] CFG_H_START;
 
     kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg (
         .clk(clk), .rst(rst),

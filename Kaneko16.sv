@@ -167,6 +167,7 @@ wire [15:0] SPR_PRI_SEL, SPR_XOFFS_CFG, SPR_YOFFS_CFG;
 wire [10:0] TILE_COLBASE_CFG, SPR_COLBASE_CFG, SPR_COUNT_CFG;
 wire [8:0]  SPR_MIN_Y;
 wire [9:0]  CFG_H_VIS, CFG_V_VIS, CFG_V_START, CFG_HSYNC;
+wire [8:0] CFG_H_START;   // visible window's x origin; 40 on the CALC3 board
 wire        INPUTS_BLAZEON;
 wire [7:0]  PG_SND;
 wire        ROM_1MB;
@@ -234,7 +235,7 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 	.fliptype(SPR_FLIPTYPE),
 
 	.h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
-	.v_start(CFG_V_START), .h_sync_start(CFG_HSYNC),
+	.v_start(CFG_V_START), .h_sync_start(CFG_HSYNC), .h_start(CFG_H_START),
 	.inputs_blazeon(INPUTS_BLAZEON),
 	.base_z80(BASE_Z80), .has_z80(HAS_Z80),
 	.oki_max_bank(OKI_MAX_BANK), .oki_on_z80(OKI_ON_Z80),
@@ -1553,7 +1554,7 @@ kaneko_video_timing u_timing
 	// The visible window is per game — 256x224 from line 16 on this board,
 	// 320x232 from line 0 on the Blaze On board. The totals are shared.
 	.h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
-	.v_start(CFG_V_START), .h_sync_start(CFG_HSYNC),
+	.v_start(CFG_V_START), .h_sync_start(CFG_HSYNC), .h_start(CFG_H_START),
 	.hcnt(hcnt), .vcnt(vcnt), .screen_x(screen_x), .screen_y(screen_y),
 	.hsync(hs), .vsync(vs), .hblank(hb), .vblank(vb), .de(de),
 	.vblank_rise(vbl_rise)
