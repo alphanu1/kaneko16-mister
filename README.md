@@ -4,9 +4,11 @@ An FPGA implementation of Kaneko's 16-bit arcade hardware for MiSTer
 (Terasic DE10-Nano, Cyclone V 5CSEBA6U23I7). Not an emulator: RTL that behaves
 as the original silicon did, verified against MAME as an oracle.
 
-**Status: early. M0 (graphics spikes) in progress, M1 (first bring-up) not
-started.** See `docs/HANDOFF.md` for an honest gap analysis before assuming
-anything here runs a game — nothing does yet.
+**Status: three of the four bring-up games are playable on hardware.**
+Explosive Breaker, Blaze On and Wing Force run with graphics, input and sound;
+Magical Crystals does not boot yet and is not shipped. Later titles needing the
+CALC3 or TOYBOX MCUs are not attempted. See `docs/HANDOFF.md` for the gap
+analysis.
 
 ## The hardware
 
@@ -41,7 +43,7 @@ Miles Rally 1/2.
 | EEPROM (93C46) | working; 20,910 reads replayed against MAME, zero mismatches |
 | Inputs | two players, 2 buttons each, start/coin/service, and the board's DIPs — assembled per board, because the two boards wire the words differently, not just relocate them |
 | Game configuration table | `rtl/io/kaneko_gamecfg.sv` — one bitstream, four games; memory-map pages, ROM bases, video geometry, layer count, sprite list size and input wiring all selected by the MRA's game-id byte |
-| Z80 + YM2151 sound (Blaze On board) | **working on Blaze On** — music and effects. T80 at 4 MHz, jt51, and a 256-byte cache over SDRAM for the program ROM; a 48 KB copy in block RAM did not fit. Wing Force is still silent and open: its Z80 writes the YM at MAME's rate while jt51 produces nothing |
+| Z80 + YM2151 sound (Blaze On board) | **working on Blaze On** — music and effects. T80 at 4 MHz, jt51, and a 256-byte cache over SDRAM for the program ROM; a 48 KB copy in block RAM did not fit. Wing Force has in-game music but no OKI effects and no attract music; its OKI hangs off the Z80's I/O ports rather than the 68000's bus, and that path is still open |
 | Screen rotation | **working on hardware** — per game, because it is per game in both senses: Explosive Breaker is ROT90 and Wing Force ROT270, turned in OPPOSITE directions, while Blaze On and Magical Crystals are ROT0. Uses MiSTer's `screen_rotate` and the DDR3 framebuffer, so it costs no M10K and no SDRAM bandwidth. **Off by default** — on a landscape monitor a turned game is a tall strip, and the framebuffer path costs a frame of latency. OSD: Off / Auto (per game) / CW / CCW |
 
 Three of the four games are playable on hardware. The 68000 completes its
@@ -65,63 +67,12 @@ in a way a player cannot diagnose.
 | Wing Force (prototype) | **playable**, graphics, input and in-game music all correct. **No OKI sound effects, and no music in the attract demo** |
 | Magical Crystals | **not shipped — cause found, fix in progress.** It has never booted, and the reason is that the MRA never carried a 68000 program ROM: `maincpu` was missing from the ROM description, so the region was zero-filled and the CPU executed half a megabyte of zeros. That is why it showed a healthy bus-cycle count and zero interrupts. The frame gate's 99.48% is unrelated — it renders from MAME's dumped VRAM without running an instruction |
 
-The debug overlay (OSD: Debug) puts seven rows of per-frame telemetry over the
-picture, each a binary count with the MSB at the left:
-
-Identify a row by its **width and colour**, not by counting down the screen —
-the rows in the tall block are borrowed for whatever is under investigation and
-the ordinal numbering has moved more than once.
-
-| Position | Width | Colour | Count |
-|---|---|---|---|
-| 1st | 20 — widest | green | bus cycles |
-| 2nd | 8 — narrowest | amber | interrupts acknowledged (3 per frame = two lit blocks) |
-| 3rd | 16 | cyan | **tilemap** line fetches that overran |
-| 4th | 16, tall (4 rows fused) | yellow | **borrowed — see below** |
-| *(gap)* | | | |
-| 5th | 16 | white | **sprite** passes that did not finish before the next frame |
-| 6th | 16 | magenta | live joystick 1 word — bit 0 at the right |
-
-`Layer1 dx` in the OSD selects the offset the VIEW2 chip applies to its second
-tilemap layer: `+2` (what MAME does and the default), `0`, `-2` or `+4`. The offset is correct — MAME sets
-`set_scrolldx(-(m_dx+2))` for `tmap[1]` and the game cancels it by writing that
-layer's scroll two lower — so this is a diagnostic for a reported two-pixel
-ghost on the Blaze On board, not a setting to leave on.
-
-**The tall block is a scratch area.** It is currently the **Z80 sound-port
-census**, for diffing against `tools/mame_z80_ports.lua` on the same title. The
-OKI chain lived here for one build and answered its question — the rows lit
-whenever Wing Force made any sound and were dark otherwise, so the OKI path is
-correct and the fault is upstream in the Z80.
-
-| Sub-row | Shows |
-|---|---|
-| 1st | Last acknowledged bus address, **high half** — `a[23:16]`, so `0030` is work RAM, `0050` palette, `00c0` inputs |
-| 2nd | Last acknowledged bus address, **low half** — `a[15:0]` |
-| 3rd | Last **unmapped** address, low half |
-| 4th | Unmapped accesses per frame — zero means the CPU is not lost, it is waiting for something that never arrives |
-
-Currently pointed at **where the 68000 is**, for Magical Crystals: it runs with a healthy bus-cycle count and **zero interrupts acknowledged**, so it is looping somewhere before it ever enables them, and the address it keeps touching says where. The block previously counted YM2151 register writes, which is meaningless on a board with no Z80.
-
-It has previously carried the CPU's last bus address, the exception vector
-number, the unmapped address and the VIEW2 scroll probe. **Identify rows by
-width and colour, never by ordinal** — the ordinal moves, and a stale reading
-of this table costs a round trip to the board and a wrong diagnosis.
-
-Whenever that block is repurposed, this table and `releases/README.md` are
-updated in the same commit.
-
-Each row is a binary number with the MSB at the left, one block per bit; a
-clear bit is dark red rather than black, so "the count is zero" is
-distinguishable from "this readout is not being drawn", which are different
-faults wanting opposite fixes.
-
-The number of lit blocks is not the number counted: the interrupt row's correct
-reading is 3, which draws as two adjacent lit blocks at the right-hand end.
-
-Rows 4-7 are a chain: the first dark one is where the sound path breaks, and
-each rules out everything above it. Row 1 dipping means the CPU is being
-starved of memory bandwidth; row 3 non-zero means the video path is.
+Two OSD options are development instruments rather than settings. The **debug
+overlay** draws per-frame counters over the picture — bus cycles, interrupts,
+fetch overruns, sprite overruns and the live pad word — and is documented row
+by row in `docs/debug-overlay.md`. **`Layer1 dx`** selects the offset the VIEW2
+chip applies to its second tilemap layer; `+2` is MAME's value and the default,
+and the alternatives are wrong for every game that behaves.
 
 M0 frame gate, RTL rendered against a frame MAME actually produced:
 
