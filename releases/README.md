@@ -57,8 +57,14 @@ exactly that reason — if they disagree, trust neither and check.**
   number that looks measured. What is still a derivation rather than a
   measurement is how those totals SPLIT — 128 of 384 horizontal and 40 of 264
   vertical — because no `set_raw()` anywhere in the driver pins the blanking.
-  Only a capture from a real PCB would settle that, and nothing on screen
-  depends on it.
+  Only a capture from a real PCB would settle that.
+
+  The RATE itself is not a detail to wave away. This hardware drives its sound
+  from the frame interrupt, so running 60 Hz instead of 59.1856 would play the
+  music 1.4% sharp and the whole game 1.4% fast, and an off-rate core judders
+  against a fixed-60 display — about one repeated frame every seventy. The
+  split affects where the picture sits and how long the game has in vblank to
+  write VRAM, which is a smaller thing but not a nothing.
 - Tier 2 and Tier 3 of the driver are not attempted. Shogun Warriors and B.Rap
   Boys need the CALC3 MCU; Great 1000 Miles Rally, Blood Warrior and Bonk's
   Adventure need TOYBOX and, for GTMR, the KC-002 sprite chip's 8bpp path.
