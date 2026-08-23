@@ -1109,6 +1109,33 @@ always @(posedge clk_sys) begin
 	else if (ym_deliv && !z80_ym_a0) ym_reg_addr <= z80_ym_din;
 end
 
+// WHERE THE 68000 IS, for a game that runs and never enables interrupts.
+// Magical Crystals shows a healthy bus-cycle count and zero interrupts
+// acknowledged, which means it is executing and looping somewhere before it
+// ever sets its interrupt mask. The address it keeps touching says where.
+reg [15:0] bus_a_hi_lat, bus_a_lo_lat;
+reg [15:0] unmap_a_lat;
+reg [15:0] unmap_cnt, unmap_cnt_lat;
+always @(posedge clk_sys) begin
+	if (rst_sys) begin
+		bus_a_hi_lat <= 0; bus_a_lo_lat <= 0;
+		unmap_a_lat  <= 0; unmap_cnt <= 0; unmap_cnt_lat <= 0;
+	end else begin
+		// Sampled on every acknowledged cycle, so what is displayed is
+		// wherever it last was -- which for a tight loop is the loop.
+		// The same edge the bus-cycle counter uses: an acknowledged cycle.
+		if (~DTACKn && !dtack_d) begin
+			bus_a_hi_lat <= {8'd0, eab[23:16]};
+			bus_a_lo_lat <= {eab[15:1], 1'b0};
+		end
+		if (unmapped_hit) begin
+			unmap_a_lat <= {unmapped_addr[15:1], 1'b0};
+			if (!(&unmap_cnt)) unmap_cnt <= unmap_cnt + 1'd1;
+		end
+		if (vbl_rise) begin unmap_cnt_lat <= unmap_cnt; unmap_cnt <= 0; end
+	end
+end
+
 reg [15:0] ym_key_cnt,   ym_key_lat;     // writes to 0x08, KEY ON/OFF
 reg [15:0] ym_tmr_cnt,   ym_tmr_lat;     // writes to 0x14, timer control
 reg [15:0] ym_nz_cnt,    ym_nz_lat;      // clocks where jt51's output is non-zero
@@ -1956,10 +1983,20 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 // zero means the tempo loop runs and no note is ever keyed, which is a
 // different fault from anything chased so far. Both at zero means the writes
 // are not reaching the chip after all.
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? ym_tmr_lat
-                        : (screen_y < 9'd52) ? ym_key_lat
-                        : (screen_y < 9'd58) ? ym_nz_lat
-                                             : z80_stl_lat;
+// WHERE THE CPU IS. The YM census answered its question on the Blaze On
+// board and is no use on Magical Crystals, which has no Z80 at all -- four
+// dark rows that mean nothing. It runs with a healthy bus-cycle count and
+// ZERO interrupts acknowledged, so it is looping before it enables them.
+//
+//   row 4  last bus address, high half (a[23:16])
+//   row 5  last bus address, low half  (a[15:0])
+//   row 6  last UNMAPPED address, low half
+//   row 7  unmapped accesses per frame -- zero means it is not lost, it is
+//          waiting for something that never comes
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? bus_a_hi_lat
+                        : (screen_y < 9'd52) ? bus_a_lo_lat
+                        : (screen_y < 9'd58) ? unmap_a_lat
+                                             : unmap_cnt_lat;
 wire       oki_set = oki_row_val[oki_bit];
 
 // Row 9, magenta: the RAW joystick word for pad 1, live — not a per-frame

@@ -96,12 +96,12 @@ correct and the fault is upstream in the Z80.
 
 | Sub-row | Shows |
 |---|---|
-| 1st | Z80 writes to YM2151 register `0x14` (timer control) per frame. MAME's Wing Force: **~3.9** — this is the driver's tempo loop |
-| 2nd | Z80 writes to YM2151 register `0x08` (KEY ON/OFF) per frame. MAME: **~1.1** — the notes themselves |
-| 3rd | Clocks where **jt51's own output** is non-zero |
-| 4th | 4 MHz Z80 ticks LOST to a ROM-cache stall, per frame, saturating at `ffff` |
+| 1st | Last acknowledged bus address, **high half** — `a[23:16]`, so `0030` is work RAM, `0050` palette, `00c0` inputs |
+| 2nd | Last acknowledged bus address, **low half** — `a[15:0]` |
+| 3rd | Last **unmapped** address, low half |
+| 4th | Unmapped accesses per frame — zero means the CPU is not lost, it is waiting for something that never arrives |
 
-Rows 1 and 2 are counted from the strobe the CHIP sees, not the CPU's bus, and are compared against `tools/mame_ym_regs.lua` run on the same title. Row 1 near 4 with row 2 near 1 means the driver is doing what the oracle's does and the fault is inside jt51 or past it. Row 1 healthy with row 2 at zero means the tempo loop runs and no note is ever keyed. Both at zero means the writes are not reaching the chip.
+Currently pointed at **where the 68000 is**, for Magical Crystals: it runs with a healthy bus-cycle count and **zero interrupts acknowledged**, so it is looping somewhere before it ever enables them, and the address it keeps touching says where. The block previously counted YM2151 register writes, which is meaningless on a board with no Z80.
 
 It has previously carried the CPU's last bus address, the exception vector
 number, the unmapped address and the VIEW2 scroll probe. **Identify rows by

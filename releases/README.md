@@ -106,7 +106,7 @@ The four yellow rows are a **chain**, in order. Each one rules out everything
 above it, so the first dark row is where the sound path breaks. All four lit
 and no audio means the fault is past the chip, in the mixing or output stage.
 
-**That block currently counts YM2151 register writes** — per frame: writes to `0x14` (timer control, MAME's Wing Force does ~3.9), writes to `0x08` (KEY ON/OFF, ~1.1), clocks where jt51's output is non-zero, and 4 MHz ticks lost to a ROM-cache stall. Compare against `tools/mame_ym_regs.lua` on the same title. Earlier arrangements established that the Z80 writes the chip at MAME's rate, so the counts are right and the CONTENT is the open question.
+**That block currently shows where the 68000 is** — per frame: the last acknowledged bus address high half, its low half, the last unmapped address, and the count of unmapped accesses. It is pointed at Magical Crystals, which runs and never enables interrupts.
 
 These rows were added *during* the silent-sound investigation and the bug was
 actually found by reading the RTL, not by reading them — so treat the chain as
