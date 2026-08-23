@@ -183,6 +183,15 @@ quartus: qsf-check nports-check lint test quartus-check
 	@echo "== quartus_sta"
 	@$(QUARTUS_BIN)/quartus_sta Kaneko16 -c Kaneko16 > build/quartus_sta.log 2>&1 \
 	  || { tail -20 build/quartus_sta.log; exit 1; }
+	@# NEGATIVE SLACK MUST FAIL THE BUILD.
+	@# Quartus emits a perfectly good .rbf for a design that misses setup, and
+	@# the 96 MHz SDRAM attempt produced one at -3.023 ns without a murmur.
+	@# docs/mister-integration.md has warned since before this core existed
+	@# about a build that "reports SUCCESS and emits an .rbf while missing
+	@# setup by tens of nanoseconds"; the SDC guard catches the case where
+	@# nothing is timed at all, and this catches the case where it is timed
+	@# and fails.
+	@slack=$$(grep -oE "Worst-case setup slack is -?[0-9.]+" build/quartus_sta.log 	          | tail -1 | grep -oE "\-?[0-9.]+$$"); 	  case "$$slack" in -*) 	    echo "quartus: TIMING FAILED, worst-case setup slack $$slack ns"; 	    echo "         the .rbf is NOT usable; see build/quartus_sta.log"; 	    exit 1;; esac; 	  echo "quartus: timing closed, worst-case setup slack $$slack ns"
 	@echo "quartus: build/quartus/Kaneko16.rbf"
 	@grep -E "Logic utilization|Total block memory bits" build/quartus/Kaneko16.fit.summary || true
 
