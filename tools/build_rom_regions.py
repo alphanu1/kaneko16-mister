@@ -187,7 +187,21 @@ CATEGORY = {
 # sits in releases/ and appears in the /_Arcade/ menu on a stock install;
 # variants go under releases/_alternatives/_<Game>/ and are opt-in. Convention
 # is World or USA if one exists, otherwise Japan.
-PRIMARY = {"explbrkr", "mgcrystl", "wingforc"}
+# A set is PRIMARY when it is the one that belongs in /_Arcade/ and shows up in
+# the arcade menu. Anything else goes to _alternatives/, which MiSTer does NOT
+# scan -- the player copies those by hand.
+#
+# blazeonj was left out on the reasoning that primary means World or USA where
+# one exists, so the Japan set should wait "until a World set turns up". That
+# is backwards for a release: the Japan set is the ONLY Blaze On this core
+# supports, so filing it under _alternatives means the one dumped set of a
+# working game never appears in the menu. releases/README.md has always told
+# players to copy it to /_Arcade/, and it was already tracked there, so the
+# tool disagreed with both the documentation and the shipped layout.
+#
+# The rule is about which of SEVERAL sets leads, not about withholding the only
+# one there is.
+PRIMARY = {"explbrkr", "mgcrystl", "wingforc", "blazeonj"}
 
 # Which games the CORE actually supports today.
 #
@@ -216,7 +230,10 @@ PRIMARY = {"explbrkr", "mgcrystl", "wingforc"}
 # Wing Force has no OKI sound effects and no attract music. That is a stated
 # limitation in the release README, not a bug.
 SUPPORTED = {"explbrkr", "blazeonj", "wingforc", "mgcrystl"}
-ALT_PARENT = {"blazeonj": "Blaze On"}
+# Display name for a set's _alternatives/ directory, used only for sets that
+# are NOT primary. Empty while every supported set is the primary of its game;
+# a World Blaze On or a second Wing Force revision would put an entry back.
+ALT_PARENT = {}
 
 # SDRAM layout: region -> (base, size). This IS the MRA's emission order, and
 # the loader maps it as the identity — stream byte N is SDRAM byte N.
