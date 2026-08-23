@@ -5889,3 +5889,58 @@ CL+1,CL+0,CL+2,CL+3 matched none of the four values they selected.
 Worth stating plainly: there was no symptom driving this. The overrun counters
 read zero after the arbitration tiering, so bandwidth was adequate. This is
 headroom for rotation, Blaze On's second VU-002 and the wider games, not a fix.
+
+### 96 MHz: eighteen dividers on the grant path
+
+The clock split built and missed setup by 3.023 ns, all of it on the memory
+clock:
+
+```
+  general[0]  clk_sdram 96 MHz   -3.023   TNS -124.480
+  general[1]  clk_sys   48 MHz   +1.432
+```
+
+with the critical path `rr_next[1] -> xfer_addr[23]`: the round-robin pointer,
+through arbitration, through the nine-way address mux, into the transfer
+register.
+
+The first reading was that the two-pass urgent arbiter had made the grant path
+too long and needed pipelining -- register the grant, give the address mux its
+own cycle, one extra cycle per transaction. That was **wrong**, and acting on it
+would have been an afternoon of surgery on the most delicate module here.
+
+**IT WAS A MODULO.**
+
+```
+cand = (rr_next + j) % NP;      // NP = 9
+```
+
+Free while NP was 8: the synthesiser drops the high bits of a power of two. A
+REAL DIVIDER the moment the Z80's fetch took NP to 9 -- and eighteen of them on
+one combinational path, nine loop iterations across two arbitration passes.
+
+`rr_next < NP` and `j < NP`, so the sum never reaches 2*NP and one compare and
+subtract is exactly equivalent:
+
+```
+                     before        after
+  clk_sdram 96 MHz   -3.023 ns   +0.502 ns
+  clk_sys   48 MHz   +1.432 ns   +1.393 ns
+```
+
+3.5 ns from deleting eighteen dividers, with kaneko_sdram's 133,020 checks
+passing unchanged because the arithmetic is identical.
+
+The lesson is narrower than "measure before optimising", because the
+measurement was right -- the path really was rr_next to xfer_addr. It is that
+**`%` or `/` by anything that is not a power of two is a divider**, and NP is
+exactly the kind of constant that quietly stops being one. Adding a port looked
+like a two-line change and had a synthesis cliff behind it, in the same way
+that adding a port turned out to have a three-bit tag behind it.
+
+Also worth keeping: the failing build emitted a perfectly ordinary .rbf and
+said nothing. `make quartus` refuses on negative slack now. And when that guard
+was first added it was committed alongside a revert, so reverting the revert
+silently took the guard with it -- caught only by checking the Makefile after
+the build printed no slack line, which is the same "verify the artefact
+changed" rule this repository keeps relearning.
