@@ -49,9 +49,16 @@ exactly that reason — if they disagree, trust neither and check.**
 - **Wing Force has no sound effects**, and no music in the attract demo. Its
   in-game music is correct. The OKI on that board hangs off the Z80's I/O ports
   rather than the 68000's bus, and that path is still being chased.
-- Screen timing is not PCB-verified (384x264 at 6 MHz, 59.1856 Hz). The driver
-  uses `set_refresh_hz(60)` with no `set_raw()`, so there is nothing in MAME to
-  check it against; a hardware recording would settle it.
+- Screen **blanking** is not PCB-verified. The refresh rate is corroborated:
+  6 MHz over 384x264 totals gives 59.1856 Hz, and MAME's only precise figure in
+  this driver is `set_refresh_hz(59.1854)` — on `wingforc` and `shogwarr`, four
+  decimal places apart from ours. Its other entries are round placeholders
+  (`60`, and `59` for Explosive Breaker), so the agreement is with the one
+  number that looks measured. What is still a derivation rather than a
+  measurement is how those totals SPLIT — 128 of 384 horizontal and 40 of 264
+  vertical — because no `set_raw()` anywhere in the driver pins the blanking.
+  Only a capture from a real PCB would settle that, and nothing on screen
+  depends on it.
 - Tier 2 and Tier 3 of the driver are not attempted. Shogun Warriors and B.Rap
   Boys need the CALC3 MCU; Great 1000 Miles Rally, Blood Warrior and Bonk's
   Adventure need TOYBOX and, for GTMR, the KC-002 sprite chip's 8bpp path.
