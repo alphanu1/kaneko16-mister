@@ -9,7 +9,7 @@
 Which is which comes from build_rom_regions.py's PRIMARY / ALT_PARENT tables,
 so there is one description of it rather than a rule encoded twice.
 """
-import os, shutil, sys, xml.etree.ElementTree as ET
+import os, re, shutil, sys, xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from build_rom_regions import PRIMARY, ALT_PARENT, SUPPORTED   # noqa: E402
@@ -34,6 +34,25 @@ def main():
         except ET.ParseError:
             print(f"stage_release: {f} is not valid XML", file=sys.stderr)
             return 1
+
+        # THE SETNAME IS NOT ENOUGH OF A FILTER.
+        #
+        # build/mra accumulates diagnostic MRAs -- EB-A-cfg-after.mra,
+        # EB-B-no-cfg.mra, ZZ-TEST-EB-as-game01.mra were all sitting there --
+        # and every one of them carries a REAL setname, so a check on setname
+        # alone waves them straight through. They were staged into releases/
+        # looking exactly like shippable games, which is the last place a
+        # debugging artefact should turn up.
+        #
+        # A release MRA is one this tool would itself have named. Anything
+        # else is somebody's experiment.
+        root = ET.parse(path).getroot()
+        title = root.findtext("name") or ""
+        expected = re.sub(r'[/\\:*?"<>|]', "-", title).strip() + ".mra"
+        if f != expected:
+            print(f"  skipping {f} — not a release name "
+                  f"(its <name> says {expected!r})")
+            continue
 
         if setname not in SUPPORTED:
             # See build_rom_regions.SUPPORTED: an MRA for a game the core

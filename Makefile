@@ -310,19 +310,39 @@ eetest:
 # otherwise Japan — so Blaze On's only dumped set here is the Japan one and it
 # sits under _alternatives until a World set turns up.
 #
-# releases/ is gitignored for now: the .rbf changes every build and this core is
-# not ready to publish. Un-ignore it when there is a version worth tagging.
+# `release` DOES NOT COPY THE BITSTREAM, and it used to.
+#
+# It ran `cp build/quartus/Kaneko16.rbf releases/...` unconditionally, so any
+# run of it silently promoted whatever had last been built -- verified or not
+# -- over the one somebody had actually played. That is exactly the failure
+# the releases/ rule exists to prevent, and it fired the first time this
+# target was run after the rule was written.
+#
+# Promoting a bitstream is now a separate, deliberate step:
+#
+#     make release       stage the MRAs only
+#     make release-rbf   promote the bitstream, AFTER a person has played
+#                        every supported game on that exact build
 .PHONY: release
 release:
-	@test -f build/quartus/Kaneko16.rbf || { \
-	  echo "release: no bitstream — run 'make quartus' first"; exit 1; }
 	@mkdir -p releases/_alternatives
-	@d=$$(date +%Y%m%d); cp build/quartus/Kaneko16.rbf releases/Kaneko16_$$d.rbf; \
-	  echo "  releases/Kaneko16_$$d.rbf"
 	@for gf in $(GATE_GAMES); do g=$${gf%%:*}; \
 	  $(MAKE) --no-print-directory mra SET=$$g >/dev/null 2>&1 || true; done
 	@tools/stage_release.py build/mra releases
+	@echo '  MRAs staged. The bitstream is NOT copied -- see make release-rbf.'
 	@find releases -type f | sort | sed 's/^/  /'
+
+.PHONY: release-rbf
+release-rbf:
+	@test -f build/quartus/Kaneko16.rbf || { \
+	  echo 'release-rbf: no bitstream — run make quartus first'; exit 1; }
+	@echo 'Promoting build/quartus/Kaneko16.rbf into releases/.'
+	@echo "md5: $$(md5sum build/quartus/Kaneko16.rbf | cut -d' ' -f1)"
+	@echo 'Only do this once a PERSON has played every supported game on THIS'
+	@echo 'build. One that lints, gates and closes timing is only a candidate.'
+	@d=$$(date +%Y%m%d); cp build/quartus/Kaneko16.rbf releases/Kaneko16_$$d.rbf; \
+	  echo "  releases/Kaneko16_$$d.rbf"
+	@echo '  then: git add releases/ && git ls-files releases/  <- CHECK TRACKED'
 
 # ---------------------------------------------------------------- deploy
 # Copy the core and its MRAs to a MiSTer and verify the checksum. Override the
