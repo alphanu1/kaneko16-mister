@@ -2332,23 +2332,53 @@ wire       ovr_set = overrun_lat[ovr_bit];
 // diagnosed and they stay in the build for the next time something stops, but
 // they sit on top of the picture, so the picture wins unless asked otherwise.
 wire dbg_on   = status[11];
-wire in_dbg   = dbg_on && (in_alive_row || in_irq_row || in_ovr_row || in_oki_row
-                           || in_spr_row || in_joy_row
-                           || in_unm_row || in_uad_row)
-              && (screen_x[2:0] != 3'd7);
-wire dbg_set  = in_alive_row ? alive_set : in_irq_row ? irq_set
+// A SOLID BACKDROP, because three readings in a row were unreadable.
+//
+// The overlay used to paint only where a block is, so the game showed through
+// the one-column gap between blocks and through every row's background. On a
+// black screen that is fine and it is how Magical Crystals was diagnosed. Over
+// a bright, busy picture -- Wing Force's ranking screen, a playfield full of
+// sprites -- the blocks blend into the artwork and the readings are guesses.
+//
+// It now covers a solid rectangle over the whole readout: the panel is opaque
+// black, the blocks are drawn on it, and nothing behind it is visible. The
+// measurements this exists to take are taken on BUSY screens by definition,
+// since that is where the bandwidth goes, so legibility over artwork is not a
+// nicety.
+wire in_dbg_panel = dbg_on
+                 && (screen_y >= 9'd12) && (screen_y < 9'd108)
+                 && (screen_x < 9'(20 * ALV_BIT_W));
+
+wire in_dbg_blk = (in_alive_row || in_irq_row || in_ovr_row || in_oki_row
+                   || in_spr_row || in_joy_row
+                   || in_unm_row || in_uad_row)
+                && (screen_x[2:0] != 3'd7);
+
+wire in_dbg   = dbg_on && in_dbg_panel;
+wire dbg_bit  = in_alive_row ? alive_set : in_irq_row ? irq_set
               : in_ovr_row ? ovr_set : in_spr_row ? spr_set
               : in_joy_row ? joy_set
               : in_unm_row ? unm_set : in_uad_row ? uad_set : oki_set;
+// Outside a block the panel is black; inside, the bit decides lit or dark red.
+wire dbg_set  = in_dbg_blk && dbg_bit;
+wire dbg_dark = in_dbg_blk && !dbg_bit;
+
+// NIBBLE SEPARATORS, so a sixteen-bit row reads as four hex digits instead of
+// sixteen blocks to be counted. Every fourth gap column is dim grey rather
+// than black. Counting to sixteen off a photograph is where the misreadings
+// have come from, and hex is what every number in the notes is written in.
+wire dbg_tick = dbg_on && in_dbg_panel && !in_dbg_blk
+              && (screen_x[2:0] == 3'd7) && (screen_x[4:3] == 2'd3);
 
 wire [7:0] dbg_r = dbg_set ? ((in_irq_row || in_oki_row || in_spr_row
                                 || in_joy_row || in_unm_row) ? 8'hff : 8'h00)
-                          : 8'h40;
+                 : dbg_dark ? 8'h40 : dbg_tick ? 8'h30 : 8'h00;
 wire [7:0] dbg_g = dbg_set ? (in_irq_row ? 8'hc0 : in_unm_row ? 8'h80
                               : (in_joy_row || in_uad_row) ? 8'h00 : 8'hff)
-                           : 8'h00;
-wire [7:0] dbg_b = dbg_set && (in_ovr_row || in_spr_row || in_joy_row
-                               || in_uad_row) ? 8'hff : 8'h00;
+                 : dbg_tick ? 8'h30 : 8'h00;
+wire [7:0] dbg_b = (dbg_set && (in_ovr_row || in_spr_row || in_joy_row
+                                || in_uad_row)) ? 8'hff
+                 : dbg_tick ? 8'h30 : 8'h00;
 
 // The game picture and the palette swatches both come out of the palette RAM,
 // so they share the same decode.

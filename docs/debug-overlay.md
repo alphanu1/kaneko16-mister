@@ -14,6 +14,17 @@ fix it here in the same commit.
 
 ## Reading a row
 
+The readout sits on an **opaque black panel**, so nothing of the game shows
+through it. It did not always: it used to paint only where a block is, and over
+a bright picture the blocks blended into the artwork. Three readings in a row
+were guesses before that was fixed, and the measurements this exists to take
+are taken on busy screens by definition.
+
+**Every fourth gap column is dim grey.** Those are nibble separators: read a
+16-bit row as four hex digits rather than counting sixteen blocks. Every number
+in the notes is written in hex for the same reason.
+
+
 Each row is a **binary number, most significant bit on the left**, one block
 per bit. Lit is 1. A clear bit is **dark red, not black**, so "the count is
 zero" is distinguishable from "this readout is not being drawn at all" — those
