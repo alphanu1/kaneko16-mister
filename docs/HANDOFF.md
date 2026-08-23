@@ -84,6 +84,50 @@ looks like support and fails undiagnosably.
 
 ---
 
+## Tier 2 — where it stands, 2026-08-24
+
+Shogun Warriors and B.Rap Boys. Both romsets verify, both MRAs match their
+stream image byte for byte, and all six games still do. The gate is green
+throughout: lint, nports-check and test.
+
+**Done and verified in simulation:**
+
+| | |
+|---|---|
+| ROM layouts | transcribed from `ROM_START` for both sets |
+| SDRAM map | shogwarr 24.4 MB, brapboys 15.4 MB |
+| Memory map | `shogwarr_map` in full — work RAM 100000, palette 380000, sprite RAM 580000, VIEW2 600000, watchdog a80000, inputs b80000 |
+| Video | one VIEW2 chip, VU-002 sprites, `set_offset(0x33,-8)`, priorities {1,3,5,7}, `set_offsets(0xa00,-0x40)` |
+| Second OKI | ports 400001 and 480001, SDRAM port 9, shared bank register at e00001 |
+| Hit calculator | `kaneko_hit`, type 1, fuzzed 202,615 checks / 0 fails |
+| MCU RAM | 64 KB at 200000, byte-enabled, two arrays so it infers as M10K |
+
+**Not started: the CALC3 simulation itself.** It is the largest single piece
+and it is what makes the games run at all — everything above is inert without
+it.
+
+`mcu_run` waits on all four command bits, then reads a command word from the
+shared 64 KB RAM. `0xff` is init: eight parameters read out, a ROM checksum
+written back, 64 words of EEPROM copied in. Every other command drives a
+table-transfer engine that decrypts blocks out of `calc3_rom`. In RTL that is a
+sequencer with read and write access to the MCU RAM, plus the decryption
+machinery, and the machinery is most of the ~1,690 lines.
+
+Two things to know before starting it:
+
+- **The internal ROM is not dumped**, so there is no low-level option. This is
+  a port of MAME's high-level simulation and its correctness standard is
+  agreement with that simulation, nothing more.
+- **B.Rap Boys needs hit type 2** despite being the same PCB with the same
+  chip. MAME says that means at least one implementation must be wrong. Do not
+  assume the two games share anything not shown to be shared.
+
+**Also outstanding for the board, smaller:** the CALC3 command-port decode at
+280000/290000/2b0000/2d0000, and per-game input words — shogwarr reads P1, P2,
+SYSTEM and UNK at b80000, which have not been transcribed bit by bit yet.
+
+---
+
 ## Open questions that carry real risk
 
 1. **Tier 3 needs the SDRAM clock at 144 MHz first.** Measured on hardware
