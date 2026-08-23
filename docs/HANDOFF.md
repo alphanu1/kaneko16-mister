@@ -96,6 +96,19 @@ looks like support and fails undiagnosably.
    before writing any of the bitmap move. Tier 2 is unaffected -- it uses
    VU-002 and the bitmap already built.
 
+1. **Rotation has no setting that is correct on a physically vertical
+   monitor.** Reported from hardware 2026-08-23: the OSD offers Off, Auto
+   (per game), CW and CCW, and on a monitor turned to portrait the picture
+   comes out rotated in every position, none of them right.
+
+   Worth thinking through rather than adding a fourth option blindly. On a
+   portrait monitor a ROT90 game wants NO rotation, while a ROT0 game wants
+   90 degrees -- the opposite of what the same settings mean on a landscape
+   monitor. So the option may need to express the DISPLAY's orientation
+   rather than the rotation to apply, or Auto needs to know the display is
+   turned. MiSTer's own `video_rotate` and the `ROTATE_CCW`/`no_rotate` OSD
+   conventions in other cores are the reference to check first.
+
 1. **Screen timing is not PCB-verified.** MAME uses `set_refresh_hz(60)` with
    no `set_raw()`. We run 384x264 at 6 MHz, 59.1856 Hz. No amount of simulation
    resolves this — it needs a hardware reference or a PCB capture. Wing Force's
