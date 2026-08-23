@@ -303,12 +303,12 @@ eetest:
 #
 #   releases/Kaneko16_YYYYMMDD.rbf        the bitstream, dated
 #   releases/<Game> (Region).mra          one primary MRA per game
-#   releases/_alternatives/_<Game>/...    regional variants, opt-in
+#   (no _alternatives/ at present — every supported set ships at the top level)
 #
-# The primary MRA is what appears in /_Arcade/ on a stock install; variants are
-# copied by hand. Convention for "primary" is World or USA if one exists,
-# otherwise Japan — so Blaze On's only dumped set here is the Japan one and it
-# sits under _alternatives until a World set turns up.
+# Everything in releases/ appears in /_Arcade/ on a stock install. There are no
+# alternatives at present: a set the core supports is a game a player should be
+# able to find, and _alternatives/ is not scanned by MiSTer. stage_release
+# fails rather than demote one.
 #
 # `release` DOES NOT COPY THE BITSTREAM, and it used to.
 #
@@ -325,7 +325,7 @@ eetest:
 #                        every supported game on that exact build
 .PHONY: release
 release:
-	@mkdir -p releases/_alternatives
+	@mkdir -p releases
 	@for gf in $(GATE_GAMES); do g=$${gf%%:*}; \
 	  $(MAKE) --no-print-directory mra SET=$$g >/dev/null 2>&1 || true; done
 	@tools/stage_release.py build/mra releases

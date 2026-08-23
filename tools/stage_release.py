@@ -3,8 +3,11 @@
 # Kaneko 16-bit arcade core for MiSTer FPGA — Copyright (C) 2026 alphanu1
 """Sort generated MRAs into the MiSTer release layout.
 
-    releases/<Game> (Region).mra          primary, appears in /_Arcade/
-    releases/_alternatives/_<Game>/...    variants, copied by hand
+    releases/<Game> (Region).mra          appears in /_Arcade/
+
+Every supported set goes at the top level. There are no alternatives at
+present, and a supported set missing from PRIMARY is an error rather than a
+quiet demotion -- see the note at the check.
 
 Which is which comes from build_rom_regions.py's PRIMARY / ALT_PARENT tables,
 so there is one description of it rather than a rule encoded twice.
@@ -60,14 +63,28 @@ def main():
             print(f"  skipping {f} — core does not support {setname} yet")
             continue
 
-        if setname in PRIMARY:
-            out = os.path.join(dst, f)
-        else:
-            # Anything not named primary is a variant. Grouping by the game's
-            # display name rather than the set name, because that is what the
-            # _alternatives directories are named after.
-            parent = ALT_PARENT.get(setname, setname)
-            out = os.path.join(dst, "_alternatives", f"_{parent}", f)
+        if setname not in PRIMARY:
+            # EVERY SUPPORTED SET IS RELEASED AT THE TOP LEVEL. There are no
+            # alternatives right now, and this raises rather than quietly
+            # filing one away.
+            #
+            # MiSTer does not scan _alternatives/ -- a player copies from it by
+            # hand -- so a set that lands there is a game the core supports and
+            # nobody can find. That is exactly what happened to Blaze On: it is
+            # the only dumped set of a fully working game, it was missing from
+            # PRIMARY, and it was staged out of the menu while both the release
+            # notes and the already-tracked file said it belonged in /_Arcade/.
+            #
+            # If a genuine variant ever appears -- a World Blaze On alongside
+            # the Japan one -- decide THEN which leads, put it in PRIMARY and
+            # the other in ALT_PARENT, and restore the branch this replaced.
+            print(f"stage_release: {setname} is supported but not in PRIMARY.\n"
+                  f"  Every supported set is released at the top level, so this\n"
+                  f"  would have gone to _alternatives/ where MiSTer never looks.\n"
+                  f"  Add it to PRIMARY in build_rom_regions.py.", file=sys.stderr)
+            return 1
+
+        out = os.path.join(dst, f)
         os.makedirs(os.path.dirname(out), exist_ok=True)
         shutil.copy2(path, out)
         staged += 1
