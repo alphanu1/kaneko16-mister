@@ -273,7 +273,7 @@ bustrace: regions
 	    -skip_gameinfo -autoboot_delay 0 -seconds_to_run 120 \
 	    -video none -sound none -nothrottle 2>&1 | grep "bus trace"
 	@echo "== diff"
-	@tools/diff_bus_trace.py $(TRACE_DIR)/ours.txt $(TRACE_DIR)/mame.txt
+	@tools/diff_bus_trace.py $(TRACE_DIR)/ours.txt $(TRACE_DIR)/mame.txt $(SET)
 
 # ------------------------------------------------------- eeprom fidelity
 # Replay MAME's own CLK/DI/CS sequence against kaneko_eeprom93c46 and check

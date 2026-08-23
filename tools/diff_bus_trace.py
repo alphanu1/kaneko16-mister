@@ -41,41 +41,91 @@ def fmt(rec):
     return f"{a:06x} {rw} {d:04x} .{lane}"
 
 
-def region(a):
-    """Name the address as bakubrkr_map does (kaneko16.cpp).
+# The memory maps, transcribed from kaneko16.cpp -- NOT shared, NOT guessed.
+#
+# A previous version guessed the VIEW2 and palette windows from the mgcrystl
+# map while tracing bakubrkr; nothing was reported there, so the census looked
+# clean while naming the wrong board. It was then pinned to bakubrkr_map, which
+# made the same mistake in the other direction the moment mgcrystl was traced:
+# its palette is at 500000 and its sprite RAM at 700000, exactly the two
+# windows bakubrkr swaps, so every count landed under a confidently wrong name.
+#
+# Hard rule 9. The map is a per-game fact and belongs in a per-game table.
+MAPS = {
+    "bakubrkr": [
+        (0x100000, 0x110000, "work ram  100000-10ffff"),
+        (0x500000, 0x504000, "view2-0 v 500000-503fff"),
+        (0x580000, 0x584000, "view2-1 v 580000-583fff"),
+        (0x600000, 0x602000, "spriteram 600000-601fff"),
+        (0x700000, 0x701000, "palette   700000-700fff"),
+        (0xa80000, 0xa80002, "watchdog  a80000"),
+        (0xe00000, 0xe00008, "inputs    e00000-e00007"),
+    ],
+    "mgcrystl": [
+        (0x300000, 0x310000, "work ram  300000-30ffff"),
+        (0x500000, 0x501000, "palette   500000-500fff"),
+        (0x600000, 0x604000, "view2-0 v 600000-603fff"),
+        (0x680000, 0x684000, "view2-1 v 680000-683fff"),
+        (0x700000, 0x702000, "spriteram 700000-701fff"),
+        (0xa00000, 0xa00002, "watchdog  a00000"),
+        (0xc00000, 0xc00006, "inputs    c00000-c00005"),
+    ],
+}
 
-    Transcribed from the driver, not guessed. The first version of this guessed
-    the VIEW2 and palette windows from the mgcrystl map and put them at 400000
-    and 300000; nothing was reported there so the census looked clean while
-    naming the wrong board.
+# Windows both maps agree on.
+COMMON = [
+    (0x400000, 0x400020, "ym2149-0  400000-40001f"),
+    (0x400200, 0x400220, "ym2149-1  400200-40021f"),
+    (0x400400, 0x400402, "oki       400401"),
+    (0x800000, 0x800020, "view2-0 r 800000-80001f"),
+    (0x900000, 0x900020, "sprite  r 900000-90001f"),
+    (0xb00000, 0xb00020, "view2-1 r b00000-b0001f"),
+    (0xd00000, 0xd00002, "lockout/eeprom d00000-1"),
+]
+
+# Addresses the traced set's own map does not cover. Named rather than lumped
+# into OTHER so a genuinely new one stands out.
+UNMAPPED = {
+    "bakubrkr": (0xc00000, 0xe40000, 0xe80000, 0xec0000),
+    "mgcrystl": (0xe00000, 0xe40000, 0xe80000, 0xec0000),
+}
+
+
+def region_for(setname):
+    """Return a namer for this set. Raises rather than defaulting.
+
+    A set with no map has no correct answer, and substituting another game's
+    produced the exact failure above: plausible names over the wrong board.
     """
-    if a < ROM_END:                return "rom       000000-07ffff"
-    if 0x100000 <= a < 0x110000:   return "work ram  100000-10ffff"
-    if 0x400000 <= a < 0x400020:   return "ym2149-0  400000-40001f"
-    if 0x400200 <= a < 0x400220:   return "ym2149-1  400200-40021f"
-    if a == 0x400400:              return "oki       400401"
-    if 0x500000 <= a < 0x504000:   return "view2-0 v 500000-503fff"
-    if 0x580000 <= a < 0x584000:   return "view2-1 v 580000-583fff"
-    if 0x600000 <= a < 0x602000:   return "spriteram 600000-601fff"
-    if 0x700000 <= a < 0x701000:   return "palette   700000-700fff"
-    if 0x800000 <= a < 0x800020:   return "view2-0 r 800000-80001f"
-    if 0x900000 <= a < 0x900020:   return "sprite  r 900000-90001f"
-    if 0xa80000 <= a < 0xa80002:   return "watchdog  a80000"
-    if 0xb00000 <= a < 0xb00020:   return "view2-1 r b00000-b0001f"
-    if 0xd00000 <= a < 0xd00002:   return "lockout/eeprom d00000-1"
-    if 0xe00000 <= a < 0xe00008:   return "inputs    e00000-e00007"
-    # Nothing in bakubrkr_map covers these and nothing in MAME's map does
-    # either — see findings. Named rather than lumped in with "other" so a
-    # genuinely new one stands out.
-    if a in (0xc00000, 0xe40000, 0xe80000, 0xec0000):
-        return f"unmapped  {a:06x}"
-    return f"OTHER     {a & 0xfc0000:06x}"
+    if setname not in MAPS:
+        raise SystemExit(
+            f"diff_bus_trace: no memory map for {setname!r}. "
+            f"Known: {', '.join(sorted(MAPS))}. Transcribe it from "
+            "kaneko16.cpp rather than reusing another game's -- the palette "
+            "and VIEW2 windows move between maps."
+        )
+    windows = MAPS[setname] + COMMON
+    unmapped = UNMAPPED.get(setname, ())
+
+    def region(a):
+        if a < ROM_END:
+            return "rom       000000-07ffff"
+        for lo, hi, name in windows:
+            if lo <= a < hi:
+                return name
+        if a in unmapped:
+            return f"unmapped  {a:06x}"
+        return f"OTHER     {a & 0xfc0000:06x}"
+
+    return region
 
 
 def main():
-    if len(sys.argv) < 3:
-        print("usage: diff_bus_trace.py <ours.txt> <mame.txt>", file=sys.stderr)
+    if len(sys.argv) < 4:
+        print("usage: diff_bus_trace.py <ours.txt> <mame.txt> <setname>",
+              file=sys.stderr)
         return 2
+    region = region_for(sys.argv[3])
     ours, mame = load(sys.argv[1]), load(sys.argv[2])
     if not ours or not mame:
         print(f"empty trace: ours={len(ours)} mame={len(mame)}", file=sys.stderr)

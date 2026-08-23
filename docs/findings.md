@@ -6149,3 +6149,60 @@ was counting: check the instrument models the thing, not the outcome.
 
 The three working games are symmetric, take the first branch only, and their
 MRAs are byte-identical after the change.
+
+### Magical Crystals: the 68000 matches MAME over a million accesses, 2026-08-23
+
+After the MRA fix gave it a program ROM, `make bustrace SET=mgcrystl
+TRACE_N=1000000` reports:
+
+```
+ours 1000000 accesses, 138246 after dropping instruction fetches
+mame 1000000 accesses, 138247 after dropping instruction fetches
+MATCH over all 138246 compared accesses
+
+palette   500000-500fff       512     512
+view2-0 v 600000-603fff     32768   32768
+spriteram 700000-701fff     41193   41193
+work ram  300000-30ffff     63745   63746
+```
+
+So the memory map, the ROM contents and the CPU are correct for this game, and
+the remaining fault is downstream of the bus. On hardware it reaches its
+self-test screen -- which means tile fetch, palette and the tilemap path all
+work -- and then goes black.
+
+**A million accesses is only about 0.7 seconds of 68000 time**, so this trace
+covers boot and the start of the self-test, not the transition that goes black.
+It bounds the fault rather than finding it.
+
+Hardware observation the same day: at the default SDRAM capture depth of CL+4
+the screen is black, and at CL+5 there is sound and garbage video. The other
+three games are correct at CL+4, and capture depth is global, so CL+5 is not a
+fix -- but the pair says the video and OKI fetches are landing on wrong data
+while the CPU's fetches are right at both depths.
+
+### The bus-trace categoriser named the wrong board, twice
+
+`diff_bus_trace.py` printed a per-region census using ONE hardcoded map. Its
+own docstring recorded the first incident -- an early version guessed the
+mgcrystl windows while tracing bakubrkr, reported nothing there, and looked
+clean while naming the wrong board. The fix pinned it to `bakubrkr_map`, which
+made the identical mistake in the other direction as soon as mgcrystl was
+traced:
+
+| address | bakubrkr | mgcrystl |
+|---|---|---|
+| 500000 | VIEW2-0 VRAM | **palette** |
+| 600000 | sprite RAM | **VIEW2-0 VRAM** |
+| 700000 | palette | **sprite RAM** |
+
+Those are exactly the windows the two maps swap, so every count appeared under
+a confidently wrong name: MC's 41,193 sprite-RAM accesses were reported as
+"palette", and its 512 palette writes as "view2-0 v". The numbers were right
+and every label was wrong.
+
+It now takes the set name and raises for a set it has no map for, rather than
+substituting another game's. Hard rule 9 applies to instruments as much as to
+the core -- this is the third one this week, after the OKI overlay row that
+counted the wrong strobe and the boot harness that pinned Explosive Breaker's
+sample region.
