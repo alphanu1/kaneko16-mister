@@ -28,12 +28,37 @@ if {[llength $core_clks] == 0} {
     post_message -type error "Kaneko16.sdc: refusing to constrain a design that is not timed."
 }
 
-# The three outputs are unrelated by construction -- 80 MHz SDRAM, 32 MHz video,
-# 25 MHz i960 -- and sys_top.sdc puts them in ONE group, which times them against
-# each other. Cut them explicitly. Nothing crosses between them in this step;
-# doing it now means the crossings that arrive later are explicit rather than
-# accidentally timed.
-set_clock_groups -asynchronous \
-  -group [get_clocks -nowarn {*|pll|pll_inst|altera_pll_i|general[0].*|divclk}] \
-  -group [get_clocks -nowarn {*|pll|pll_inst|altera_pll_i|general[1].*|divclk}] \
-  -group [get_clocks -nowarn {*|pll|pll_inst|altera_pll_i|general[2].*|divclk}]
+# THERE IS DELIBERATELY NO set_clock_groups FOR THE CORE PLL OUTPUTS.
+#
+# There used to be one, cutting general[0..2] as -asynchronous. It arrived with
+# this file from the Model 2 core and carried that core's comment: "80 MHz
+# SDRAM, 32 MHz video, 25 MHz i960 ... nothing crosses between them". Both
+# halves were false here, and Quartus said so on every build:
+#
+#   Warning (332049): Ignored set_clock_groups at Kaneko16.sdc(36): Argument
+#   -group with value [get_clocks {*|...|general[1].*|divclk}] contains zero
+#   elements
+#
+# Groups 1 and 2 matched nothing, because all three outputs had identical
+# settings and the IP collapsed them into ONE counter. One clock cannot be cut
+# from itself, so the whole statement was a no-op and nobody noticed.
+#
+# clk_sdram is 96 MHz and clk_sys is 48 MHz now, both from a 480 MHz VCO by
+# integer divides, so they are phase-aligned and SYNCHRONOUS. The port
+# handshakes in kaneko_sdram genuinely cross between them. Cutting them would
+# tell the fitter to ignore exactly the paths this split depends on -- and the
+# build would pass while the hardware failed. sys_top.sdc already groups the
+# core PLL outputs away from the HDMI and audio PLLs, which is what is wanted:
+# cut from unrelated clocks, timed against each other.
+#
+# The guard below is the same idea as the one above. If the two ever collapse
+# back into one counter -- which takes only two outputs sharing a frequency and
+# phase -- the design silently stops being two domains.
+set sdram_clk [get_clocks -nowarn {*|pll|pll_inst|altera_pll_i|general[0].*|divclk}]
+set core_clk  [get_clocks -nowarn {*|pll|pll_inst|altera_pll_i|general[1].*|divclk}]
+if {[llength $sdram_clk] == 0 || [llength $core_clk] == 0} {
+    post_message -type error \
+      "Kaneko16.sdc: expected TWO core PLL output counters, general[0] (96 MHz\
+       SDRAM) and general[1] (48 MHz core), and did not find both. Outputs with\
+       identical frequency and phase share one counter -- see rtl/pll/pll.v."
+}

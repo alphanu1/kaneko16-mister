@@ -442,7 +442,19 @@ module kaneko_sdram #(
   logic [$clog2(NP)-1:0] rr_grant;
   logic                  rr_valid;
 
-  int unsigned j, cand;
+  // ROTATION BY CONDITIONAL SUBTRACT, NOT BY MODULO.
+  //
+  // This was `cand = (rr_next + j) % NP`, which is free when NP is a power of
+  // two -- the synthesiser drops the high bits -- and is a REAL DIVIDER when it
+  // is not. Adding the Z80's fetch took NP from 8 to 9 and turned eighteen of
+  // these (nine iterations, two passes) into hardware on one combinational
+  // path. It cost the 96 MHz build 3.023 ns of setup on
+  // rr_next[1] -> xfer_addr[23], which is the whole of the memory clock's
+  // failure.
+  //
+  // rr_next < NP and j < NP, so the sum is always below 2*NP and one compare
+  // and subtract is exactly equivalent, at the price of an adder.
+  int unsigned j, sum, cand;
   always_comb begin
     rr_valid = 1'b0;
     rr_grant = rr_next;
@@ -452,7 +464,8 @@ module kaneko_sdram #(
     // ladder form is NP copies of the same priority chain and every copy is a
     // chance to mistype an index.
     for (j = 0; j < NP; j = j + 1) begin
-      cand = (rr_next + j) % NP;
+      sum  = rr_next + j;
+      cand = (sum >= NP) ? (sum - NP) : sum;
       if (URGENT[cand] && pend[cand] && !inflight[cand] && !rr_valid) begin
         rr_valid = 1'b1;
         rr_grant = ($clog2(NP))'(cand);
@@ -460,7 +473,8 @@ module kaneko_sdram #(
     end
     // Only once nothing with a deadline is waiting.
     for (j = 0; j < NP; j = j + 1) begin
-      cand = (rr_next + j) % NP;
+      sum  = rr_next + j;
+      cand = (sum >= NP) ? (sum - NP) : sum;
       if (!URGENT[cand] && pend[cand] && !inflight[cand] && !rr_valid) begin
         rr_valid = 1'b1;
         rr_grant = ($clog2(NP))'(cand);

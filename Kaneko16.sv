@@ -67,7 +67,7 @@ localparam CONF_STR = {
 	"Kaneko16;;",
 	"-;",
 	"O[8],Aspect ratio,4:3,16:9;",
-	"O[5:4],SDRAM capture,CL+1,CL+0,CL+2,CL+3;",
+	"O[5:4],SDRAM capture,CL+5,CL+3,CL+2,CL+4;",
 	"O[9],Show,Game,Palette+CPU;",
 	"O[11],Debug overlay,Off,On;",
 	"-;",
@@ -88,7 +88,7 @@ localparam CONF_STR = {
 // ------------------------------------------------------------------ clocks
 // One clock for the core AND the SDRAM: no clock-domain crossing in this
 // build. See rtl/pll/pll.v.
-wire clk_sys, clk_spare, pll_locked;
+wire clk_sys, clk_sdram_ps, pll_locked;
 wire clk_sdram;
 
 pll pll
@@ -97,7 +97,7 @@ pll pll
 	.rst      (0),
 	.outclk_0 (clk_sdram),
 	.outclk_1 (clk_sys),
-	.outclk_2 (clk_spare),
+	.outclk_2 (clk_sdram_ps),
 	.locked   (pll_locked)
 );
 
@@ -373,7 +373,10 @@ assign SDRAM_DQ  = sd_dq_oe ? sd_dq_o : 16'bZ;
 // The device is clocked on the inverse of the controller clock. That is why
 // the capture-depth default differs between the model and the board, and why
 // the OSD exposes the setting at all — see kaneko_sdram.sv.
-assign SDRAM_CLK = ~clk_sdram;
+// From the PLL's own phase-shifted output, not an inverter. `~clk_sdram` put a
+// fabric inverter in the path to the pin; this takes the dedicated clock route,
+// which is the whole reason for spending a PLL output on it.
+assign SDRAM_CLK = clk_sdram_ps;
 
 // Declared above the controller because its port gating uses rom_loaded.
 wire rom_loaded, ldr_overflow;
@@ -397,7 +400,48 @@ wire rom_loaded, ldr_overflow;
 //
 // 8'b0011_1111: tiles, the CPU and the OKI first; only the sprite engine, which
 // has a whole frame to fill its bitmap, waits.
-kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300),
+// T_REFI is in clk cycles and clk is 96 MHz now, so the 48 MHz value of 300
+// would refresh twice as often as needed and spend the bandwidth this change
+// exists to recover. 8192 rows per 64 ms is one per 750 cycles at 96 MHz; 700
+// keeps margin for a transfer in flight when the timer fires.
+// ------------------------------------------------ 48 MHz side -> 96 MHz side
+//
+// The controller runs at twice the core clock now, so every requester -- four
+// tile layers, the 68000, the OKI, two sprite ports and the Z80 -- is a slow
+// master talking to a fast servant. kaneko_sdram was written for exactly this
+// (its ACK_HOLD is documented as "2 for a clk/2 requester") but two hazards sit
+// in the gap, and this adapter is the tested answer to both: a request held
+// across its own acknowledge must not be taken twice, and an acknowledge must
+// span exactly one slow cycle. sim/mem/tb_kaneko_sdram_x2.cpp exercises the
+// pair at 96/48 and passes with rd_lat_sel=3.
+wire [NPORTS-1:0]        f_req;
+wire [NPORTS-1:0][SDR_AW:1] f_addr;
+wire [NPORTS-1:0]        f_ack;
+wire [NPORTS-1:0][63:0]  f_dout;
+wire                     f_wr_req, f_wr_ack;
+wire [SDR_AW:1]          f_wr_addr;
+wire [15:0]              f_wr_din;
+wire [1:0]               f_wr_be;
+
+kaneko_sdram_x2 #(.NP(NPORTS), .AW(SDR_AW)) u_sdr_x2
+(
+	.clk_fast(clk_sdram),
+
+	.s_req  (rom_loaded ? {p8_req, p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}
+	                    : {NPORTS{1'b0}}),
+	.s_addr ({p8_addr, p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
+	.s_ack  (p_ack_bus),
+	.s_dout (p_dout_bus),
+
+	.s_wr_req(ldr_wr_req), .s_wr_addr(ldr_wr_addr), .s_wr_din(ldr_wr_din),
+	.s_wr_be(ldr_wr_be),   .s_wr_ack(ldr_wr_ack),
+
+	.f_req(f_req), .f_addr(f_addr), .f_ack(f_ack), .f_dout(f_dout),
+	.f_wr_req(f_wr_req), .f_wr_addr(f_wr_addr), .f_wr_din(f_wr_din),
+	.f_wr_be(f_wr_be),   .f_wr_ack(f_wr_ack)
+);
+
+kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(700),
                // Bit 8 is the Z80's program fetch. Urgent, despite being a
                // tiny share of the bandwidth -- one eight-byte line per eight
                // opcode bytes at 4 MHz -- because everything behind it is the
@@ -405,15 +449,28 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300),
                .URGENT(9'b1_0011_1111)) u_sdram
 (
 	.clk(clk_sdram), .rst_n(pll_locked), .ready(mem_ready),
-	.rd_lat_sel(status[5:4]),
+	// THE FIRST OSD POSITION IS THE DEFAULT AND MUST WORK.
+	//
+	// kaneko_sdram's own mapping is 0->CL+3, 1->CL+2, 2->CL+4, 3->CL+5, and
+	// tb_kaneko_sdram_x2 measured that at 96 MHz only 3 (CL+5) reads correct
+	// data -- 0, 1 and 2 fail every one of its 6402 checks. status defaults to
+	// zero, so position 0 is remapped to 3 rather than left selecting a depth
+	// that returns garbage on first boot and looks like the clock change
+	// failing. All four remain reachable.
+	//
+	// The menu text was wrong as well: it read CL+1,CL+0,CL+2,CL+3, which
+	// matched none of the four values it was selecting.
+	.rd_lat_sel(status[5:4] == 2'd0 ? 2'd3 :
+	            status[5:4] == 2'd1 ? 2'd0 :
+	            status[5:4] == 2'd2 ? 2'd1 : 2'd2),
 
 	.sd_cke(SDRAM_CKE), .sd_cs_n(SDRAM_nCS), .sd_ras_n(SDRAM_nRAS),
 	.sd_cas_n(SDRAM_nCAS), .sd_we_n(SDRAM_nWE), .sd_ba(SDRAM_BA),
 	.sd_a(SDRAM_A), .sd_dqm({SDRAM_DQMH, SDRAM_DQML}),
 	.sd_dq_o(sd_dq_o), .sd_dq_oe(sd_dq_oe), .sd_dq_i(SDRAM_DQ),
 
-	.wr_req(ldr_wr_req), .wr_addr(ldr_wr_addr), .wr_din(ldr_wr_din),
-	.wr_be(ldr_wr_be), .wr_ack(ldr_wr_ack),
+	.wr_req(f_wr_req), .wr_addr(f_wr_addr), .wr_din(f_wr_din),
+	.wr_be(f_wr_be), .wr_ack(f_wr_ack),
 
 	// NOBODY READS SDRAM UNTIL THE ROM IS IN IT.
 	//
@@ -433,14 +490,13 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(300),
 	//
 	// The boot harness has carried a `video_idle` input for exactly this since
 	// it was written. The core never had the equivalent.
-	.p_req  (rom_loaded ? {p8_req, p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}
-	                    : 9'b0),
-	.p_addr ({p8_addr, p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
-	.p_din  ({9{16'd0}}),
-	.p_be   ({9{2'b11}}),
-	.p_we   (9'b0),
-	.p_ack  (p_ack_bus),
-	.p_dout (p_dout_bus)
+	.p_req  (f_req),
+	.p_addr (f_addr),
+	.p_din  ({NPORTS{16'd0}}),
+	.p_be   ({NPORTS{2'b11}}),
+	.p_we   ({NPORTS{1'b0}}),
+	.p_ack  (f_ack),
+	.p_dout (f_dout)
 );
 
 
