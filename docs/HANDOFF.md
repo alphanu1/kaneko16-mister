@@ -86,6 +86,23 @@ looks like support and fails undiagnosably.
 
 ## Open questions that carry real risk
 
+0. **Magical Crystals boots and runs but takes no interrupts on hardware.**
+   Its bus trace matches MAME over all 138,246 compared accesses out of a
+   million, it reaches its self-test on the board, and it then sits at roughly
+   46,800 bus cycles a frame with the interrupt counter reading **zero**. MAME
+   shows the game spinning in an idle loop at `01f820` — 2,731,366 fetches over
+   600 frames — with every drawing operation in the interrupt handlers, so no
+   interrupts fully explains the black screen.
+
+   **The core takes those interrupts in simulation and not on hardware**, which
+   is the part that carries risk: the same RTL behaves differently in the two
+   places, and the IRQ path is shared with Explosive Breaker, which takes its
+   three per frame on the same board. Two candidates remain and they need
+   opposite work — `kaneko_irq` not asserting, or asserting while the 68000
+   sits masked at level 7 because it never finished self-test. A per-frame
+   count of IPL assertions was added to the debug overlay to tell them apart;
+   see `docs/debug-overlay.md`.
+
 1. **Screen timing is not PCB-verified.** MAME uses `set_refresh_hz(60)` with
    no `set_raw()`. We run 384x264 at 6 MHz, 59.1856 Hz. No amount of simulation
    resolves this — it needs a hardware reference or a PCB capture. Wing Force's

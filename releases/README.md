@@ -29,7 +29,7 @@ bases, screen geometry, layer count, sprite list size and input wiring.
 | Explosive Breaker | playable, with sound |
 | Blaze On (Japan) | playable, with music and effects |
 | Wing Force (prototype) | playable, with in-game music; **no OKI sound effects, and no music in the attract demo** |
-| Magical Crystals | **not shipped — cause found, fix in progress.** The MRA never carried a 68000 program ROM, so the CPU executed a zero-filled region |
+| Magical Crystals | **not shipped — boots but draws nothing.** The missing program ROM is fixed and the CPU now runs correctly; the screen stays black because the game never takes an interrupt, and it does all its drawing in the interrupt handlers |
 
 An MRA for a game the core cannot run is deliberately not shipped: it looks
 supported and then fails in a way a player cannot diagnose.
@@ -41,11 +41,14 @@ change as the RBF that fixes it, so if an item is still here it is still true
 of the newest build in this directory. **The heading carries the RBF's name for
 exactly that reason — if they disagree, trust neither and check.**
 
-- **Magical Crystals is not shipped.** It has never booted: its MRA never
-  carried a 68000 program ROM, so the region was zero-filled and the CPU
-  executed half a megabyte of zeros. The cause is understood and the fix is in
-  progress; the region is awkward because its two byte lanes are different
-  sizes.
+- **Magical Crystals is not shipped.** It boots now — the earlier fault, an
+  MRA that carried no 68000 program ROM, is fixed — and its bus trace matches
+  MAME exactly over a million accesses. It reaches its self-test and then goes
+  black, because it never takes an interrupt and the game does all of its
+  drawing inside the interrupt handlers. The core takes those interrupts
+  correctly in simulation, so the disagreement is between simulation and
+  hardware and is still being chased.
+
 - **Wing Force has no sound effects**, and no music in the attract demo. Its
   in-game music is correct. The OKI on that board hangs off the Z80's I/O ports
   rather than the 68000's bus, and that path is still being chased.

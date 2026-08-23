@@ -6206,3 +6206,48 @@ substituting another game's. Hard rule 9 applies to instruments as much as to
 the core -- this is the third one this week, after the OKI overlay row that
 counted the wrong strobe and the boot harness that pinned Explosive Breaker's
 sample region.
+
+### Magical Crystals: 01f820 is the IDLE loop, not a crash, 2026-08-23
+
+With the program ROM finally reaching it, the core's 68000 ends every run in a
+two-instruction loop:
+
+```
+01f81a  4ff9 0060 3000   LEA   $00603000,A7
+01f820  5279 0030 0006   ADDQ.W #1,$300006
+01f826  4efa fff8        JMP   *-6
+```
+
+It was entered through an `RTE`, which made it look exactly like a failed
+self-test dropping into an error trap, and that is how it was first read here.
+
+**It is not.** A read tap on the ROM fetch says MAME executes `01f820`
+**2,731,366 times in 600 frames** while the game plays correctly. It is the
+game's idle loop: Magical Crystals does all of its work in the interrupt
+handlers and spins here between them. Reaching it is correct behaviour.
+
+Two earlier attempts to establish this were wrong and are worth recording,
+because both looked like answers:
+
+- **`SR=2504` sampled at end-of-frame is not a masked CPU.** Mask 5 is what the
+  68000 sets when it TAKES a level-5 interrupt, so the reading meant the
+  opposite of what it appeared to: the CPU was inside its IRQ5 handler.
+- **A write tap on `300006` proves nothing.** It looked like a park-loop
+  counter; MAME writes it 2.7 million times in 600 frames because it is an
+  ordinary hot variable. The tap that worked was on the instruction fetch —
+  a fetch leaves nothing in memory, so only a read tap can see it.
+
+So the black screen reduces to one fact: **the core takes zero interrupts on
+hardware**, at a healthy ~46,800 bus cycles a frame, and the handlers that draw
+everything never run.
+
+`kaneko_irq` uses fixed scanlines 224/144/64 for every game, and Explosive
+Breaker takes its three per frame on the same board, so the logic itself works.
+**The core also takes them in simulation** — the 6M-access trace shows the
+handler at `000700`-`000718` running — so simulation and hardware disagree
+about the same RTL. That is the open question.
+
+Zero acknowledgements cannot distinguish "never asserted" from "asserted and
+ignored", and those need opposite work, so the overlay now counts IPL
+assertions separately from acknowledgements. See `docs/debug-overlay.md` for
+the truth table.

@@ -6,7 +6,7 @@ as the original silicon did, verified against MAME as an oracle.
 
 **Status: three of the four bring-up games are playable on hardware.**
 Explosive Breaker, Blaze On and Wing Force run with graphics, input and sound;
-Magical Crystals does not boot yet and is not shipped. Later titles needing the
+Magical Crystals now boots and runs but draws nothing; it is not shipped. Later titles needing the
 CALC3 or TOYBOX MCUs are not attempted. See `docs/HANDOFF.md` for the gap
 analysis.
 
@@ -51,7 +51,8 @@ self-test, formats a blank EEPROM, enables interrupts and runs its main loop;
 tilemaps, sprites, inputs and sound all work on Explosive Breaker and Blaze On,
 and Wing Force is complete apart from its OKI effects.
 
-Magical Crystals has never booted and is not shipped.
+Magical Crystals boots, runs and matches MAME on the bus, but its screen stays
+black because it never takes an interrupt. It is not shipped.
 
 ## Games
 
@@ -65,7 +66,7 @@ in a way a player cannot diagnose.
 | Explosive Breaker | **playable**, with sound |
 | Blaze On (Japan) | **playable**, with music and effects |
 | Wing Force (prototype) | **playable**, graphics, input and in-game music all correct. **No OKI sound effects, and no music in the attract demo** |
-| Magical Crystals | **not shipped — cause found, fix in progress.** It has never booted, and the reason is that the MRA never carried a 68000 program ROM: `maincpu` was missing from the ROM description, so the region was zero-filled and the CPU executed half a megabyte of zeros. That is why it showed a healthy bus-cycle count and zero interrupts. The frame gate's 99.48% is unrelated — it renders from MAME's dumped VRAM without running an instruction |
+| Magical Crystals | **not shipped — boots, runs, draws nothing.** The first cause is fixed: its MRA carried no 68000 program ROM, so the CPU executed half a megabyte of zeros. With that corrected it reaches its self-test on hardware and its bus trace matches MAME over **all 138,246 compared accesses out of a million**. What remains is that it takes **zero interrupts** on the board while running at a healthy ~46,800 bus cycles a frame. MAME shows the game spins in an idle loop at `01f820` — 2.7 million fetches in 600 frames — and does all of its work in the interrupt handlers, so no interrupts is a complete explanation of the black screen. Our own simulation of the same RTL *does* take them, so hardware and simulation disagree and that is the open question. See `docs/findings.md` |
 
 Two OSD options are development instruments rather than settings. The **debug
 overlay** draws per-frame counters over the picture — bus cycles, interrupts,
