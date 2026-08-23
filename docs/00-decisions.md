@@ -255,17 +255,59 @@ the bandwidth to move it off-chip does not exist. Both routes are closed.
 instantiate KANEKO_VU002_SPRITE and run on the bitmap already built. Nothing
 about this measurement touches them.
 
-If Tier 3 is wanted later, the routes worth investigating, in order of promise:
+### THE ANSWER FOR TIER 3 IS THE SDRAM CLOCK
 
-1. **Find the 28.4%.** It is unattributed and larger than the tile path. If the
-   68000's ROM line cache is thrashing, recovering even half of it changes the
-   arithmetic. Measuring it needs per-port occupancy rather than the three
-   groups counted here.
-2. **Band rendering.** Keep a horizontal band of the surface on-chip and make
-   several passes over the sprite list. This is what the earlier core does. It
-   trades SDRAM bandwidth for repeated list walks and does not impose the
-   per-line sprite limit that D5 rejected.
-3. Neither, and Tier 3 stays out of scope.
+**Raise it to 144 MHz, three times the core clock, and the bitmap fits.**
+
+The work per line is fixed at 565 clocks. Raising the clock does not reduce the
+work, it lengthens the line:
+
+| SDRAM clock | line | free | bitmap needs 377 |
+|---|---|---|---|
+| 96 MHz — today, 2x core | 768 | 203 | no |
+| 120 MHz — 2.5x | 960 | 395 | fits |
+| **144 MHz — 3x core** | **1152** | **587** | **fits with margin** |
+
+It also answers the part that actually blocked the move. The worst line
+measured 757 clocks of 768, one percent spare, so added traffic overruns
+immediately. The same work at 3x is 757 of 1152 — **66% occupied with 395
+clocks free** — which turns a hard edge into ordinary headroom.
+
+144 MHz is 3 x 48, so it stays an exact integer ratio off the same PLL and the
+crossing adapter becomes x3 rather than x2. Nothing about the alignment
+argument in `kaneko_sdram_x2`'s header changes: edges still line up and there
+is still no metastability to synchronise away. `tb_kaneko_sdram` already quotes
+its throughput at 143 MHz, and -7E parts are rated for it.
+
+What the change actually involves:
+
+1. PLL: a 144 MHz output in place of 96.
+2. `kaneko_sdram_x2` becomes x3. The ack-width and held-request hazards its
+   header documents are the same two problems, now spanning three fast cycles
+   instead of two, and an acknowledge must still be exactly one slow cycle wide.
+3. **Every timing parameter is in CLOCKS and must be recomputed.** `T_RCD`,
+   `T_RP`, `T_RC`, `T_RAS`, `T_WR`, `CL` and `T_REFI` are all sized for 96 MHz.
+   Leaving them would violate the device at 144 and the failure would be
+   corrupted data rather than a build error.
+4. Timing closure on the controller at 144 MHz, which is the real risk. The
+   core itself does not move: its critical path is 15.74 ns, a ceiling near
+   63 MHz, and it stays at 48.
+
+Do this BEFORE writing any of the bitmap move. It is the difference between a
+design that fits with margin and one that does not fit at all, and every
+estimate for the move should be recomputed against 1152 clocks a line.
+
+Secondary, and worth doing anyway because it is cheap: **find the 28.4%.** It
+is unattributed, larger than the entire tile path, and nominally the 68000, OKI
+and Z80 — but the 68000 reads through a cache with a 0.1% miss rate and should
+not cost anything like 218 clocks a line. Either the attribution is wrong or
+something is thrashing. Per-port occupancy instead of the three groups counted
+here would show it in one build.
+
+Third, if neither is enough: **band rendering.** Keep a horizontal band of the
+surface on-chip and make several passes over the sprite list, as the earlier
+core does. It trades bandwidth for repeated list walks and does not impose the
+per-line sprite limit D5 rejected.
 
 Order follows from that: do the SDRAM move **before** Tier 2, while only four
 games depend on the sprite subsystem. Doing it afterwards means the same

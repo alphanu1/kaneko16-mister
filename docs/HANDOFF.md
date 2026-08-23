@@ -86,6 +86,16 @@ looks like support and fails undiagnosably.
 
 ## Open questions that carry real risk
 
+1. **Tier 3 needs the SDRAM clock at 144 MHz first.** Measured on hardware
+   2026-08-23: the bus is 73.6% occupied on an average line and **98.6% on the
+   worst**, leaving 11 clocks. The sprite bitmap needs 377 and cannot stay in
+   block memory either, since KC-002's surface is 148% of the device. Raising
+   the clock to 3x the core lengthens the line to 1152 clocks and leaves 587
+   free, which fits with margin and takes the worst line from 99% to 66%.
+   Full working and the four pieces of work in `docs/00-decisions.md` D5. Do it
+   before writing any of the bitmap move. Tier 2 is unaffected -- it uses
+   VU-002 and the bitmap already built.
+
 1. **Screen timing is not PCB-verified.** MAME uses `set_refresh_hz(60)` with
    no `set_raw()`. We run 384x264 at 6 MHz, 59.1856 Hz. No amount of simulation
    resolves this — it needs a hardware reference or a PCB capture. Wing Force's
