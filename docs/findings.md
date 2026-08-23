@@ -6076,3 +6076,76 @@ the rate, and not nothing.
 
 Not a user-facing limitation, which is why it is no longer in the release
 notes: nobody playing the core can act on it.
+
+### An MRA interleave's two lanes must advance equally, 2026-08-23
+
+Magical Crystals is the only set here whose 68000 program ROMs are different
+sizes:
+
+```
+ROM_REGION( 0x040000*2, "maincpu", ROMREGION_ERASE )
+ROM_LOAD16_BYTE( "mc100e02.u18", 0x000000, 0x020000 )   /* EVEN, 0x20000 */
+ROM_LOAD16_BYTE( "mc101e02.u19", 0x000001, 0x040000 )   /* ODD,  0x40000 */
+```
+
+0x20000 of even bytes against 0x40000 of odd, the region's ERASE covering the
+even lane's upper half.
+
+`build_rom_regions.py` emitted that as one `<interleave>` and accounted for it
+with `written += ent[0][2] * 2` — **the FIRST lane's length**. It counted
+0x40000 written, then padded the region up to 0x80000, while the loader expands
+the interleave to the LONGER lane. The region came out 0xC0000, and
+`verify_mra.py` caught it as `LENGTH DIFFERS by +262144`.
+
+**The real fault is worse than the miscount, and the verifier could not see
+it.** `mra_loader.cpp`'s `rom_data()` keeps a **separate write cursor per
+lane**:
+
+```c
+*(romdata + romlen[idx] + offsets[i]) = *buf++;
+romlen[idx] += unitlen;
+```
+
+`idx` comes from the first non-zero nibble of `map`, so `map="01"` advances
+`romlen[0]` and `map="10"` advances `romlen[1]`. **Nothing resyncs them at
+`</interleave>`** — the closing tag clears `ifrom`, `ito`, `imap` and `unitlen`
+and leaves the cursors where they lie. The only resync in the file is for a
+`map` used OUTSIDE an interleave:
+
+```c
+if (!arc_info->insideinterleave && arc_info->imap) { ... for (i=1;i<8;i++) romlen[i] = romlen[0]; }
+```
+
+So a lopsided interleave leaves the cursors 0x40000 apart, and the next part —
+which writes at `romlen[0]` — lands back inside the odd lane's tail and
+overwrites it. Fixing only the arithmetic would have produced a right-sized
+region full of wrong bytes.
+
+The fix emits the asymmetry as **two equal interleaves**, the second taking its
+short lane from the region fill, so both cursors step together:
+
+```xml
+<interleave output="16">
+  <part name="mc100e02.u18" map="01"/>
+  <part name="mc101e02.u19" length="0x20000" map="10"/>
+</interleave>
+<interleave output="16">
+  <part repeat="131072" map="01">00</part>
+  <part name="mc101e02.u19" offset="0x20000" length="0x20000" map="10"/>
+</interleave>
+```
+
+Inline hex inside an interleave honours `map` — `rom_data(binary, len,
+arc_info->imap, ...)` — and `offset`/`length` parse with `strtoul(..., 0)`, so
+`0x` prefixes are fine.
+
+`verify_mra.py` modelled an interleave as ONE buffer sized from the longer
+lane, zero-filling the short one. That is exactly the right answer for the
+region and exactly the wrong model of the loader: it would have blessed an MRA
+the loader corrupts. It now tracks lanes separately and **refuses** an
+interleave whose lanes advance unequally, which is the only reason the two-part
+emission can be trusted. Same lesson as the census that could not see what it
+was counting: check the instrument models the thing, not the outcome.
+
+The three working games are symmetric, take the first branch only, and their
+MRAs are byte-identical after the change.

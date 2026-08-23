@@ -497,12 +497,57 @@ def build_mra(setname, rompath, outdir):
                     f"{fill_of(setname, region):02X}"
                 written = off
             if is_pair:
+                # THE TWO LANES OF AN INTERLEAVE MUST ADVANCE EQUALLY.
+                #
+                # mra_loader's rom_data() keeps a SEPARATE write cursor per
+                # lane -- romlen[idx], where idx comes from the first non-zero
+                # nibble of `map` -- and NOTHING resyncs them at the closing
+                # </interleave>. So an interleave whose two parts differ in
+                # length leaves the cursors apart by that difference, and the
+                # next part, which writes at romlen[0], lands back inside the
+                # longer lane's tail and overwrites what is already there.
+                #
+                # mgcrystl is the only set here that is asymmetric:
+                #
+                #   ROM_REGION( 0x040000*2, "maincpu", ROMREGION_ERASE )
+                #   ROM_LOAD16_BYTE( "mc100e02.u18", 0x000000, 0x020000 )
+                #   ROM_LOAD16_BYTE( "mc101e02.u19", 0x000001, 0x040000 )
+                #
+                # 0x20000 of even bytes against 0x40000 of odd, with the
+                # region's ERASE covering the even lane's upper half. Emitted
+                # as ONE interleave it desyncs the cursors; emitted as two
+                # EQUAL interleaves -- the second taking its short lane from
+                # the region fill -- the cursors stay in step and the region
+                # is exactly the 0x80000 MAME describes.
+                #
+                # Symmetric pairs, which is every other region in every other
+                # set, take the first branch only and emit byte for byte what
+                # they always did.
+                pair = sorted(ent, key=lambda x: x[5])
+                lane = lambda pe: "01" if pe[5] == 0 else "10"
+                n = min(pe[2] for pe in pair)
+                m = max(pe[2] for pe in pair)
+
                 il = ET.SubElement(rom, "interleave", output="16")
-                for pe in sorted(ent, key=lambda x: x[5]):
-                    ET.SubElement(il, "part", name=pe[0],
-                                  crc=crcs.get(pe[0], "0"),
-                                  map="01" if pe[5] == 0 else "10")
-                written += ent[0][2] * 2
+                for pe in pair:
+                    a = dict(name=pe[0], crc=crcs.get(pe[0], "0"), map=lane(pe))
+                    if pe[2] != n:
+                        a["length"] = hex(n)
+                    ET.SubElement(il, "part", **a)
+
+                if m != n:
+                    il2 = ET.SubElement(rom, "interleave", output="16")
+                    for pe in pair:
+                        if pe[2] == n:
+                            ET.SubElement(
+                                il2, "part", repeat=str(m - n), map=lane(pe)
+                            ).text = f"{fill_of(setname, region):02X}"
+                        else:
+                            ET.SubElement(il2, "part", name=pe[0],
+                                          crc=crcs.get(pe[0], "0"),
+                                          offset=hex(n), length=hex(m - n),
+                                          map=lane(pe))
+                written += m * 2
             else:
                 ET.SubElement(rom, "part", name=ent[0], crc=crcs.get(ent[0], "0"))
                 written += ent[2]

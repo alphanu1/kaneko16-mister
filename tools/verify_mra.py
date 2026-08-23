@@ -33,20 +33,46 @@ def expand(mra_path, rompath):
             elif el.tag == "part":
                 out += z.read(el.get("name"))
             elif el.tag == "interleave":
-                # THE TWO LANES NEED NOT BE THE SAME LENGTH. Magical Crystals
-                # supplies the EVEN bytes of the first 256 KB from a 128 KB
-                # part and the ODD bytes of the whole 512 KB from a 256 KB one,
-                # with ROM_REGION's ERASE covering the rest. Sizing the buffer
-                # from parts[0] assumed a symmetry that held for every set
-                # described until then and threw a ValueError on the first one
-                # that broke it.
-                parts = [(p.get("map"), z.read(p.get("name"))) for p in el]
-                span = max(len(d) for _, d in parts) * 2
-                buf  = bytearray(span)
-                for m, data in parts:
+                # THE LANES MUST ADVANCE EQUALLY, and this used to zero-fill
+                # the short one instead of saying so.
+                #
+                # mra_loader keeps a cursor PER LANE -- romlen[idx] in
+                # rom_data() -- and never resyncs them at </interleave>. A
+                # lopsided interleave therefore leaves the cursors apart, and
+                # the next part writes at romlen[0], back inside the longer
+                # lane's tail. Modelling it as one buffer sized from the longer
+                # lane hid that completely: it produced exactly the bytes the
+                # region wanted and would have blessed an MRA the loader
+                # corrupts. Refuse it instead.
+                lanes = {}
+                for pt in el:
+                    ln = 0 if pt.get("map") == "01" else 1
+                    if pt.get("name"):
+                        data = z.read(pt.get("name"))
+                        off = int(pt.get("offset"), 0) if pt.get("offset") else 0
+                        cut = int(pt.get("length"), 0) if pt.get("length") else 0
+                        data = data[off:]
+                        if cut:
+                            data = data[:cut]
+                    else:
+                        unit = bytes.fromhex((pt.text or "00").strip())
+                        data = unit * int(pt.get("repeat", "1"), 0)
+                    lanes[ln] = data
+
+                widths = {ln: len(d) for ln, d in lanes.items()}
+                if len(set(widths.values())) != 1:
+                    sys.exit(
+                        f"  interleave lanes advance unequally: {widths} — "
+                        "mra_loader keeps one cursor per lane and never "
+                        "resyncs them, so every part after this one would "
+                        "land in the wrong place. Split it into equal "
+                        "interleaves."
+                    )
+
+                buf = bytearray(next(iter(widths.values())) * 2)
+                for ln, data in lanes.items():
                     # map="01" supplies byte 0 of each 16-bit word, "10" byte 1.
-                    lane = 0 if m == "01" else 1
-                    buf[lane:len(data) * 2:2] = data
+                    buf[ln:len(data) * 2:2] = data
                 out += buf
             else:
                 sys.exit(f"unhandled MRA element <{el.tag}>")
