@@ -349,7 +349,8 @@ module kaneko_cpumem_harness #(
         .pg_spr(PG_SPR), .pg_pal(PG_PAL), .pg_wdog(PG_WDOG),
         .pg_snd(PG_SND), .pg_in(PG_IN),
         .rom_1mb(ROM_1MB), .blazeon_io(BLAZEON_IO),
-        .base_trom0(), .base_trom1(), .base_spr(), .base_oki(),
+        .base_trom0(), .base_trom1(), .base_spr(),
+        .base_oki(CFG_OKI_BASE), .oki_max_bank(CFG_OKI_MAX_BANK),
         .v2_dx(), .v2_dy(), .view2_2_pri(), .spr_pri_f(),
         .two_chips(), .spr_count(), .spr_xoffs(), .visarea_min_y(),
         .wide_screen(),
@@ -505,7 +506,13 @@ module kaneko_cpumem_harness #(
     wire [7:0] oki_din;
     wire [7:0] oki_dout;
 
-    localparam [SDR_AW:1] OKI_BASE = SDR_AW'(25'h260000);
+    // NOT a hardcoded 0x260000. That is Explosive Breaker's oki1 base, and
+    // this harness takes SET: Magical Crystals' region starts at byte
+    // 0x500000 and Wing Force's elsewhere again, so pinning one game's value
+    // silently pointed every other game's sample fetch into another region.
+    // Same fault the core had and hard rule 9 exists for.
+    wire [SDR_AW:1] CFG_OKI_BASE;
+    wire [2:0]      CFG_OKI_MAX_BANK;
 
     wire [17:0] oki_rom_addr;
     wire [7:0]  oki_rom_data;
@@ -513,8 +520,9 @@ module kaneko_cpumem_harness #(
     wire [23:0] oki_region_addr;
     wire signed [13:0] oki_snd;
 
-    kaneko_oki_bank #(.MAX_BANK(7)) u_okibank (
+    kaneko_oki_bank u_okibank (
         .chip_addr(oki_rom_addr),
+        .max_bank(CFG_OKI_MAX_BANK),
         .bank(ym0_iob_out[2:0]),
         .region_addr(oki_region_addr)
     );
@@ -522,7 +530,7 @@ module kaneko_cpumem_harness #(
     kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_okirom (
         .clk(clk), .rst(rst),
         .req_addr(oki_region_addr),
-        .base_addr(OKI_BASE),
+        .base_addr(CFG_OKI_BASE),
         .req_data(oki_rom_data),
         .port_ready(oki_rom_ok),
         .sdr_req(p5_req), .sdr_addr(p5_addr),
