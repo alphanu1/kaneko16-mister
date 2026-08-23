@@ -29,7 +29,12 @@ assign ADC_BUS  = 'Z;
 assign USER_OUT = '1;
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
-assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;
+// DDRAM is driven by screen_rotate at the bottom of this file. It was tied off
+// while nothing used it; rotation writes each frame into DDR3 and lets the
+// scaler read it back turned, which is how every vertical MiSTer arcade core
+// does it. Note it is DDR3, NOT the core's SDRAM: the two are separate, so
+// rotation costs nothing from the 37 spare M10K blocks or from the memory the
+// sprite bitmap is destined for.
 
 // Audio. Both YM2149s are mono into the cabinet's single speaker, so the two
 // outputs are summed and sent to both channels. AUDIO_S = 0: jt49's `sound` is
@@ -59,8 +64,13 @@ assign VGA_DISABLE = 0;
 // deliberately shows the NATIVE orientation. Rotation is decision D3 and an
 // output-stage concern; putting it in before the picture is trusted would mean
 // debugging two things at once.
-assign VIDEO_ARX = status[8] ? 12'd16 : 12'd4;
-assign VIDEO_ARY = status[8] ? 12'd9  : 12'd3;
+// SWAPPED WHEN ROTATED, or a turned game is drawn in the wrong shape. The
+// framework needs the aspect of what it is actually scaling, not of the
+// unrotated source.
+wire [11:0] arx_base = status[8] ? 12'd16 : 12'd4;
+wire [11:0] ary_base = status[8] ? 12'd9  : 12'd3;
+assign VIDEO_ARX = video_rotated ? ary_base : arx_base;
+assign VIDEO_ARY = video_rotated ? arx_base : ary_base;
 
 `include "build_id.v"
 localparam CONF_STR = {
@@ -78,6 +88,7 @@ localparam CONF_STR = {
 	"O[17],Tilemaps,On,Off;",
 	"O[20:19],Game override,Off(MRA),1 Magical Crystals,2 Blaze On,3 Wing Force;",
 	"O[23:21],Layer1 dx,+2 (MAME),0,-2,+4;",
+	"O[25:24],Rotation,Auto (per game),Off,CW,CCW;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
@@ -227,7 +238,8 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 	.inputs_blazeon(INPUTS_BLAZEON),
 	.base_z80(BASE_Z80), .has_z80(HAS_Z80),
 	.oki_max_bank(OKI_MAX_BANK), .oki_on_z80(OKI_ON_Z80),
-	.oki_cen_half(OKI_CEN_HALF)
+	.oki_cen_half(OKI_CEN_HALF),
+	.rot_en(ROT_EN), .rot_ccw(ROT_CCW)
 );
 
 // WIDE=1, so ioctl_addr counts bytes and advances by two per word.
@@ -2058,6 +2070,44 @@ always @(posedge clk_sys) begin
 	de_d  <= {de_d[0],  de};
 	cep_d <= {cep_d[0], ce_pix};
 end
+
+// ------------------------------------------------------------- rotation
+//
+// Explosive Breaker is ROT90 and Wing Force ROT270 -- two of the four games,
+// turned in OPPOSITE directions -- so the game table supplies both whether and
+// which way, and the OSD can override for a monitor that is already turned.
+//
+// screen_rotate lives in sys/arcade_video.v and is already in sys.qip, so this
+// is an instantiation rather than a new dependency. It takes the video the
+// core would have displayed, writes each frame into DDR3 with the axes
+// swapped, and raises FB_EN so the scaler reads that instead.
+wire       ROT_EN, ROT_CCW;
+wire [1:0] rot_sel = status[25:24];
+wire       rot_off = (rot_sel == 2'd1);
+wire       rot_ccw = (rot_sel == 2'd0) ? ROT_CCW      // per game
+                   : (rot_sel == 2'd3);               // 2 = CW, 3 = CCW
+wire       no_rot  = rot_off || ((rot_sel == 2'd0) && !ROT_EN);
+wire       video_rotated;
+
+screen_rotate u_rotate
+(
+	.CLK_VIDEO(clk_sys), .CE_PIXEL(cep_d[1]),
+	.VGA_R(out_r), .VGA_G(out_g), .VGA_B(out_b),
+	.VGA_HS(hs_d[1]), .VGA_VS(vs_d[1]), .VGA_DE(de_d[1]),
+
+	.rotate_ccw(rot_ccw), .no_rotate(no_rot), .flip(1'b0),
+	.video_rotated(video_rotated),
+
+	.FB_EN(FB_EN), .FB_FORMAT(FB_FORMAT),
+	.FB_WIDTH(FB_WIDTH), .FB_HEIGHT(FB_HEIGHT),
+	.FB_BASE(FB_BASE), .FB_STRIDE(FB_STRIDE),
+	.FB_VBL(FB_VBL), .FB_LL(FB_LL),
+
+	.DDRAM_CLK(DDRAM_CLK), .DDRAM_BUSY(DDRAM_BUSY),
+	.DDRAM_BURSTCNT(DDRAM_BURSTCNT), .DDRAM_ADDR(DDRAM_ADDR),
+	.DDRAM_DIN(DDRAM_DIN), .DDRAM_BE(DDRAM_BE),
+	.DDRAM_WE(DDRAM_WE), .DDRAM_RD(DDRAM_RD)
+);
 
 assign CLK_VIDEO = clk_sys;
 assign CE_PIXEL  = cep_d[1];

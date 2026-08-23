@@ -101,7 +101,14 @@ module kaneko_gamecfg #(
     // bakubrkr and mgcrystl boards, 16MHz/16 = 1 MHz on Wing Force. PIN7 is
     // high on all three so the internal divider is 132 either way, and the
     // entire difference is this bit.
-    output wire        oki_cen_half
+    output wire        oki_cen_half,
+
+    // SCREEN ROTATION, and it is per-game in BOTH senses -- whether, and which
+    // way. MAME's GAME() lines: explbrkr ROT90, wingforc ROT270, mgcrystl and
+    // blazeon ROT0. Two of the four rotate, in OPPOSITE directions, so a
+    // single "rotate" flag would put one of them upside down.
+    output wire        rot_en,
+    output wire        rot_ccw
 );
 
     localparam [7:0] CFG_INDEX = 8'd1;
@@ -212,6 +219,12 @@ module kaneko_gamecfg #(
     assign oki_max_bank = is_wf ? 3'd3 : is_mg ? 3'd1 : 3'd7;
     assign oki_on_z80   = is_wf;
     assign oki_cen_half = is_wf;
+
+    // ROT90 is clockwise, ROT270 is the same thing counter-clockwise, which is
+    // what screen_rotate's rotate_ccw selects.
+    wire is_eb = (game_id == 8'd0);
+    assign rot_en  = is_eb | is_wf;
+    assign rot_ccw = is_wf;
 endmodule
 
 `default_nettype wire
