@@ -1072,15 +1072,29 @@ end
 // 600 frames -- and does all of its work in the handlers, so "no interrupts"
 // is a complete explanation of the black screen either way.
 //
-// Counts the FALLING edge of "all three IPL lines high", i.e. each new request
-// kaneko_irq raises, whether or not the CPU ever answers it. Wants 3 per frame.
+// COUNTED AS A LEVEL, NOT AN EDGE, and the first version got this wrong.
+//
+// Counting rising edges of "some IPL line is low" cannot answer the question.
+// kaneko_irq HOLDS a request until it is acknowledged, the way MAME's
+// HOLD_LINE does, so a request the CPU never answers asserts ONCE and then
+// stays asserted -- no further edges, a per-frame count of zero, and a reading
+// identical to never asserting at all. The two cases it was built to separate
+// both read dark.
+//
+// Clocks with IPL asserted, saturating, is unambiguous:
+//
+//   0        never asserted            -> the fault is the interrupt path
+//   0xffff   asserted and HELD all frame -> the 68000 is masked at level 7 and
+//                                          never finished its self-test
+//   small    asserted and promptly acknowledged -> working normally
+//
+// All sixteen blocks lit versus all dark is also the easiest thing to read off
+// a photograph, which is how this gets looked at.
 reg [15:0] ipl_cnt, ipl_cnt_lat;
-reg        ipl_any_d;
 wire       ipl_any = (cpu_ipl_n != 3'b111);
 always @(posedge clk_sys) begin
-	ipl_any_d <= ipl_any;
 	if (vbl_rise) begin ipl_cnt_lat <= ipl_cnt; ipl_cnt <= 16'd0; end
-	else if (ipl_any && !ipl_any_d) ipl_cnt <= ipl_cnt + 16'd1;
+	else if (ipl_any && !(&ipl_cnt)) ipl_cnt <= ipl_cnt + 16'd1;
 end
 
 // OKI TELEMETRY: where does the sound path stop?
@@ -1155,11 +1169,25 @@ end
 // acknowledged, which means it is executing and looping somewhere before it
 // ever sets its interrupt mask. The address it keeps touching says where.
 reg [15:0] bus_a_hi_lat, bus_a_lo_lat;
+// THE SAME ADDRESS, HELD STILL FOR A WHOLE FRAME.
+//
+// bus_a_*_lat update on every acknowledged access, so what the overlay draws
+// changes thousands of times while the screen is being scanned. On a phone
+// camera the rolling shutter then smears several different values down the
+// block and it reads as noise -- which is what the first two Magical Crystals
+// photographs showed, and it cost a round trip each time.
+//
+// These sample the same value once per frame at vblank, so the block is
+// constant while it is drawn and a photograph of it is a number.
+reg [15:0] bus_a_hi_run, bus_a_lo_run;
+reg [15:0] bus_a_hi_frm, bus_a_lo_frm;
 reg [15:0] unmap_a_lat;
 reg [15:0] unmap_cnt, unmap_cnt_lat;
 always @(posedge clk_sys) begin
 	if (rst_sys) begin
 		bus_a_hi_lat <= 0; bus_a_lo_lat <= 0;
+		bus_a_hi_run <= 0; bus_a_lo_run <= 0;
+		bus_a_hi_frm <= 0; bus_a_lo_frm <= 0;
 		unmap_a_lat  <= 0; unmap_cnt <= 0; unmap_cnt_lat <= 0;
 	end else begin
 		// Sampled on every acknowledged cycle, so what is displayed is
@@ -1168,12 +1196,20 @@ always @(posedge clk_sys) begin
 		if (~DTACKn && !dtack_d) begin
 			bus_a_hi_lat <= {8'd0, eab[23:16]};
 			bus_a_lo_lat <= {eab[15:1], 1'b0};
+			bus_a_hi_run <= {8'd0, eab[23:16]};
+			bus_a_lo_run <= {eab[15:1], 1'b0};
 		end
 		if (unmapped_hit) begin
 			unmap_a_lat <= {unmapped_addr[15:1], 1'b0};
 			if (!(&unmap_cnt)) unmap_cnt <= unmap_cnt + 1'd1;
 		end
-		if (vbl_rise) begin unmap_cnt_lat <= unmap_cnt; unmap_cnt <= 0; end
+		if (vbl_rise) begin
+			unmap_cnt_lat <= unmap_cnt; unmap_cnt <= 0;
+			// One sample per frame, so the overlay draws a still number
+			// rather than a smear the camera cannot resolve.
+			bus_a_hi_frm <= bus_a_hi_run;
+			bus_a_lo_frm <= bus_a_lo_run;
+		end
 	end
 end
 
@@ -2035,8 +2071,8 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 //   row 7  unmapped accesses per frame -- zero means it is not lost, it is
 //          waiting for something that never comes
 wire [15:0] oki_row_val = (screen_y < 9'd46) ? ipl_cnt_lat
-                        : (screen_y < 9'd52) ? bus_a_hi_lat
-                        : (screen_y < 9'd58) ? bus_a_lo_lat
+                        : (screen_y < 9'd52) ? bus_a_hi_frm
+                        : (screen_y < 9'd58) ? bus_a_lo_frm
                                              : unmap_cnt_lat;
 wire       oki_set = oki_row_val[oki_bit];
 

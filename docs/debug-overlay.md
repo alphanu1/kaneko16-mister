@@ -62,9 +62,15 @@ says where.
 
 | Sub-row | y | Shows |
 |---|---|---|
-| 1st | 40-45 | **IPL assertions this frame** — interrupt requests kaneko_irq RAISED, whether or not the CPU answered. Wants **3**. |
-| 2nd | 46-51 | Last acknowledged bus address, **high half** `a[23:16]` — `0030` work RAM, `0050` palette, `00c0` inputs |
-| 3rd | 52-57 | Last acknowledged bus address, **low half** `a[15:0]` |
+| 1st | 40-45 | **Clocks with IPL asserted this frame**, saturating at `ffff`. All dark = never asserted. **All sixteen lit = asserted and HELD**, i.e. the CPU is ignoring it. A small number = asserted and promptly acknowledged, which is normal. |
+| 2nd | 46-51 | Bus address sampled ONCE per frame at vblank, **high half** `a[23:16]` — `0030` work RAM, `0050` palette, `00c0` inputs |
+| 3rd | 52-57 | The same sample, **low half** `a[15:0]` |
+
+Sub-rows 2 and 3 are sampled once per frame on purpose. They used to update on
+every acknowledged access — thousands of times while the screen is scanned —
+so a phone camera's rolling shutter smeared several values down the block and
+it photographed as noise. Two Magical Crystals photographs were unreadable for
+that reason before it was noticed.
 | 4th | 58-63 | Unmapped accesses per frame |
 
 ### Reading sub-row 1 against the amber row
@@ -75,9 +81,16 @@ interrupt logic **offered**.
 
 | sub-row 1 | amber | Meaning |
 |---|---|---|
-| 3 | 3 | Interrupts are working. Look elsewhere. |
-| 3 | 0 | The requests are there and the 68000 is ignoring them, so it is masked at level 7 — it never finished its self-test. **The fault is upstream, nowhere near the IRQ path.** |
-| 0 | 0 | kaneko_irq is not firing at all. The fault IS the interrupt path. |
+| small | 3 | Interrupts are working. Look elsewhere. |
+| **all lit** | 0 | The request is raised and HELD and the 68000 is ignoring it, so it is masked at level 7 — it never finished its self-test. **The fault is upstream, nowhere near the IRQ path.** |
+| **all dark** | 0 | kaneko_irq is not firing at all. The fault IS the interrupt path. |
+
+This row counts a LEVEL because counting edges could not answer the question.
+`kaneko_irq` holds a request until it is acknowledged, so one the CPU never
+answers asserts once and then stays asserted: no further edges, a per-frame
+count of zero, and a reading identical to never asserting at all. The first
+version of this row counted edges and both cases read dark, which cost a
+build and a round trip to the board.
 
 Magical Crystals reads amber 0 with ~46,800 bus cycles a frame, and MAME shows
 the game spinning in an idle loop at `01f820` — 2.7 million fetches in 600
