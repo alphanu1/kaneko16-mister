@@ -71,8 +71,8 @@ Two OSD options are development instruments rather than settings. The **debug
 overlay** draws per-frame counters over the picture — bus cycles, interrupts,
 fetch overruns, sprite overruns and the live pad word — and is documented row
 by row in `docs/debug-overlay.md`. Its tall yellow block is a scratch area that
-changes between builds; in this one it is the **Z80 sound-port census**, aimed
-at Wing Force's missing sound effects. **`Layer1 dx`** selects the offset the VIEW2
+changes between builds; in this one it is **SDRAM occupancy per scanline**,
+measuring whether the sprite bitmap can move out of block memory. **`Layer1 dx`** selects the offset the VIEW2
 chip applies to its second tilemap layer; `+2` is MAME's value and the default,
 and the alternatives are wrong for every game that behaves.
 

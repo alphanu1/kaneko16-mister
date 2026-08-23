@@ -55,27 +55,33 @@ diagnosis. Screen `y` is given because it is the one thing that cannot drift.
 ## The tall yellow block is a scratch area
 
 It gets repurposed for whatever is under investigation. **It currently shows
-the Z80's sound-port census**, for Wing Force: that game plays its in-game
-music and nothing else — no OKI effects, no attract music — and two plausible
-causes were checked and were both wrong, so the question moved to what the Z80
-actually writes.
+SDRAM occupancy per scanline**, for the sprite-bitmap move: the bitmap has to
+leave block RAM before Tier 3 is reachable, and whether SDRAM has room is the
+open question. Estimates say no, by a margin small enough to sit inside their
+own error, so this measures it instead.
 
-| Sub-row | y | Shows | MAME's wingforc, per frame |
-|---|---|---|---|
-| 1st | 40-45 | Z80 writes to the **OKI**, port `0a` | up to ~1, **only during the attract demo** |
-| 2nd | 46-51 | Z80 writes to the **YM2151**, ports `02`/`03` | 4-9, continuously, attract AND game |
-| 3rd | 52-57 | Z80 **reads of the latch**, port `06` — i.e. NMI handler entries | rare, a handful per run |
-| 4th | 58-63 | Z80 writes to the **OKI bank**, port `0c` | occasional |
+Every value is **fast clocks out of the 768 a scanline lasts**, counted in the
+96 MHz domain. Read them as a fraction of 768.
 
-Compare against `tools/mame_z80_ports.lua` on the same title. Its per-second
-figures are `w02/w03 = 232-564`, `r03 = 6300-7200`, `w0a` only in the demo, and
-`r06 = 1-2`; divide by 60 for these rows.
+| Sub-row | y | Shows |
+|---|---|---|
+| 1st | 40-45 | **Total occupancy** — clocks with some port granted. This is the headline number. |
+| 2nd | 46-51 | The four **tile feeders**, ports 0, 2, 3, 4 |
+| 3rd | 52-57 | The two **sprite ROM** ports, 6 and 7 |
+| 4th | 58-63 | **Peak** total occupancy across the last frame, so one busy line cannot hide behind an average |
 
-What the first two rows separate: if the OKI row is dark while the YM row is
-busy, our Z80 is running its music driver and never reaching the code that
-plays effects, and the fault is upstream of the chip. If the OKI row counts
-and there is still no sound, the fault is in jt6295 or the mixing behind it.
-Nothing in the build could tell those apart before.
+Rough readings and what they mean for the move, given the bitmap needs roughly
+200 more clocks a line with write combining:
+
+| 1st sub-row | of 768 | verdict |
+|---|---|---|
+| under `0200` | under 42% | comfortable room |
+| `0200`-`0300` | 42-63% | fits, tight |
+| over `0300` | over 63% | the bitmap does not fit as designed |
+
+The line boundary is a free-running divide-by-768 in the fast domain rather
+than anything sampled from the video timing. Both clocks come from one PLL at
+2:1, so 768 fast clocks is exactly a scanline and nothing needs crossing.
 
 The block has previously carried the 68000's bus-address probe, the IPL
 counter, the OKI chain, the YM2151 register count and the VIEW2 scroll probe.

@@ -363,6 +363,18 @@ wire [1:0]            p67_req;
 wire [1:0][SDR_AW:1]  p67_addr;
 wire [1:0]            p67_ack;
 wire [1:0][63:0]      p67_dout;
+// SDRAM OCCUPANCY, MEASURED ON THE BOARD.
+//
+// The sprite bitmap has to leave block RAM before Tier 3 is reachable -- see
+// D5 -- and whether SDRAM has room for it is the open question. The estimates
+// say no by a margin small enough to be inside their own error: bus efficiency
+// was measured on wandering cursors rather than row-local runs, and the tile
+// and write demands are both derived rather than observed.
+//
+// This counts what the arbiter actually grants, per scanline, in the 96 MHz
+// domain. A line is 768 fast clocks, so the counters fit 16 bits with room and
+// the number reads directly as occupancy.
+wire [NPORTS-1:0]       sdr_dbg_req, sdr_dbg_grant;
 wire [NPORTS-1:0]       f_we;
 wire [NPORTS-1:0][15:0] f_din;
 wire [NPORTS-1:0][1:0]  f_be;
@@ -528,6 +540,7 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(700),
 	// it was written. The core never had the equivalent.
 	.p_req  (f_req),
 	.p_addr (f_addr),
+	.dbg_req(sdr_dbg_req), .dbg_grant(sdr_dbg_grant),
 	.p_din  (f_din),
 	.p_be   (f_be),
 	.p_we   (f_we),
@@ -1097,6 +1110,52 @@ always @(posedge clk_sys) begin
 	iack_d <= cpu_iack;
 	if (vbl_rise) begin irq_cnt_lat <= irq_cnt; irq_cnt <= 16'd0; end
 	else if (cpu_iack && !iack_d) irq_cnt <= irq_cnt + 16'd1;
+end
+
+// SDRAM OCCUPANCY PER SCANLINE, counted in the 96 MHz domain.
+//
+// Four numbers, all in fast clocks out of the 768 a scanline lasts:
+//
+//   any        clocks with SOME port granted -- total occupancy
+//   tiles      the four tile feeders, ports 0, 2, 3, 4
+//   sprrom     the two sprite ROM ports, 6 and 7
+//   peak       the largest `any` seen in the last frame
+//
+// The line boundary is derived here rather than crossed from the video timing:
+// hcnt is a slow-domain counter and sampling it in the fast domain would need
+// care for no benefit, when a free-running divide-by-768 is exact. Both clocks
+// come from one PLL at 2:1, so 768 fast clocks IS a scanline.
+reg [15:0] occ_any, occ_tile, occ_spr, occ_peak;
+reg [15:0] occ_any_l, occ_tile_l, occ_spr_l, occ_peak_l;
+reg [9:0]  occ_div;
+wire       occ_g_any  = |sdr_dbg_grant;
+wire       occ_g_tile = |(sdr_dbg_grant & 9'b0_0001_1101);   // 0,2,3,4
+wire       occ_g_spr  = |(sdr_dbg_grant & 9'b0_1100_0000);   // 6,7
+
+always @(posedge clk_sdram) begin
+	if (occ_div == 10'd767) begin
+		occ_div    <= 10'd0;
+		occ_any_l  <= occ_any;
+		occ_tile_l <= occ_tile;
+		occ_spr_l  <= occ_spr;
+		// Peak resets on the frame, not the line, so one busy scanline in a
+		// frame cannot hide behind an average.
+		occ_peak   <= (occ_any > occ_peak) ? occ_any : occ_peak;
+		occ_any    <= 16'd0;
+		occ_tile   <= 16'd0;
+		occ_spr    <= 16'd0;
+	end else begin
+		occ_div  <= occ_div + 10'd1;
+		if (occ_g_any)  occ_any  <= occ_any  + 16'd1;
+		if (occ_g_tile) occ_tile <= occ_tile + 16'd1;
+		if (occ_g_spr)  occ_spr  <= occ_spr  + 16'd1;
+	end
+end
+
+// Frame boundary, sampled in the slow domain: vbl_rise is one slow clock wide
+// and the values it copies are stable between lines.
+always @(posedge clk_sys) begin
+	if (vbl_rise) begin occ_peak_l <= occ_peak; occ_peak <= 16'd0; end
 end
 
 // Z80 SOUND-PORT CENSUS, to diff against tools/mame_z80_ports.lua.
@@ -2180,10 +2239,12 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 //          waiting for something that never comes
 // The scratch block, pointed at the Z80 sound ports for Wing Force. The 68000
 // probe it carried is no longer needed: Magical Crystals boots.
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? zoki_lat
-                        : (screen_y < 9'd52) ? zym_lat
-                        : (screen_y < 9'd58) ? zlat_lat
-                                             : zbank_lat;
+// The scratch block, pointed at SDRAM occupancy for the sprite-bitmap move.
+// All four are fast clocks out of the 768 a scanline lasts.
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? occ_any_l
+                        : (screen_y < 9'd52) ? occ_tile_l
+                        : (screen_y < 9'd58) ? occ_spr_l
+                                             : occ_peak_l;
 wire       oki_set = oki_row_val[oki_bit];
 
 // Row 9, magenta: the RAW joystick word for pad 1, live — not a per-frame
