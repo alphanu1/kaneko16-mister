@@ -34,21 +34,39 @@ bases, screen geometry, layer count, sprite list size and input wiring.
 An MRA for a game the core cannot run is deliberately not shipped: it looks
 supported and then fails in a way a player cannot diagnose.
 
-## Not finished, as of `Kaneko16_20260822.rbf`
+## Not finished, as of `Kaneko16_20260823.rbf`
 
 This list describes the RBF named above. Every entry is removed in the same
 change as the RBF that fixes it, so if an item is still here it is still true
-of the newest build in this directory.
+of the newest build in this directory. **The heading carries the RBF's name for
+exactly that reason — if they disagree, trust neither and check.**
 
-- Screen rotation is not implemented. Explosive Breaker is a ROT90 game, so it
-  plays sideways on a horizontal monitor until the rotation output stage lands.
-- The sprite renderer still overruns its frame on about 1.5% of frames with
-  heavy content, so sprites occasionally update a frame late. Down from every
-  frame. Debug row 8 counts it.
-- Music is absent: the YM2149s are wired and mixed, but this board's music is
-  OKI samples and the game keeps the PSG volumes at zero. Verify against MAME
-  before treating that as a fault.
-- Screen timing is not PCB-verified (384x264 at 6 MHz, 59.1856 Hz).
+- **Magical Crystals is not shipped.** It has never booted: its MRA never
+  carried a 68000 program ROM, so the region was zero-filled and the CPU
+  executed half a megabyte of zeros. The cause is understood and the fix is in
+  progress; the region is awkward because its two byte lanes are different
+  sizes.
+- **Wing Force has no sound effects**, and no music in the attract demo. Its
+  in-game music is correct. The OKI on that board hangs off the Z80's I/O ports
+  rather than the 68000's bus, and that path is still being chased.
+- Screen timing is not PCB-verified (384x264 at 6 MHz, 59.1856 Hz). The driver
+  uses `set_refresh_hz(60)` with no `set_raw()`, so there is nothing in MAME to
+  check it against; a hardware recording would settle it.
+- Tier 2 and Tier 3 of the driver are not attempted. Shogun Warriors and B.Rap
+  Boys need the CALC3 MCU; Great 1000 Miles Rally, Blood Warrior and Bonk's
+  Adventure need TOYBOX and, for GTMR, the KC-002 sprite chip's 8bpp path.
+
+Removed from this list since 20260822, all confirmed on hardware:
+
+- ~~Screen rotation is not implemented~~ — done, per game and in both
+  directions, **off by default**.
+- ~~The sprite renderer overruns its frame on about 1.5% of frames~~ — the
+  arbitration was changed to serve by deadline rather than equal share, and
+  the overrun counters have read zero since. SDRAM now runs at 96 MHz as well,
+  which is headroom rather than a fix.
+- ~~Music is absent~~ — Explosive Breaker's soundtrack is the OKI and it plays;
+  its level was 12 dB below the Blaze On board and has been raised. Blaze On
+  has music and effects.
 
 ## Layer1 dx +2
 
