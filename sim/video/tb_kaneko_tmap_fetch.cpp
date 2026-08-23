@@ -85,22 +85,33 @@ std::deque<Req> inflight;
 // The three reads are chained (vram_addr depends on scr_data, rom_addr on
 // vram_data), so each must be presented and evaluated in order before the next
 // address is meaningful.
-uint32_t held_scr = 0, held_vram = 0, held_rom = 0;
+uint32_t held_scr = 0, held_vram = 0;
 
 void tick()
 {
     dut->clk = 0; dut->eval();
 
+    // THE TWO MEMORIES DO NOT HAVE THE SAME LATENCY, and modelling them the
+    // same way is what let a real bug hide here.
+    //
+    //   kaneko_vmem   `va_h <= ta_hi[vr_t]`            REGISTERED, one cycle
+    //   kaneko_tilerom `assign req_data = hit0 ? ...`  COMBINATIONAL
+    //
+    // Both were answered from the previous cycle's address. That agreed with
+    // a kaneko_tmap_fetch which also consumed rom_data a cycle late -- two
+    // errors that cancelled, so this test passed while the board drew every
+    // tile two pixels off. The frame gate could not see it either, because it
+    // scores kaneko_tmap_layer, which is combinational and has no such stage.
     dut->scr_data  = scroll_ram[held_scr & 0x1ff];   dut->eval();
     dut->vram_data = vram[held_vram & 0x3ff];        dut->eval();
-    dut->rom_data  = tile_rom[held_rom & (tile_rom.size() - 1)]; dut->eval();
+    dut->rom_data  = tile_rom[dut->rom_addr & (tile_rom.size() - 1)]; dut->eval();
 
     // Capture the addresses this cycle presents, for the next one to answer.
-    // Only when the pipeline is actually advancing.
+    // Only when the pipeline is actually advancing. rom_addr is NOT captured:
+    // its memory answers within the cycle.
     if (dut->ce) {
         held_scr  = dut->scr_addr;
         held_vram = dut->vram_addr;
-        held_rom  = dut->rom_addr;
     }
 
     dut->clk = 1; dut->eval();

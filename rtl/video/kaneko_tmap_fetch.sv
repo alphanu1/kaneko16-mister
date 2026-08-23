@@ -111,6 +111,11 @@ module kaneko_tmap_fetch (
     end
 
     // ------------------------------------------------------------- stage 2
+    // NOT registered here, unlike the tile ROM below, and the asymmetry is
+    // real: kaneko_vmem reads through a flop (`va_h <= ta_hi[vr_t]`) so
+    // vram_data already arrives a cycle after vram_addr, while kaneko_tilerom
+    // answers combinationally. Registering this one too was tried and shifts
+    // the colour by a whole tile.
     wire [15:0] s2_attr = vram_data[15:0];
     wire [15:0] s2_code = vram_data[31:16];
 
@@ -130,6 +135,7 @@ module kaneko_tmap_fetch (
     logic       s3_valid, s3_nibble_hi;
     logic [5:0] s3_colour;
     logic [2:0] s3_cat;
+    logic [7:0] s3_rom_data;
     always_ff @(posedge clk) begin
         if (rst) s3_valid <= 1'b0;
         else if (ce) begin
@@ -137,13 +143,29 @@ module kaneko_tmap_fetch (
             s3_nibble_hi <= s2_nibble_hi;
             s3_colour    <= s2_colour;
             s3_cat       <= s2_cat;
+            // THE ROM BYTE IS CAPTURED WITH THE SELECT THAT CHOOSES ITS HALF.
+            //
+            // `rom_addr` is combinational out of the STAGE 2 registers, so
+            // `rom_data` is the right byte only during stage 2's cycle. It
+            // used to be consumed a cycle later, in stage 3, by which time
+            // stage 2 had advanced and rom_addr was already the NEXT pixel's
+            // address -- so the nibble select belonged to pixel P and the byte
+            // to P+1. Two pixels share a byte, so that landed the data TWO
+            // pixels early: every tile drawn two columns off, tile colour
+            // boundaries included.
+            //
+            // On hardware this was the layer that looked "off by two pixels,
+            // move it left and it would be right", and it is why a one-pixel
+            // vertical stroke came out as two -- the neighbouring column
+            // carried the same byte's other half.
+            s3_rom_data  <= rom_data;
         end
     end
 
     // ------------------------------------------------------------- stage 3
     // LSB variant: an even X takes the LOW nibble. Sprites use the MSB variant
     // and are the other way round — see kaneko_vuspr_pixaddr.
-    wire [3:0] s3_pix = s3_nibble_hi ? rom_data[7:4] : rom_data[3:0];
+    wire [3:0] s3_pix = s3_nibble_hi ? s3_rom_data[7:4] : s3_rom_data[3:0];
 
     always_ff @(posedge clk) begin
         if (rst) begin

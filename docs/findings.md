@@ -5758,3 +5758,70 @@ chain, then a Z80 port census, then past the YM's write port -- each answered
 its question and each answer moved the search. The census was decisive: the Z80
 writing at MAME's rate while producing nothing is what ruled out the CPU, the
 ROM cache, the command path and the OKI in a single reading.
+
+### The tilemap drew two pixels off, and its test agreed with it
+
+Every tile on screen was displaced two pixels horizontally, tile colour
+boundaries included, and a one-pixel vertical stroke came out as two. It had
+been visible for days as "one layer is off by two pixels, move it left and it
+would be right".
+
+`kaneko_tmap_fetch` consumed the tile-ROM byte one pipeline stage too late:
+
+```
+kaneko_tmap_pixaddr u_p (.code(s2_code), ..., .rom_addr(rom_addr), ...);
+wire [3:0] s3_pix = s3_nibble_hi ? rom_data[7:4] : rom_data[3:0];
+```
+
+`rom_addr` is combinational out of the STAGE 2 registers, so `rom_data` is the
+right byte only during stage 2's cycle. Reading it in stage 3 took the byte for
+the NEXT address while the nibble select still belonged to the current pixel.
+Two pixels share a byte, so the data landed two pixels early. The byte is
+captured alongside its select now.
+
+**WHY EVERYTHING PASSED WHILE THE BOARD DREW WRONG**
+
+Three instruments were blind to it at once, and each for its own reason.
+
+`tb_kaneko_tmap_fetch` modelled BOTH memories as registered, answering from the
+previous cycle's address. The RTL read the ROM a cycle late and the bench fed
+it a cycle late: **two errors that cancelled**. 972,776 checks passed. The real
+core has no register there -- `kaneko_tilerom.req_data` is a combinational
+assign wired straight to the fetch in Kaneko16.sv -- while `kaneko_vmem` does
+read through a flop. The two memories have different latency and the bench
+treated them the same.
+
+The frame gate could not see it because it instantiates `kaneko_tmap_layer`,
+which is combinational and has no such stage, and which is not in the
+bitstream. It scored 100.0000% throughout.
+
+`tb_kaneko_tmap_line` fed its ROM the same way, for the same reason.
+
+**THE NEW BENCH, AND WHAT IT COST TO GET RIGHT**
+
+`sim/video/tb_kaneko_tline.cpp` runs the real line-buffered path against
+`kaneko_tmap_layer` as an oracle -- the module the frame gate scores against
+MAME -- and compares every pixel. Getting it to agree took three corrections,
+all in the BENCH, and each looked exactly like an RTL fault:
+
+  * the display reads the bank the fetch is NOT writing, so a line only becomes
+    visible after the next start flips the banks. Reading straight after the
+    fetch returns an empty bank: every pixel zero, indistinguishable from a
+    dead pipeline.
+  * `rom_addr` depends combinationally on `vram_data` through s2_code, so the
+    ROM must be answered AFTER vram_data is applied. Reading it first answers
+    the previous address -- invisible except on the cycle a tile changes, which
+    is where the failures appeared. Flipped tiles made it show up more often.
+  * the VRAM capture must be gated by the pipeline's clock enable. kaneko_vmem
+    has no ce of its own, but its address comes from a stage the enable
+    freezes, so during a stall the data does not move either.
+
+With those fixed: 7,084 checks, 0 fails, with the ROM always ready, with it
+stalling, and across a line preceded by a different line. Reverting the RTL fix
+takes it to 1,708.
+
+A `flush` input was added to clear the pipeline at line start and then REMOVED:
+`x_req` already runs to `h_active + LAT` specifically to drain the pipeline
+before the line ends, so there is nothing left to contaminate the next one. The
+test that would have justified it shows no difference either way, and untested
+RTL is not worth carrying.

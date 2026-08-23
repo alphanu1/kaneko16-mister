@@ -61,7 +61,7 @@ bool stall_enabled = false;
 // Answering in the same tick makes a zero-latency memory. Without stalls that
 // is a consistent shift and the line still looks self-consistent; with stalls
 // the two disagree, which is how it was caught.
-uint32_t held_scr[4] = {0}, held_vram[4] = {0}, held_rom[4] = {0};
+uint32_t held_scr[4] = {0}, held_vram[4] = {0};
 
 void feed() {
     uint64_t scr = 0;
@@ -80,11 +80,34 @@ void feed() {
             ? 0u
             : mix(held_vram[g] * 8 + (same_for_all_layers ? 0 : g) + 0x1000);
 
+    // THE ORDER MATTERS: rom_addr depends combinationally on vram_data, through
+    // s2_code and kaneko_tmap_pixaddr. Reading rom_addr before vram_data has
+    // been applied answers the ROM for the PREVIOUS address, which is
+    // invisible except on the cycle a tile changes -- exactly where this bench
+    // reported failures, and it looks precisely like an RTL fault there.
+    dut->eval();
+
     uint32_t rd = 0;
-    for (int g = 0; g < 4; g++)
+    // THE TILE ROM ANSWERS WITHIN THE CYCLE, THE VRAM DOES NOT.
+    //
+    //   kaneko_tilerom  `assign req_data = hit0 ? line0[...] : line1[...]`
+    //                   wired straight here in Kaneko16.sv, no register
+    //   kaneko_vmem     `va_h <= ta_hi[vr_t]`, so genuinely a cycle late
+    //
+    // Both were answered from the previous cycle's address, which agreed with
+    // a kaneko_tmap_fetch that also read rom_data a cycle late. Two errors
+    // that cancelled: this passed while the board drew every tile two pixels
+    // off, and the frame gate could not see it because it scores the
+    // combinational kaneko_tmap_layer instead.
+    for (int g = 0; g < 4; g++) {
+        const int lo = g * 24;
+        uint64_t w = (uint64_t)dut->rom_addr_f[lo / 32];
+        if ((lo % 32) + 24 > 32) w |= (uint64_t)dut->rom_addr_f[lo / 32 + 1] << 32;
+        const uint32_t cur = (uint32_t)((w >> (lo % 32)) & 0xffffff);
         rd |= (rom_nibble_ramp ? 0x21u
-                               : (mix(held_rom[g] + (same_for_all_layers ? 0 : g) * 0x555) & 0xff))
+                               : (mix(cur + (same_for_all_layers ? 0 : g) * 0x555) & 0xff))
               << (g * 8);
+    }
     dut->rom_data_f = rd;
 
     // Four bits now, one per layer, stalled independently. That independence
@@ -105,10 +128,6 @@ void capture() {
         if (!((dut->rom_ready >> g) & 1)) continue;
         held_scr[g]  = (uint32_t)((dut->scr_addr_f  >> (g * 9))  & 0x1ff);
         held_vram[g] = (uint32_t)((dut->vram_addr_f >> (g * 10)) & 0x3ff);
-        const int lo = g * 24;
-        uint64_t w = (uint64_t)dut->rom_addr_f[lo / 32];
-        if ((lo % 32) + 24 > 32) w |= (uint64_t)dut->rom_addr_f[lo / 32 + 1] << 32;
-        held_rom[g] = (uint32_t)((w >> (lo % 32)) & 0xffffff);
     }
 }
 
