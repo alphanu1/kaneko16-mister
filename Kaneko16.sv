@@ -1902,17 +1902,32 @@ wire [5:0] p2_bits = { ~p2_b2, ~p2_b1, ~p2_right, ~p2_left, ~p2_down, ~p2_up };
 // 0xFFFF -- and the same reading was never applied to these two games.
 //
 //                       Explosive Breaker            Magical Crystals
-//   c00000/e00000  bits 2-7 absent      -> 0    bits 2-7 absent      -> 0
+//   c00000/e00000  bits 2-7 DIPUNUSED   -> 1    bits 2-7 DIPUNUSED   -> 1
 //   c00002/e00002  low byte  absent     -> 0    low byte IPT_UNKNOWN -> ff
 //   c00004/e00004  low byte  absent     -> 0    low byte IPT_UNKNOWN -> ff
 //   c00006         port exists, empty   -> 0    NO SUCH PORT
 //
-// Explosive Breaker plainly never tests any of them, since it has run
-// correctly all along with all of them driven high. Magical Crystals has never
-// booted.
+// Explosive Breaker plainly never tests the ones that differ, since it has run
+// correctly all along. Magical Crystals reaches its test screen and stops with
+// the 68000 masked at level 7, which is what sent this table back to
+// INPUT_PORTS_START to be read bit by bit a second time.
 wire [7:0]  eb_lo   = (game_id == 8'd1) ? 8'hff : 8'h00;   // 1 = mgcrystl
 
-wire [15:0] in_p1_eb  = { 2'b11, p1_bits, 6'b000000, dip_service, dip_flip };
+// BITS 7..2 ARE ONES, NOT ZEROS. They were zeros, and the comment above said
+// they were "absent". They are not absent in either game:
+//
+//   PORT_DIPUNUSED_DIPLOC( 0x0004, 0x0004, "SW1:3" )  /* Listed as "Unused" */
+//   ... 0x0008, 0x0010, 0x0020, 0x0040, 0x0080, all the same shape
+//
+// PORT_DIPUNUSED_DIPLOC(mask, default, loc) with default EQUAL TO THE MASK is a
+// DIP switch in the off position, and these are active low, so the board pulls
+// every one of them HIGH. bakubrkr and mgcrystl declare them identically.
+//
+// Explosive Breaker never tests them, which is why it has run correctly for
+// weeks with all six driven low and why this was not noticed. "Listed as
+// Unused" in the manual describes the CABINET, not the program -- it says
+// nothing about whether the game reads the word.
+wire [15:0] in_p1_eb  = { 2'b11, p1_bits, 6'b111111, dip_service, dip_flip };
 wire [15:0] in_p2_eb  = { 2'b11, p2_bits, eb_lo };
 wire [15:0] in_sys_eb = { 1'b1, ~svc_coin, ~pause, 1'b1,
                           ~coin2, ~coin1, ~start2, ~start1, eb_lo };

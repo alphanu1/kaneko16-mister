@@ -344,13 +344,15 @@ module kaneko_cpumem_harness #(
         .clk(clk), .rst(rst),
         .ioctl_wr(ioctl_wr),
         .ioctl_index(ioctl_index[7:0]), .ioctl_dout(ioctl_dout[7:0]),
-        .game_id(),
         .pg_wram(PG_WRAM), .pg_v2w0(PG_V2W0), .pg_v2w1(PG_V2W1),
         .pg_spr(PG_SPR), .pg_pal(PG_PAL), .pg_wdog(PG_WDOG),
         .pg_snd(PG_SND), .pg_in(PG_IN),
         .rom_1mb(ROM_1MB), .blazeon_io(BLAZEON_IO),
         .base_trom0(), .base_trom1(), .base_spr(),
         .base_oki(CFG_OKI_BASE), .oki_max_bank(CFG_OKI_MAX_BANK),
+        // Needed to build the input words, which are per GAME and not per
+        // board -- see the in_p1/in_system comment below.
+        .game_id(CFG_GAME_ID),
         .v2_dx(), .v2_dy(), .view2_2_pri(), .spr_pri_f(),
         .two_chips(), .spr_count(), .spr_xoffs(), .visarea_min_y(),
         .wide_screen(),
@@ -424,7 +426,19 @@ module kaneko_cpumem_harness #(
         .reg_addr(h_reg_addr), .reg_din(h_reg_din),
         .v2r0_q(h_v2r0_q), .v2r1_q(h_v2r1_q), .sprreg_q(h_sprreg_q),
 
-        .in_p1(16'hffff), .in_p2(16'hffff),
+        // PER GAME, BIT BY BIT, THE SAME WAY THE TOP LEVEL BUILDS THEM.
+        //
+        // These were a blanket 0xffff, and that blanket is what hid the
+        // Magical Crystals fault for a whole session: the core drove DSW bits
+        // 7..2 LOW while this harness drove them HIGH, so the game passed its
+        // check here, unmasked, took interrupts and ran -- and failed on the
+        // board, where the same six bits read zero. Simulation and hardware
+        // disagreed because the harness was feeding an idealised word.
+        //
+        // Both games declare bits 7..2 as PORT_DIPUNUSED_DIPLOC with default
+        // equal to mask, i.e. pulled high; the SYSTEM low byte is defined on
+        // mgcrystl (0xff) and absent on bakubrkr (0x00).
+        .in_p1(16'hffff), .in_p2({8'hff, CFG_SYS_LO}),
         // EVERY window page comes from the game table, exactly as the top
         // level wires them. They used to be left unconnected, which ties them
         // to 0 — so every window decoded at page 0x00, where the ROM lives,
@@ -440,7 +454,8 @@ module kaneko_cpumem_harness #(
         // bits read zero. Tying it to all-ones here is what let the core ship
         // the same mistake — a harness that feeds an idealised value cannot
         // catch a wrong one.
-        .in_system(INPUTS_BLAZEON ? 16'hff00 : 16'hffff), .in_unk(16'hffff),
+        .in_system(INPUTS_BLAZEON ? 16'hff00 : {8'hff, CFG_SYS_LO}),
+        .in_unk(16'hffff),
 
         .unmapped_hit(unmapped_hit), .unmapped_addr(unmapped_addr)
     );
@@ -513,6 +528,12 @@ module kaneko_cpumem_harness #(
     // Same fault the core had and hard rule 9 exists for.
     wire [SDR_AW:1] CFG_OKI_BASE;
     wire [2:0]      CFG_OKI_MAX_BANK;
+    wire [7:0]      CFG_GAME_ID;
+    // mgcrystl declares the SYSTEM/P2 low byte as IPT_UNKNOWN, so it reads
+    // 0xff; bakubrkr does not declare it at all, so it reads 0x00. Undefined
+    // bits in a MAME port read ZERO -- that is the whole rule, and it has now
+    // caught three separate bugs in this project.
+    wire [7:0]      CFG_SYS_LO = (CFG_GAME_ID == 8'd1) ? 8'hff : 8'h00;
 
     wire [17:0] oki_rom_addr;
     wire [7:0]  oki_rom_data;
