@@ -6359,3 +6359,37 @@ broken Z80 port write.
 
 Whether this fixes the OKI is not yet established. It is a real divergence on a
 word the game samples every frame, which is enough to fix on its own.
+
+### Wing Force: the 980000 fix was not the audio fault, 2026-08-23
+
+Tested on hardware with the second sprite register window implemented. **No
+change**: still no OKI effects and no music in the attract demo.
+
+Worth stating plainly, because the fix looked promising and was not. The
+game had been reading `0xffff` from `980004`-`98001f` since nineteen bus
+accesses into boot, so every decision it took afterwards was made on values
+the hardware never produces. That was a real defect and it had to be fixed
+before any measurement of this game meant anything — but it was not this.
+
+What the census establishes, and what it does not:
+
+| | |
+|---|---|
+| Z80 writes the YM2151 | **14 per frame**, inside MAME's 8-19 |
+| Z80 writes the OKI | **0**, where MAME writes it during the demo |
+| Z80 reads the sound latch | reads 0 per frame, but see below |
+| 68000 writes the latch | MAME does it **6 times in 1,500 frames** |
+
+The latch and OKI rows are per-frame counters watching events that happen a
+handful of times a run, so "always 0" on those two means "too rare for this
+counter", not "never happened". They need to be cumulative and saturating
+before anything is concluded from them. The YM row is trustworthy because 14
+a frame is frequent enough to read.
+
+So the established fact is narrow and solid: **the Z80 runs its music driver
+at the oracle's rate and never writes the OKI.** The fault is upstream of
+jt6295, whose status read returns `{4'hf, busy|start}` -- the same shape as
+MAME's `0xf0 | playing-flags` -- so the chip is not implicated.
+
+Parked deliberately. Tier 2 shares this board's sound topology and may show
+the same fault from an angle where it is easier to see.
