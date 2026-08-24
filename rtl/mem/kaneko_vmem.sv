@@ -36,31 +36,6 @@ module kaneko_vmem (
     input  wire [15:0] cpu_din,
     input  wire        we_vram0, we_vram1, we_spr, we_pal,
     input  wire        uds, lds,       // byte enables, active high
-
-    // ------------------------------------------- the shared VIEW2 read port
-    // ONE READ PORT PER ARRAY, SHARED BY THE CPU AND THE TILE FETCH.
-    //
-    // These arrays used to be read at two addresses in the same cycle: the CPU
-    // read-back and the video fetch. An M10K has one read port, so Quartus
-    // built TWO COPIES of every one of them, silently, and only while blocks
-    // were spare. That cost 32 of the device's 553 blocks on a design sitting
-    // at 94%, and it is what stopped Tier 2 fitting.
-    //
-    // Sharing is affordable because the CPU almost never reads VIEW2. Measured
-    // on Explosive Breaker over 2,700 frames: 3,704 reads against 233,432
-    // writes on chip 0, and chip 1 was never read at all. That is 1.4 reads a
-    // frame, against a frame of 811,000 clocks.
-    //
-    // `cpu_rd` asks for the cycle. `vid_stall` says the cycle AFTER, when the
-    // video side's registered data is the CPU's instead and the tile fetch
-    // must not sample it. The fetch already has a `ce` for exactly this, used
-    // today when the tile ROM is not ready.
-    //
-    // The palette is deliberately NOT shared. Its reader is the mixer, which
-    // reads every pixel during scanout and cannot be stalled without
-    // corrupting the picture.
-    input  wire        cpu_rd,
-    output logic       vid_stall,
     output wire  [15:0] q_vram0, q_vram1, q_spr, q_pal,
 
     // ---- video side, read only.
@@ -148,15 +123,6 @@ module kaneko_vmem (
     //     and there is no simple-dual-port left to infer. Mux the registered
     //     outputs afterwards instead, which costs a 4:1 mux of 16 bits.
 
-    // The steal happens on the cycle cpu_rd is asserted; the wrong data is in
-    // the video registers the cycle AFTER, which is both the cycle to stall
-    // and the cycle the CPU's copy is taken.
-    logic cpu_rd_d;
-    always_ff @(posedge clk) begin
-        cpu_rd_d  <= cpu_rd;
-        vid_stall <= cpu_rd;
-    end
-
     logic [15:0] cpu_rq [0:1];
     logic [1:0]  rd_quarter [0:1];      // registered decode, for the mux below
 
@@ -187,10 +153,6 @@ module kaneko_vmem (
                 logic [7:0] ca_h, ca_l, cc_h, cc_l, cs_h, cs_l;   // CPU side
                 logic [7:0] va_h, va_l, vc_h, vc_l, vs_h, vs_l;   // video side
 
-                // The shared read address. The CPU wins the cycle it asks for.
-                wire [9:0]  rd_t = cpu_rd ? t_idx : vr_t;
-                wire [10:0] rd_s = cpu_rd ? s_idx : vr_s;
-
                 always_ff @(posedge clk) begin
                     if (tile_sel && !is_code && uds) ta_hi[t_idx] <= cpu_din[15:8];
                     if (tile_sel && !is_code && lds) ta_lo[t_idx] <= cpu_din[7:0];
@@ -199,32 +161,14 @@ module kaneko_vmem (
                     if (scr_sel && uds) sc_hi[s_idx] <= cpu_din[15:8];
                     if (scr_sel && lds) sc_lo[s_idx] <= cpu_din[7:0];
 
-                    // ONE READ PER ARRAY, INTO ONE REGISTER, UNCONDITIONALLY.
-                    //
-                    // The shape matters as much as the count. The first
-                    // version read each array twice -- once unconditionally
-                    // for the video side and once inside `if (cpu_rd)` for the
-                    // CPU -- and Quartus inferred no read port at all from
-                    // that: the arrays became logic and the fitter asked for
-                    // 194,328 ALMs against the device's 41,910. Block usage
-                    // dropped exactly as intended while the design stopped
-                    // fitting by a factor of five.
-                    //
-                    // So each array is read once, into the video register, and
-                    // the CPU's copy is taken FROM THAT REGISTER a cycle later.
-                    // That is a register-to-register move, not a second read
-                    // port, and it costs the CPU one extra cycle of latency --
-                    // which it has, because the 68000's access is four clocks
-                    // and it is asking about 1.4 times a frame.
-                    va_h <= ta_hi[rd_t];   va_l <= ta_lo[rd_t];
-                    vc_h <= tc_hi[rd_t];   vc_l <= tc_lo[rd_t];
-                    vs_h <= sc_hi[rd_s];   vs_l <= sc_lo[rd_s];
+                    // Unconditional reads, each into its own register.
+                    ca_h <= ta_hi[t_idx];  ca_l <= ta_lo[t_idx];
+                    cc_h <= tc_hi[t_idx];  cc_l <= tc_lo[t_idx];
+                    cs_h <= sc_hi[s_idx];  cs_l <= sc_lo[s_idx];
 
-                    if (cpu_rd_d) begin
-                        ca_h <= va_h;  ca_l <= va_l;
-                        cc_h <= vc_h;  cc_l <= vc_l;
-                        cs_h <= vs_h;  cs_l <= vs_l;
-                    end
+                    va_h <= ta_hi[vr_t];   va_l <= ta_lo[vr_t];
+                    vc_h <= tc_hi[vr_t];   vc_l <= tc_lo[vr_t];
+                    vs_h <= sc_hi[vr_s];   vs_l <= sc_lo[vr_s];
                 end
 
                 wire [31:0] tile_q = {vc_h, vc_l, va_h, va_l};

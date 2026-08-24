@@ -440,13 +440,6 @@ module kaneko_cpumem_harness #(
         .vram0_we(vram0_we), .vram1_we(vram1_we),
         .spr_we(spr_we), .pal_we(pal_we),
         .vmem_addr(vmem_addr), .vmem_din(vmem_din),
-        // THE SHARED VIEW2 READ PORT, which this harness did not carry.
-        // kaneko_vmem's cpu_rd was left off the instance below, so it sat at
-        // zero, the CPU-side read-back never updated, and the one harness
-        // holding kaneko_bus and kaneko_vmem together could not see whether a
-        // 68000 read of VIEW2 returns the right value. It does not, unless the
-        // bus waits for the port's latency -- which is what this now covers.
-        .vram_rd(h_vram_rd),
         .vram0_q(q_vram0), .vram1_q(q_vram1), .spr_q(q_spr), .pal_q(q_pal),
 
         .ym0_we(ym0_we), .ym1_we(ym1_we), .ym_addr(ym_addr), .ym_din(ym_din),
@@ -628,12 +621,9 @@ module kaneko_cpumem_harness #(
         end
     end
 
-    wire h_vram_rd, h_vid_stall;
-
     kaneko_vmem u_vmem
     (
         .clk(clk),
-        .cpu_rd(h_vram_rd), .vid_stall(h_vid_stall),
         .cpu_addr(vmem_addr), .cpu_din(vmem_din),
         .we_vram0(vram0_we), .we_vram1(vram1_we),
         .we_spr(spr_we), .we_pal(pal_we),

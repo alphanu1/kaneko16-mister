@@ -82,12 +82,6 @@ module kaneko_bus #(
 
     // ---- video-side memories, written by the CPU
     output logic        vram0_we, vram1_we, spr_we, pal_we,
-    // A VIEW2 READ, which now claims a shared port. kaneko_vmem's tile and
-    // scroll arrays have one read port between the CPU and the tile fetch, so
-    // the CPU has to ask for the cycle. Raised for the access cycle of a read
-    // from either VIEW2 window and low otherwise -- the games read these about
-    // 1.4 times a frame, so the fetch is almost never stalled.
-    output logic        vram_rd,
     output logic [12:0] vmem_addr,     // word address within the selected window
     output logic [15:0] vmem_din,
     input  wire  [15:0] vram0_q, vram1_q, spr_q, pal_q,
@@ -324,9 +318,7 @@ module kaneko_bus #(
     assign snd_din    = oEdb[15:8];
 
     // ---------------------------------------------------------- sequencing
-    typedef enum logic [2:0] { S_IDLE, S_ROM, S_DONE, S_VRAM } state_t;
-    // Edges still to wait before a VIEW2 read-back is valid. See S_VRAM.
-    logic [1:0] vwait;
+    typedef enum logic [1:0] { S_IDLE, S_ROM, S_DONE } state_t;
     state_t state;
 
     logic [15:0] rom_word;
@@ -386,7 +378,6 @@ module kaneko_bus #(
 
     always_ff @(posedge clk) begin
         vram0_we <= 1'b0; vram1_we <= 1'b0; spr_we <= 1'b0; pal_we <= 1'b0;
-        vram_rd  <= 1'b0;
         v2r0_we  <= 1'b0; v2r1_we  <= 1'b0; sprreg_we <= 1'b0; sprreg2_we <= 1'b0;
         ym0_we   <= 1'b0; ym1_we   <= 1'b0; eeprom_we <= 1'b0;
         oki_we   <= 1'b0; snd_we <= 1'b0;
@@ -396,7 +387,6 @@ module kaneko_bus #(
 
         if (rst) begin
             state      <= S_IDLE;
-            vwait      <= 2'd0;
             DTACKn     <= 1'b1;
             rom_req    <= 1'b0;
             cvalid     <= '0;
@@ -426,10 +416,6 @@ module kaneko_bus #(
                                 state    <= S_ROM;
                             end
                         end else begin
-                            // The read half of the same access cycle. Raised
-                            // for a READ of either VIEW2 window; `wr` below
-                            // handles the write half.
-                            vram_rd <= ~wr && (sel_v2w0 || sel_v2w1);
                             if (wr) begin
                                 vram0_we  <= sel_v2w0;
                                 vram1_we  <= sel_v2w1;
@@ -471,29 +457,8 @@ module kaneko_bus #(
                             // behind; answering on this edge would hand the CPU
                             // whatever register the previous access happened to
                             // land on. They spend the extra edge.
-                            //
-                            // AND SO IS VIEW2, SINCE ITS READ PORT WAS SHARED.
-                            // kaneko_vmem no longer has a read port per
-                            // reader: the array is read once into the video
-                            // register, the CPU's copy is taken from that
-                            // register a cycle later, and the read-back mux
-                            // registers it again. So vram0_q/vram1_q are valid
-                            // THREE edges after vram_rd, not on this one.
-                            //
-                            // Answering here hands the 68000 whatever the
-                            // previous VIEW2 read left behind. Explosive
-                            // Breaker reads VIEW2 1.4 times a frame and never
-                            // showed it; Magical Crystals reads it 724 times a
-                            // frame and read-modify-writes its tilemap, so it
-                            // wrote the stale value back and the picture came
-                            // apart in bands.
-                            if (!wr && (sel_v2w0 || sel_v2w1)) begin
-                                vwait <= 2'd2;
-                                state <= S_VRAM;      // DTACK deliberately not
-                            end else begin            // asserted yet
-                                if (!(sel_ym0 || sel_ym1)) DTACKn <= 1'b0;
-                                state <= S_DONE;
-                            end
+                            if (!(sel_ym0 || sel_ym1)) DTACKn <= 1'b0;
+                            state <= S_DONE;
                         end
                     end
                 end
@@ -530,18 +495,6 @@ module kaneko_bus #(
                     // register has not been written yet on this edge.
                     rom_word <= {burst_word[7:0], burst_word[15:8]};
                     state    <= S_DONE;
-                end
-
-                // The shared VIEW2 read port's latency, spent as edges. The
-                // count is the number of extra cycles kaneko_vmem needs before
-                // its CPU-side output is the value just asked for.
-                S_VRAM: begin
-                    if (vwait != 2'd0) begin
-                        vwait <= vwait - 2'd1;
-                    end else begin
-                        DTACKn <= 1'b0;
-                        state  <= S_DONE;
-                    end
                 end
 
                 S_DONE: begin

@@ -629,9 +629,6 @@ fx68k u_cpu
 );
 
 wire        vram0_we, vram1_we, spr_we, pal_we;
-// The CPU claiming kaneko_vmem's shared VIEW2 read port, and the stall it costs
-// the tile fetch the cycle after.
-wire        vram_rd, vmem_vid_stall;
 wire        ym0_we, ym1_we, eeprom_we, oki_we;
 wire [7:0]  oki_din, oki_dout;
 wire        oki2_we, okibk_we;
@@ -665,7 +662,6 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.rom_req(p1_req), .rom_addr(p1_addr), .rom_ack(p1_ack), .rom_dout(p1_dout),
 
 	.vram0_we(vram0_we), .vram1_we(vram1_we), .spr_we(spr_we), .pal_we(pal_we),
-	.vram_rd(vram_rd),
 	.vmem_addr(vmem_addr), .vmem_din(vmem_din),
 	.vram0_q(q_vram0), .vram1_q(q_vram1), .spr_q(q_spr), .pal_q(q_pal),
 
@@ -718,7 +714,6 @@ kaneko_vmem u_vmem
 	.clk(clk_sys),
 	.cpu_addr(vmem_addr), .cpu_din(vmem_din),
 	.we_vram0(vram0_we), .we_vram1(vram1_we),
-	.cpu_rd(vram_rd), .vid_stall(vmem_vid_stall),
 	.we_spr(spr_we), .we_pal(pal_we),
 	.uds(~UDSn), .lds(~LDSn),
 	.q_vram0(q_vram0), .q_vram1(q_vram1), .q_spr(q_spr), .q_pal(q_pal),
@@ -1952,7 +1947,7 @@ kaneko_tmap_line #(.H_VIS(320)) u_line
 	.scr_addr_f(ln_scr_addr),   .scr_data_f(ln_scr_data),
 	.vram_addr_f(ln_vram_addr), .vram_data_f(ln_vram_data),
 	.rom_addr_f(trom_addr_f),   .rom_data_f(trom_data_f),
-	.rom_ready(trom_ready), .vmem_stall(vmem_vid_stall),
+	.rom_ready(trom_ready),
 
 	.rd_x(screen_x),
 	.out_solid(mix_solid), .out_cat_f(mix_cat),

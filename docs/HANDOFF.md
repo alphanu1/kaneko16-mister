@@ -253,6 +253,39 @@ on purpose before trusting it.
    orientation rather than the rotation to apply, because on a portrait
    monitor a ROT90 game wants no rotation while a ROT0 game wants 90 degrees.
 
+1. **Tier 2 and Tier 3 should become their own core. NOT branched yet, by
+   decision -- finish Tier 1 first.** Recorded 2026-08-24.
+
+   The bisect that found the Magical Crystals regression measured what Tier 2
+   costs this device, and the numbers say it does not belong in the same
+   bitstream as Tier 1:
+
+   | commit | state |
+   |---|---|
+   | `bc2f4d1` second OKI, NPORTS 9->10 | good, +0.548 ns |
+   | `67ea051` hit calculator + 64 KB MCU RAM | **cannot fit** -- 6773 LABs against the device's 4191 |
+   | `239d83f` MCU RAM cut to 8 KB | **cannot close timing** -- -0.773 ns |
+   | `355bf50` VIEW2 read port shared | fits and times, but **breaks Magical Crystals** |
+
+   Read in order that is one story: Tier 2 did not fit, the port sharing was
+   done to make room, and the room was bought by breaking a Tier 1 game. The
+   64 KB of MCU RAM alone asks for more logic than the whole device has,
+   because it does not infer into M10K.
+
+   So the plan is a separate core for the CALC3 board, branched from a
+   commit verified on hardware, with Tier 1 keeping the block memory and the
+   nine SDRAM ports it actually needs. Two candidates for the branch point:
+
+   - `bc2f4d1` -- the newest commit VERIFIED GOOD on hardware that already
+     carries the CALC3 second OKI. Needs the two-line `p9_ack`/`p9_dout`
+     declaration fix that `239d83f` supplied, because it does not compile as
+     pushed.
+   - `f8c00ac` -- current main, which carries the hit calculator and the ROM
+     tables as well, none of it hardware-verified.
+
+   Nothing is branched yet. Branching fixes a point in history and there was
+   no reason to fix one before Tier 1 was finished.
+
 1. **Screen timing is not PCB-verified.** MAME uses `set_refresh_hz(60)` with
    no `set_raw()`. We run 384x264 at 6 MHz, 59.1856 Hz. No amount of simulation
    resolves this — it needs a hardware reference or a PCB capture. Wing Force's

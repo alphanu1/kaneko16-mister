@@ -60,8 +60,6 @@ module kaneko_tmap_line #(
     output wire [95:0] rom_addr_f,     // 4 x 24
     input  wire [31:0] rom_data_f,     // 4 x 8
     input  wire [3:0]  rom_ready,     // kaneko_tilerom: per-port hit
-    // From kaneko_vmem: the cycle after the CPU stole the shared read port.
-    input  wire        vmem_stall,
 
     // Display read port. Combinational address, data one clock later.
     input  wire [8:0]  rd_x,
@@ -92,19 +90,7 @@ module kaneko_tmap_line #(
     // WORST layer rather than the sum of all four.
     logic [9:0] x_req [0:3];
     logic [9:0] x_wr  [0:3];
-    // THE SHARED VIEW2 READ PORT COSTS A CYCLE WHEN THE CPU TAKES IT.
-    //
-    // kaneko_vmem's tile and scroll arrays have one read port between this
-    // fetch and the 68000's read-back. When the CPU claims a cycle, the data
-    // registered for the video side is the CPU's, and vmem raises vid_stall
-    // for exactly the cycle that wrong data is visible. Freezing `ce` then is
-    // the same mechanism already used when the tile ROM is not ready, and
-    // kaneko_tmap_fetch's header records that it freezes without losing or
-    // duplicating a pixel.
-    //
-    // It costs almost nothing: measured on Explosive Breaker, the CPU reads
-    // VIEW2 about 1.4 times a frame against a frame of 811,000 clocks.
-    wire  [3:0] ce = rom_ready & {4{~vmem_stall}};
+    wire  [3:0] ce = rom_ready;
     wire  [3:0] req_valid;
     wire  [3:0] layer_done;
 
