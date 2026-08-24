@@ -119,8 +119,49 @@ local function scan()
   end
 end
 
+-- ------------------------------------------------------------- gameplay
+--
+-- Attract mode is not what the fault was reported against, and the two do not
+-- draw the same sprites. With PLAY=1 this drops a coin, presses start, and
+-- then holds fire and walks, so the census covers a level rather than a demo.
+-- The player dies eventually and the game returns to attract, which is why the
+-- coin and start are re-pressed on a cycle rather than once.
+local PLAY = (os.getenv("SPR_PLAY") or "0") ~= "0"
+
+-- Port tags carry a LEADING COLON -- ":SYSTEM", not "SYSTEM". The first
+-- version of this looked them up without it, got nil for every port, and
+-- returned quietly; the census then reported the attract loop's numbers
+-- unchanged and looked exactly like an answer. A missing port or field is an
+-- error here for that reason, not a no-op.
+local function hold(port, field, on)
+  local p = mach.ioport.ports[port]
+  if not p then error("no such ioport: " .. port) end
+  local f = p.fields[field]
+  if not f then error("no such field: " .. port .. " / " .. field) end
+  f:set_value(on and 1 or 0)
+end
+
+local function play_tick()
+  -- A short repeating script: coin, start, then fire and move. Frame numbers
+  -- are relative to a 900-frame cycle so a death and return to attract is
+  -- picked up again rather than leaving the rest of the run in the demo.
+  local t = frames % 900
+  if     t ==  60 then hold(":SYSTEM", "Coin 1", true)
+  elseif t ==  66 then hold(":SYSTEM", "Coin 1", false)
+  elseif t == 120 then hold(":SYSTEM", "1 Player Start", true)
+  elseif t == 126 then hold(":SYSTEM", "1 Player Start", false)
+  elseif t == 180 then hold(":P1", "P1 Button 1", true)
+  elseif t > 180 then
+    -- Sweep left and right so the level scrolls and new enemies spawn.
+    local phase = (t // 120) % 2 == 0
+    hold(":P1", "P1 Left",  phase)
+    hold(":P1", "P1 Right", not phase)
+  end
+end
+
 function census_tick()
   frames = frames + 1
+  if PLAY then play_tick() end
   scan()
   if frames % 300 == 0 then
     emu.print_info(string.format(
