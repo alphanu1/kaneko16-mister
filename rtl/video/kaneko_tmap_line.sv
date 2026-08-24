@@ -59,9 +59,9 @@ module kaneko_tmap_line #(
     input  wire [127:0] vram_data_f,   // 4 x 32
     output wire [95:0] rom_addr_f,     // 4 x 24
     input  wire [31:0] rom_data_f,     // 4 x 8
-    input  wire [3:0]  rom_ready,
+    input  wire [3:0]  rom_ready,     // kaneko_tilerom: per-port hit
     // From kaneko_vmem: the cycle after the CPU stole the shared read port.
-    input  wire        vmem_stall,      // kaneko_tilerom: per-port hit
+    input  wire        vmem_stall,
 
     // Display read port. Combinational address, data one clock later.
     input  wire [8:0]  rd_x,

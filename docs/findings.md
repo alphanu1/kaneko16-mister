@@ -6520,6 +6520,73 @@ wrap. Reverting the reduction now gives 911,684 out-of-range fetches and
 Same family as every other default that returned a plausible value: the
 harness answered instead of failing.
 
+### Explosive Breaker's tilemap is one pixel right, and it is chip 1 layer 0, 2026-08-24
+
+The frame gate localises this exactly. On the attract frame at 600:
+
+```
+explbrkr, LAYERS=4 (chip 1 layer 0 alone)
+  sweep xadj  -2      -1       0      +1      +2
+            9602       0    9589    9873    9945
+```
+
+**Zero at xadj = -1.** Not "fewer", zero: all 57,344 pixels agree. Our
+renderer is otherwise exact on this frame and the whole error is a constant
+one-pixel shift to the right.
+
+It is confined to layer 2 -- chip 1, layer 0. Layers 0, 1 and 3 contribute no
+differences because nothing else is visible on this frame; `LAYERS=4` alone
+reproduces the entire diff, and the whole-frame sweep has the same shape.
+
+Not line scroll. `LSADJ=-1`, `0` and `+1` all give 9589, and `LSMODE=screen`
+gives 9589 -- the index cannot matter because the values are not varying.
+That rules out the phase error the mgcrystl investigation left open, at least
+for this game.
+
+Magical Crystals does NOT want the same shift:
+
+```
+mgcrystl, all layers
+  sweep xadj  -2      -1       0      +1      +2
+            4089    2336     298    2860    4523
+```
+
+Best at 0, with 298 residual. So this is per-game or per-chip and a global
+correction would break Magical Crystals -- hard rule 9. What is NOT yet
+explained is why, because every input differs only in the data:
+
+| | explbrkr | mgcrystl |
+|---|---|---|
+| `v2_dx` | 91 | 91 |
+| `h_vis` / `v_start` | 256 / 16 | 256 / 16 |
+| `set_offset` in MAME | `(0x5b, -0x8, 256, 240)` | `(0x5b, -0x8, 256, 240)` |
+| layer 2 `scroll_x` | **0xa290** | 0x6940 |
+
+MAME configures the two identically. The one difference is that Explosive
+Breaker's layer 2 scroll carries a **sub-pixel fraction** -- `0xa290 & 0x3f` is
+0x10 -- where every other layer in both games is an exact multiple of 64. That
+is the obvious suspect and it is not yet proven; `scroll_sum[15:6]` truncates
+exactly as `(layer0_scrollx + scroll) >> 6` does, so the divergence is not in
+the shift itself.
+
+Not fixed. Recorded with the measurement that pins it, because tuning a
+constant until Explosive Breaker matches is precisely what hard rule 9
+forbids.
+
+### The VIEW2 tile code is not bounded either -- latent
+
+`kaneko_tmap.sv` forms `tile_base = {1'b0, code, 7'd0}` with nothing bounding
+the code, the same omission the sprite path had. A VIEW2 tile is
+`gfx_8x8x4_row_2x2_group_packed_lsb` -- 16x16, 128 bytes, LSB nibble order --
+so Explosive Breaker's 0x100000 regions hold 8192 tiles against a 16-bit code
+field.
+
+Measured with `tools/mame_view2_codes.lua` over 8851 frames and 36,253,696
+tile entries: **zero** codes at or above 8192, highest seen 0x1d1e. So it
+cannot be causing anything on this game today. Left recorded rather than
+fixed, because unlike the sprite case there is no measurement showing it
+matters, and every region here is a power of two where a mask would do.
+
 ### Both bitstreams render Explosive Breaker's sprites identically
 
 Checked because the fault was reported against the release while the build on
