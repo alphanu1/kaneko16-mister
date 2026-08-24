@@ -81,7 +81,10 @@ module kaneko_vuspr_draw #(
     input  wire         skip_en,
 
     input  wire         start,
-    input  wire [10:0]  sprite_count,        // 1024, or 512 on the Blaze On board
+    input  wire [10:0]  sprite_count,      // 1024, or 512 on the Blaze On board
+    // The sprite code is reduced modulo this before it is fetched -- the
+    // number of sprite tiles the ROM region holds. See kaneko_gamecfg.
+    input  wire [17:0]  spr_elements,
     output logic        busy,
     output logic        done,
 
@@ -128,6 +131,42 @@ module kaneko_vuspr_draw #(
     logic [1:0]        s_prio;
     logic              s_flipx, s_flipy;
     logic signed [9:0] s_x, s_y;
+
+    // ------------------------------------------- the sprite code modulus
+    //
+    //     const u8 *source_base = gfx->get_data(code % gfx->elements());
+    //
+    // kaneko_spr.cpp, and the reason it matters is that two of these games'
+    // element counts are NOT powers of two -- 18432 for Explosive Breaker and
+    // 20480 for Magical Crystals -- so a mask cannot stand in for it. A code
+    // past the end fetches from beyond the sprite region, which for Explosive
+    // Breaker is SDRAM nothing ever wrote: all-zero nibbles, fully
+    // transparent, and the sprite vanishes while its game logic runs on.
+    //
+    // Restoring division by conditional subtraction, taken combinationally in
+    // the one cycle S_LATCH occupies. Five stages cover a quotient up to 31; a
+    // 17-bit code against the smallest region here needs 7, so there is room
+    // for a smaller region than any game currently has.
+    //
+    // WHAT THE SILICON DOES IS NOT KNOWN. A PCB would mask address lines, not
+    // divide, and for the four power-of-two regions the two are the same
+    // answer. Where they differ this follows the oracle, because the oracle is
+    // the standard everything else here is measured against.
+    function automatic [16:0] reduce_code(input [16:0] c, input [17:0] e);
+        logic [21:0] rem, e1;
+        begin
+            rem = {5'd0, c};
+            e1  = {4'd0, e};
+            if (rem >= (e1 << 4)) rem = rem - (e1 << 4);
+            if (rem >= (e1 << 3)) rem = rem - (e1 << 3);
+            if (rem >= (e1 << 2)) rem = rem - (e1 << 2);
+            if (rem >= (e1 << 1)) rem = rem - (e1 << 1);
+            if (rem >=  e1)       rem = rem -  e1;
+            reduce_code = rem[16:0];
+        end
+    endfunction
+
+    wire [16:0] code_mod = reduce_code(tbl_data[16:0], spr_elements);
 
     // --------------------------------------------------- pixel address maths
     wire [3:0] px = s_flipx ? ~xx : xx;
@@ -251,7 +290,7 @@ module kaneko_vuspr_draw #(
                         state    <= S_FETCH;
                     end
                 end else begin
-                    s_code   <= tbl_data[16:0];
+                    s_code   <= code_mod;
                     s_colour <= tbl_data[22:17];
                     s_prio   <= tbl_data[24:23];
                     s_flipx  <= tbl_data[25];

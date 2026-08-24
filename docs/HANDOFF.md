@@ -188,6 +188,13 @@ which counts sprite passes that did not finish before the next frame.
   whatever sits late in the list is never reached. That matches the symptom
   exactly.
 
+**Partly answered 2026-08-24**: the sprite code was never reduced modulo the
+ROM region, so codes past its end fetched from outside it and drew nothing.
+Fixed, with a per-game modulus -- but measured at only 283 on-screen sprites in
+7081 attract frames, so it is not established to be the whole fault. See
+`docs/findings.md`. The next measurement is gameplay rather than attract, and
+the structural gap is that the frame gate does not render sprites at all.
+
 Already ruled out: the offscreen skip (tester turned it Off, no change), the
 sprite ROM layout (matches ROM_START including both ROM_RELOADs), keep_sprites
 (low-byte write only, inverted bit 2, starts false), the list size and the
@@ -228,18 +235,23 @@ on purpose before trusting it.
    before writing any of the bitmap move. Tier 2 is unaffected -- it uses
    VU-002 and the bitmap already built.
 
-1. **Rotation has no setting that is correct on a physically vertical
-   monitor.** Reported from hardware 2026-08-23: the OSD offers Off, Auto
-   (per game), CW and CCW, and on a monitor turned to portrait the picture
-   comes out rotated in every position, none of them right.
+1. **Rotation: the 180 setting was missing. Added 2026-08-24, UNTESTED on a
+   turned monitor.** Reported from hardware 2026-08-23 as "rotated in every
+   position, right in none" on a physically portrait monitor. The reason turns
+   out to be plain: with Off, CW and CCW the OSD offered three of the four
+   quarter turns, so if the correct one was the half turn no setting could
+   reach it.
 
-   Worth thinking through rather than adding a fourth option blindly. On a
-   portrait monitor a ROT90 game wants NO rotation, while a ROT0 game wants
-   90 degrees -- the opposite of what the same settings mean on a landscape
-   monitor. So the option may need to express the DISPLAY's orientation
-   rather than the rotation to apply, or Auto needs to know the display is
-   turned. MiSTer's own `video_rotate` and the `ROTATE_CCW`/`no_rotate` OSD
-   conventions in other cores are the reference to check first.
+   `screen_rotate` asks for a half turn by NOT rotating and raising `flip`
+   (`do_flip <= no_rotate && flip`), keeping the framebuffer because
+   `fb_en <= ~no_rotate | flip`. This core had `flip` tied to `1'b0`, so the
+   option existed in the framework and not in the menu. Now `O[26:24]`, five
+   positions: Off, Auto, CW 90, CCW 90, 180.
+
+   Still to confirm on the turned monitor. If 180 is also wrong then the
+   original reading stands -- the option needs to express the DISPLAY's
+   orientation rather than the rotation to apply, because on a portrait
+   monitor a ROT90 game wants no rotation while a ROT0 game wants 90 degrees.
 
 1. **Screen timing is not PCB-verified.** MAME uses `set_refresh_hz(60)` with
    no `set_raw()`. We run 384x264 at 6 MHz, 59.1856 Hz. No amount of simulation

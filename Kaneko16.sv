@@ -82,12 +82,12 @@ localparam CONF_STR = {
 	"O[11],Debug overlay,Off,On;",
 	"-;",
 	"O[14],Service switch,Off,On;",
-	"O[15],Sprite offscreen skip,On,Off;",
+	"O[15],Sprite offscreen skip,Off,On;",
 	"O[16],Sprites,On,Off;",
 	"O[17],Tilemaps,On,Off;",
 	"O[20:19],Game override,Off(MRA),1 Magical Crystals,2 Blaze On,3 Wing Force;",
 	"O[23:21],Layer1 dx,+2 (MAME),0,-2,+4;",
-	"O[25:24],Rotation,Off,Auto (per game),CW,CCW;",
+	"O[26:24],Rotation,Off,Auto (per game),CW 90,CCW 90,180;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
@@ -165,6 +165,9 @@ wire signed [10:0] V2_DX_CFG, V2_DY_CFG;
 wire        VIEW2_2_PRI, TWO_CHIPS, SPR_WIDE, SPR_FLIPTYPE;
 wire [15:0] SPR_PRI_SEL, SPR_XOFFS_CFG, SPR_YOFFS_CFG;
 wire [10:0] TILE_COLBASE_CFG, SPR_COLBASE_CFG, SPR_COUNT_CFG;
+// Sprite tiles in the ROM region -- the modulus the sprite code is reduced
+// by before it is fetched. Two of the six are not powers of two.
+wire [17:0] SPR_ELEMENTS_CFG;
 wire [8:0]  SPR_MIN_Y;
 wire [9:0]  CFG_H_VIS, CFG_V_VIS, CFG_V_START, CFG_HSYNC;
 wire [8:0] CFG_H_START;   // visible window's x origin; 40 on the CALC3 board
@@ -232,7 +235,7 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 	.tile_colbase(TILE_COLBASE_CFG), .spr_colbase(SPR_COLBASE_CFG),
 	.two_chips(TWO_CHIPS),
 
-	.spr_count(SPR_COUNT_CFG),
+	.spr_count(SPR_COUNT_CFG), .spr_elements(SPR_ELEMENTS_CFG),
 	.spr_xoffs(SPR_XOFFS_CFG), .spr_yoffs(SPR_YOFFS_CFG),
 	.visarea_min_y(SPR_MIN_Y), .wide_screen(SPR_WIDE),
 	.fliptype(SPR_FLIPTYPE),
@@ -2044,9 +2047,12 @@ kaneko_spr_sys #(
 	.clk(clk_sys), .rst(cpu_rst | spr_off),
 	.frame_start(vbl_rise),
 	.keep_sprites(keep_sprites),
-	.skip_en(~status[15]),
+	// OFF IS THE DEFAULT. status resets to zero, so the menu is ordered with
+	// Off first and the sense is straight rather than inverted -- reversing one
+	// without the other silently swaps every position.
+	.skip_en(status[15]),
 
-	.sprite_count(SPR_COUNT_CFG),
+	.sprite_count(SPR_COUNT_CFG), .spr_elements(SPR_ELEMENTS_CFG),
 	.sprite_xoffs(SPR_XOFFS_CFG), .sprite_yoffs(SPR_YOFFS_CFG),
 	.visarea_min_y(SPR_MIN_Y),
 	.wide_screen(SPR_WIDE), .fliptype(SPR_FLIPTYPE),
@@ -2584,12 +2590,25 @@ wire       ROT_EN, ROT_CCW;
 // direct video path does not. It is opt-in.
 //
 //   0 Off              1 Auto, from the game table
-//   2 CW               3 CCW
-wire [1:0] rot_sel = status[25:24];
-wire       rot_ccw = (rot_sel == 2'd1) ? ROT_CCW      // per game
-                   : (rot_sel == 2'd3);               // 2 = CW, 3 = CCW
-wire       no_rot  = (rot_sel == 2'd0)                // explicitly off
-                  || ((rot_sel == 2'd1) && !ROT_EN);  // auto, game is ROT0
+//   2 CW 90            3 CCW 90            4 180
+//
+// 180 IS NOT A ROTATION HERE, and that is why it was missing. screen_rotate
+// gates its flip on `do_flip <= no_rotate && flip`, so a half turn is asked
+// for by NOT rotating and raising flip; it keeps the framebuffer because
+// `fb_en <= ~no_rotate | flip`. With flip tied to zero the option could never
+// be reached, which left a physically portrait monitor with three settings
+// that are each a quarter turn out and none that is right -- reported from
+// hardware, and the reason this exists.
+wire [2:0] rot_sel = status[26:24];
+wire       rot_ccw = (rot_sel == 3'd1) ? ROT_CCW      // per game
+                   : (rot_sel == 3'd3);               // 2 = CW, 3 = CCW
+wire       rot_180 = (rot_sel == 3'd4);
+// Positions 5..7 do not exist in the menu. They resolve to Off rather than to
+// a rotation, because a spare code that lands on a real setting is the shape
+// of bug this file has paid for repeatedly.
+wire       no_rot  = (rot_sel == 3'd0)                // explicitly off
+                  || (rot_sel >= 3'd4)                // 180, and the unused codes
+                  || ((rot_sel == 3'd1) && !ROT_EN);  // auto, game is ROT0
 wire       video_rotated;
 
 screen_rotate u_rotate
@@ -2598,7 +2617,7 @@ screen_rotate u_rotate
 	.VGA_R(out_r), .VGA_G(out_g), .VGA_B(out_b),
 	.VGA_HS(hs_d[1]), .VGA_VS(vs_d[1]), .VGA_DE(de_d[1]),
 
-	.rotate_ccw(rot_ccw), .no_rotate(no_rot), .flip(1'b0),
+	.rotate_ccw(rot_ccw), .no_rotate(no_rot), .flip(rot_180),
 	.video_rotated(video_rotated),
 
 	.FB_EN(FB_EN), .FB_FORMAT(FB_FORMAT),

@@ -72,6 +72,9 @@ module kaneko_gamecfg #(
 
     // ---- sprites
     output wire [10:0] spr_count,
+    // Sprite tiles in the ROM region, which is the MODULUS the sprite code is
+    // reduced by. See the note where it is assigned.
+    output wire [17:0] spr_elements,
     output wire [15:0] spr_xoffs, spr_yoffs,
     output wire [8:0]  visarea_min_y,
     output wire        wide_screen,    // screen width > 0x100
@@ -233,6 +236,44 @@ module kaneko_gamecfg #(
 
     // -------------------------------------------------------- sprites
     assign spr_count     = blazeon_board ? 11'd512 : 11'd1024;
+
+    // ------------------------------------------- the sprite code modulus
+    //
+    // kaneko_spr.cpp bounds every sprite code before it fetches:
+    //
+    //     const u8 *source_base = gfx->get_data(code % gfx->elements());
+    //
+    // `elements` is the ROM region divided by the size of one sprite. A VU-002
+    // sprite is gfx_8x8x4_row_2x2_group_packed_msb, whose gfx_layout ends
+    // `16*16*4` -- BITS, so 128 bytes per 16x16 sprite, not the 256 an 8bpp
+    // tile would take.
+    //
+    // Without this the fetch runs off the end of the region. Measured on the
+    // Explosive Breaker attract loop, 283 on-screen sprites in 7081 frames
+    // carry a code past its 18432 -- 0x6c3a, 0x7d0d and 0x9e00. At base
+    // 0x280000 a code of 0x6c3a addresses byte 0x5e1d00, which is past the end
+    // of the OKI region above it and into SDRAM nothing ever wrote. Zero
+    // nibbles are transparent, so the sprite silently does not appear while
+    // its game logic goes on running.
+    //
+    // PER GAME, and hard rule 9 in its sharpest form: two of these are not
+    // powers of two, so no mask can stand in for the division.
+    //
+    //   explbrkr  0x240000 / 128 =  18432   NOT a power of two
+    //   mgcrystl  0x280000 / 128 =  20480   NOT a power of two
+    //   blazeonj  0x200000 / 128 =  16384
+    //   wingforc  0x200000 / 128 =  16384
+    //   shogwarr  0x1000000 / 128 = 131072
+    //   brapboys  0x800000 / 128 =  65536
+    //
+    // These must track SDRAM_MAPS in tools/build_rom_regions.py: the region
+    // the MRA builds is the region this divides by, and `make lint` checks
+    // the pair agree.
+    assign spr_elements  = is_sw ? 18'd131072
+                         : is_bb ? 18'd65536
+                         : blazeon_board ? 18'd16384
+                         : is_mg ? 18'd20480
+                                 : 18'd18432;
     // set_offsets(0xa00, -0x40) on the CALC3 board.
     // set_offsets(0x10000 - 0x680, 0) on the Blaze On board.
     assign spr_xoffs     = calc3_board ? 16'h0a00

@@ -40,6 +40,7 @@ struct Spr { uint32_t code, colour, prio; bool fx, fy; int x, y; };
 
 std::vector<uint64_t> table_mem;
 std::vector<uint8_t>  rom;
+long                  rom_oob = 0;   // fetches past the end of the region
 std::vector<uint16_t> bmp;
 std::vector<uint8_t>  mask;
 
@@ -113,7 +114,20 @@ void tick()
 
     dut->clk = 0; dut->eval();
     dut->tbl_data = table_mem[held_tbl % table_mem.size()];
-    dut->rom_data = rom[held_rom % rom.size()];
+    // NOT `% rom.size()`. Wrapping here would supply a plausible byte for an
+    // address that ran off the end of the region and hide exactly the fault
+    // this file is here to catch -- the same shape as every other default that
+    // returned a plausible value. On hardware that address is SDRAM nothing
+    // wrote, and it reads as transparent.
+    if (held_rom >= rom.size()) {
+        if (++rom_oob <= 5)
+            printf("  FAIL: rom_addr %u is past the %zu-byte region"
+                   " -- the sprite code was not reduced\n",
+                   (unsigned)held_rom, rom.size());
+        dut->rom_data = 0;
+    } else {
+        dut->rom_data = rom[held_rom];
+    }
     dut->mask_q   = mask[held_mask % mask.size()];
     dut->eval();
 
@@ -154,7 +168,12 @@ int main(int argc, char** argv)
     dut = new Vkaneko_vuspr_draw;
     std::mt19937 rng(0x44524157u);   // 'DRAW'
 
-    rom.resize(1 << 18);
+    // Explosive Breaker's sprite region exactly: 0x240000 bytes, 18432
+    // elements of 128. NOT a power of two, and that is the whole point -- at
+    // 1<<18 the region held 2048 elements and a mask was indistinguishable
+    // from the modulo kaneko_spr.cpp actually applies, so a core that never
+    // reduced the code at all passed this test.
+    rom.resize(18432u * 128u);
     for (auto& b : rom) b = (uint8_t)rng();
 
     long passes = 0, checks = 0, fails = 0, overlaps = 0;
@@ -173,7 +192,13 @@ int main(int argc, char** argv)
 
         std::vector<Spr> spr(n);
         for (auto& s : spr) {
-            s.code   = rng() % (rom.size() / 128);
+            // Half in range, half anywhere a 17-bit code can reach. MAME
+            // reduces with `code % gfx->elements()`, so an out-of-range code
+            // is a VALID sprite that must appear -- not a don't-care. The
+            // generator only ever produced in-range codes before, which is
+            // why the missing reduction survived every pass of this test.
+            s.code   = (rng() & 1) ? (rng() % (rom.size() / 128))
+                                   : (rng() & 0x1ffff);
             s.colour = rng() & 0x3f;
             s.prio   = rng() & 3;
             s.fx     = rng() & 1;
@@ -204,6 +229,7 @@ int main(int argc, char** argv)
             dut->clip_x0 = x0; dut->clip_x1 = x1;
             dut->clip_y0 = y0; dut->clip_y1 = y1;
             dut->sprite_count = n;
+            dut->spr_elements = (uint32_t)(rom.size() / 128);
             {   int save = stall_pct; stall_pct = 0;   // never stall in reset
                 for (int i = 0; i < 4; i++) tick();
                 dut->rst = 0;
@@ -268,6 +294,10 @@ int main(int argc, char** argv)
 
     printf("  stall-equivalence: %ld pixels compared, %ld differ, "
            "%ld stalled cycles\n", stall_cmp, stall_diff, n_stall);
+    fails += rom_oob;
+    printf("  region %zu bytes = %zu elements (not a power of two);"
+           " %ld fetches past its end\n",
+           rom.size(), rom.size() / 128, rom_oob);
     printf("kaneko_vuspr_draw: checks=%ld fails=%ld passes=%ld/8 "
            "bmp_writes=%ld mask_writes=%ld (rejected=%ld)\n",
            checks, fails, passes, total_bmp, total_mask, total_mask - total_bmp);

@@ -91,6 +91,8 @@ module kaneko_spr_sys #(
 
     // Per-game configuration, all of it from the machine config.
     input  wire [10:0]  sprite_count,
+    // Sprite tiles in the ROM region; the drawer reduces each code by it.
+    input  wire [17:0]  spr_elements,
     input  wire [15:0]  sprite_xoffs,
     input  wire [15:0]  sprite_yoffs,
     input  wire [8:0]   visarea_min_y,
@@ -230,6 +232,7 @@ module kaneko_spr_sys #(
     kaneko_vuspr_draw #(.BMP_W(BMP_W), .AW(AW)) u_draw (
         .clk(clk), .rst(rst), .ce(dr_ce), .skip_en(skip_en),
         .start(dr_start), .sprite_count(sprite_count),
+        .spr_elements(spr_elements),
         .busy(dr_busy), .done(dr_done),
         .tbl_addr(tbl_ra), .tbl_data({17'd0, tbl_q}),
         .rom_addr(dr_rom_addr), .rom_data(dr_rom_data),

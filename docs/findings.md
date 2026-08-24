@@ -6448,11 +6448,90 @@ all.
 | sprite list size | 1024, correct for this board |
 | sprite priorities | {8,8,8,8}, matches `set_priorities` |
 
-The next measurement is the overlay's WHITE row, which counts sprite passes
-that did not finish before the next frame. Zero means every sprite is reached
-and the fault is in what is drawn; non-zero means the pass is cut short, and
-since the table is walked DOWNWARDS whatever sits late in the list is never
-reached — which is exactly "missing but still shooting".
+### The sprite code was never reduced modulo the region, 2026-08-24
+
+`kaneko_spr.cpp` bounds every code before it fetches:
+
+```cpp
+const u8 *source_base = gfx->get_data(code % gfx->elements());
+```
+
+That is a **modulo**, and this core did not have it — `kaneko_vuspr_draw`
+formed `rom_addr` as `{s_code, 7'd0}` and fetched. A code past the end of the
+sprite region therefore addressed **outside it**. For Explosive Breaker the
+region is bytes 0x280000–0x4c0000 with the OKI samples above it, so a code of
+0x6c3a reaches byte 0x5e1d00 — past the OKI region too, into SDRAM nothing ever
+wrote. Zero nibbles are transparent, so the sprite **silently does not appear
+while its game logic goes on running**, which is the reported symptom.
+
+`elements` is the region divided by the size of one sprite, and that size is
+**128 bytes, not 256**. A VU-002 sprite is `gfx_8x8x4_row_2x2_group_packed_msb`
+whose `gfx_layout` ends `16*16*4` — bits. Getting this wrong by a factor of two
+puts the modulus at 9216 instead of 18432 and reports four times as many
+offenders as exist.
+
+Per game, and this is hard rule 9 at its sharpest — **two of the six are not
+powers of two, so no mask can stand in for the division**:
+
+| set | region | elements | power of two |
+|---|---|---|---|
+| `explbrkr` | 0x240000 | 18432 | **no** |
+| `mgcrystl` | 0x280000 | 20480 | **no** |
+| `blazeonj` | 0x200000 | 16384 | yes |
+| `wingforc` | 0x200000 | 16384 | yes |
+| `shogwarr` | 0x1000000 | 131072 | yes |
+| `brapboys` | 0x800000 | 65536 | yes |
+
+Measured with `tools/mame_spr_codes.lua`, which replicates the multisprite
+latch (`if (flags & USE_LATCHED_CODE) s->code = ++code;`) and the on-screen
+test so it counts sprites that would actually be seen rather than table
+entries:
+
+```
+explbrkr, 7081 frames of attract
+  ON-SCREEN sprites     : 5649725
+  elements in the region: 18432 (0x4800)
+  codes AT OR ABOVE it  : 283          0x6c3a, 0x7d0d, 0x9e00
+```
+
+**283 in 7081 frames is small, and attract mode is not gameplay.** This is a
+real divergence from the oracle and it is fixed, but it is not established that
+it accounts for the reported fault — the census has only been run over the
+attract loop, where the three offending codes look like a handful of records
+rather than a wave of missing enemies.
+
+Fixed by reducing the code in `S_LATCH` with a five-stage conditional-subtract
+divide, and by a per-game `spr_elements` from `kaneko_gamecfg`. What silicon
+does above the region is **not known** — a PCB masks address lines rather than
+dividing, and for the four power-of-two regions the two agree. Where they
+differ this follows MAME, because MAME is the standard everything else is
+measured against.
+
+**The test could not have caught it.** `tb_kaneko_vuspr_draw` sized its ROM
+`1 << 18` — 2048 elements, a power of two, where a mask and a modulo are the
+same answer — generated codes only with `rng() % (rom.size() / 128)` so none
+ever went out of range, and fed the DUT `rom[held_rom % rom.size()]`, which
+wrapped an out-of-range fetch into a plausible byte. Three separate things each
+hiding it. The region is now 18432 elements, half the codes are drawn from the
+full 17-bit range, and a fetch past the end is a **failure** rather than a
+wrap. Reverting the reduction now gives 911,684 out-of-range fetches and
+995,116 fails; with it, zero.
+
+Same family as every other default that returned a plausible value: the
+harness answered instead of failing.
+
+### Both bitstreams render Explosive Breaker's sprites identically
+
+Checked because the fault was reported against the release while the build on
+the board looked correct. It is not a difference between the two. Since the
+released bitstream (`6a1af58`) nothing in `kaneko_vuspr_draw.sv`,
+`kaneko_spr_sys.sv` or `kaneko_vuspr.sv` has changed at all, and every
+`kaneko_gamecfg` change is gated on `calc3_board` — game ids 4 and 5. Verified
+by evaluating both revisions of the module and diffing the **values**, not the
+source: every output identical for all four Tier 1 games.
+
+So the fault was present in the build that looked correct too; it had not been
+reproduced there.
 
 **The lesson is the same one three times over.** The overlay's IPL row counted
 edges where only a level could answer; the overlay's address rows were

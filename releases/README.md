@@ -142,9 +142,16 @@ implement — so it only offered a state the picture could not show. Screen
 orientation is `Rotation`, which turns the finished image and is a separate
 mechanism.
 
+`Rotation` offers Off, Auto (per game), CW 90, CCW 90 and **180**. The half
+turn is the one a physically portrait monitor usually wants, and it was
+unreachable until now: MiSTer's `screen_rotate` asks for a half turn by NOT
+rotating and raising its `flip` input, which this core had tied to zero. On a
+turned monitor that left three settings each a quarter turn out and none
+correct.
+
 ## Sprite offscreen skip (OSD)
 
-A diagnostic toggle, **on by default**. It stops the sprite renderer walking
+A diagnostic toggle, **off by default**. It stops the sprite renderer walking
 records whose 16x16 box lies entirely outside the visible area.
 
 It exists because the sprite pass is the one part of the video path with no
@@ -160,9 +167,10 @@ skip changes nothing — which is the correct result, because there is nothing
 offscreen to skip. The saving only appears when a game parks sprites off the
 edge of the screen, and how large it is depends entirely on how many.
 
-Turn it **Off** if sprites are missing; leave it **On** otherwise. With the
-debug overlay on, the **white row** counts sprite passes that did not finish in
-time and should read zero.
+It now defaults to **Off** so the renderer walks every record the way the
+board does, and it is turned **On** only to test whether the clip is
+responsible for something missing. With the debug overlay on, the **white row**
+counts sprite passes that did not finish in time and should read zero.
 
 It is switchable because it reached hardware alongside another sprite change
 and one of the two stopped Explosive Breaker's laser from drawing.
