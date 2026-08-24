@@ -237,6 +237,74 @@ int main(int argc, char** argv) {
         }
     }
 
+    // ------------------------------------------------------------------ 5b
+    // THE VIDEO SIDE MUST NOT LOSE A FETCH.
+    //
+    // Section 5 checks that the CPU gets its answer and that the steal is
+    // flagged. It does NOT check the thing the video side actually needs,
+    // which is that every address it presents comes back to it exactly once.
+    // That gap shipped: Magical Crystals reads VIEW2 about 724 times a frame
+    // against Explosive Breaker's 1.4, and on hardware its tilemap came back
+    // in corrupted horizontal bands while every other game looked right.
+    //
+    // This models the real consumer. kaneko_tmap_line freezes on vid_stall and
+    // otherwise advances, so a fetcher is simulated that does exactly that:
+    //
+    //   holds its address while vid_stall is high,
+    //   advances to the next address when it is low,
+    //   and samples the data register one cycle after presenting an address.
+    //
+    // Then every address it walked must have yielded that address's contents.
+    // A stall asserted one cycle too late lets the fetcher step past a read
+    // that was given to the CPU instead, and one tile fetch is lost per steal.
+    printf("== the video side loses no fetch across a steal\n");
+    {
+        for (int i = 0; i < 128; i++) {
+            cpu_write(0, addr_of(V0, i * 2 + 0), (uint16_t)(0x1000 + i));
+            cpu_write(0, addr_of(V0, i * 2 + 1), (uint16_t)(0x2000 + i));
+        }
+        d->cpu_rd = 0; d->we_vram0 = 0;
+
+        // Walk the video address forward, stealing on a fixed pattern so the
+        // steal lands at every phase relative to the fetch.
+        // period 0 means NEVER steal. It validates the model itself: if the
+        // expected-data bookkeeping here is wrong, this case fails too and the
+        // failures below say nothing about the RTL.
+        for (int period = 0; period <= 5; period++) {
+            if (period == 1) continue;
+            int  idx = 0;               // address the fetcher is presenting
+            long got = 0, bad = 0;
+            d->c0_t0_addr = idx;
+
+            for (int t = 0; t < 600; t++) {
+                const bool steal = period && ((t % period) == 0) && (t > 0);
+                d->cpu_addr = addr_of(V0, (t * 7) & 0xfe);
+                d->cpu_rd   = steal;
+                // A stolen cycle reads the CPU's address, so whatever the
+                // fetcher presented this cycle yields nothing for it.
+                // A stolen cycle reads the CPU's address instead, so the
+                // fetcher gets nothing for what it presented.
+                const int due = steal ? -1 : idx;
+                tick();
+                const bool stalled = d->vid_stall != 0;
+
+                if (due >= 0 && !stalled) {
+                    const uint32_t want =
+                        (uint32_t)(((0x2000 + due) << 16) | (0x1000 + due));
+                    if (d->c0_t0_q != want) bad++;
+                    got++;
+                }
+                // The line fetcher holds its address while stalled.
+                if (!stalled) idx = (idx + 1) & 0x7f;
+                d->c0_t0_addr = idx;
+            }
+            check(bad == 0, "the video side got data for an address it did not present");
+            if (bad) printf("    period=%d: %ld of %ld fetches wrong\n", period, bad, got);
+            check(got > 100, "the fetcher made too little progress to be a test");
+        }
+        d->cpu_rd = 0;
+    }
+
     // ------------------------------------------------------------------ 6
     printf("== a large random pass over one chip\n");
     {
