@@ -6623,21 +6623,34 @@ M10K blocks   522 -> 495 of 553      (355bf50, the VIEW2 port sharing)
 ALMs          16,670 -> 17,840
 ```
 
-The released build sat at **522 of 553 blocks, 94%**. The build after the port
-sharing sits at 495, 89.5%. That is the regime this file already warns about:
+The released build sat at **522 of 553 blocks, 94%**; the build after the port
+sharing sits at 495, 89.5%.
 
-> 1W2R memories are silently duplicated ONLY WHILE BLOCKS ARE SPARE.
+**An earlier version of this entry blamed that 94% for the fault. That was
+wrong and is withdrawn.** Running a Cyclone V near its block limit does not
+corrupt data, and this repository already contains the proof of what actually
+happens when the blocks are not there:
 
-The released build had 31 spare blocks while the VIEW2 arrays alone wanted
-about 32 for duplication. A design scraping the bottom of the block pool is
-exactly where the fitter's choices stop being neutral, and where a build can
-work almost everywhere and lose particular data -- which is the shape of what
-was reported.
+> the arrays became logic and the fitter asked for 194,328 ALMs against
+> 41,910. Block usage fell exactly as intended while the design stopped
+> fitting by a factor of five.
 
-So the leading explanation is that the port sharing, done for Tier 2 headroom,
-also relieved the pressure that produced the fault. That is a mechanism, not a
-proof; the cheap test is to give the tester the current build, because the
-owner already runs it and does not see the fault.
+That is the failure mode, and it is **loud**. When a memory cannot be inferred
+into M10K it becomes logic, the ALM count explodes and the build stops
+fitting. Quartus does not quietly hand back a bitstream that works everywhere
+except one boss sprite. A build that fits and closes timing has its memories
+where it says they are.
+
+So block occupancy is not a mechanism for this, and 94% was never the problem
+-- all 553 blocks are there to be used. The thing that genuinely degrades as a
+device fills is **routing, and therefore timing slack**, which is measured
+rather than inferred from a percentage.
+
+Which leaves timing as the only build-level candidate, and **the released
+build's slack was never recorded**, so there is nothing to compare the
+current +0.559 ns against. That gap is the real lesson here: record the fit
+and timing numbers with every build, or this comparison cannot be made the
+next time somebody reports a fault against a release.
 
 The released build's own timing slack was never recorded, which is a gap --
 there is nothing to compare +0.559 ns against.
