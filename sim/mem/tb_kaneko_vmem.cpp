@@ -305,6 +305,49 @@ int main(int argc, char** argv) {
         d->cpu_rd = 0;
     }
 
+    // ------------------------------------------------------------------ 5c
+    // THE READ-BACK LATENCY IS A CONTRACT, AND THE BUS HAS TO HONOUR IT.
+    //
+    // Sharing the port put three registers between cpu_rd and q_vram0: the
+    // array reads into the video register, the CPU's copy is taken from that
+    // register a cycle later, and the read-back mux registers it again.
+    // kaneko_bus was still answering DTACK on the cycle it raised vram_rd,
+    // which handed the 68000 whatever the previous VIEW2 read left behind.
+    //
+    // Explosive Breaker reads VIEW2 1.4 times a frame and never showed it.
+    // Magical Crystals reads it 724 times a frame and read-modify-writes its
+    // tilemap, so it wrote the stale value back and the picture came apart in
+    // horizontal bands on hardware.
+    //
+    // This measures the latency rather than assuming it, and prints it, so
+    // that if it ever changes the number to put in kaneko_bus's S_VRAM wait is
+    // right here instead of being rediscovered.
+    printf("== the CPU read-back latency, which kaneko_bus must wait out\n");
+    {
+        cpu_write(0, addr_of(V0, 0x40), 0xfeed);
+        cpu_write(0, addr_of(V0, 0x41), 0x0bad);   // a neighbour, to catch off-by-one
+        // Prime the pipeline with a DIFFERENT address so a stale answer is
+        // distinguishable from the right one.
+        (void)cpu_read(0, addr_of(V0, 0x41));
+
+        d->cpu_addr = addr_of(V0, 0x40);
+        d->cpu_rd   = 1;
+        tick();                       // cycle 1: cpu_rd high
+        d->cpu_rd   = 0;
+        int valid_at = -1;
+        for (int c = 2; c <= 8; c++) {
+            tick();
+            if (valid_at < 0 && d->q_vram0 == 0xfeed) valid_at = c;
+        }
+        printf("  q_vram0 valid %d cycles after cpu_rd\n", valid_at);
+        check(valid_at > 0, "the CPU read-back never became valid at all");
+        // kaneko_bus spends vwait=2 in S_VRAM and then one more edge reaching
+        // S_DONE, so it samples on cycle 4. Anything later than that is a bug
+        // in the RTL or a wait that needs lengthening -- and this says which.
+        check(valid_at <= 4,
+              "read-back is slower than kaneko_bus's S_VRAM wait -- raise vwait");
+    }
+
     // ------------------------------------------------------------------ 6
     printf("== a large random pass over one chip\n");
     {
