@@ -174,6 +174,48 @@ SYSTEM and UNK at b80000, which have not been transcribed bit by bit yet.
 
 ---
 
+## PICK UP HERE — the sprite bug and two blind instruments
+
+**1. Explosive Breaker is missing enemy sprites**, reported from hardware
+against the public release. Invisible but still firing, so the game logic runs
+and the drawing does not.
+
+The next step is one reading, not more code: **the debug overlay's WHITE row**,
+which counts sprite passes that did not finish before the next frame.
+
+- zero — every sprite is reached, so the fault is in WHAT is drawn
+- non-zero — the pass is cut short, and the table is walked DOWNWARDS, so
+  whatever sits late in the list is never reached. That matches the symptom
+  exactly.
+
+Already ruled out: the offscreen skip (tester turned it Off, no change), the
+sprite ROM layout (matches ROM_START including both ROM_RELOADs), keep_sprites
+(low-byte write only, inverted bit 2, starts false), the list size and the
+priorities.
+
+**2. The frame gate does not render sprites.** It composites four tilemap
+layers and passes zero for sprite pen and priority. No automated check here
+could have caught the bug above. Fixing this is the systemic answer and is
+worth more than the individual bug.
+
+**3. Explosive Breaker's tilemaps are one pixel right of MAME**, on a frame
+that can show it. Its "100.00%" came from a frame where xadj 0, 1 and 2 all
+score zero — horizontally uniform enough to be blind. Run `SWEEP=1` on the
+frame binary to see the grid.
+
+Checked and matching the oracle: dx=91 from set_offset(0x5b,-8), the +2 on each
+chip's layer 1, (scroll_x + linescroll) >> 6 adding before shifting, the
+line-scroll enables at bits 11 and 3, and line scroll indexed by map row.
+LSOFF=1 changes nothing, so line scroll is not involved on that frame.
+
+**The pattern across all three: an instrument that has never failed has not
+been shown to work.** The IPL counter counted edges where only a level could
+answer. The overlay's address rows were unreadable over a bright picture. The
+frame gate reports a pass it cannot fail. Each looked green. Make a gate fail
+on purpose before trusting it.
+
+---
+
 ## Open questions that carry real risk
 
 1. **Tier 3 needs the SDRAM clock at 144 MHz first.** Measured on hardware

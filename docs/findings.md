@@ -6393,3 +6393,70 @@ MAME's `0xf0 | playing-flags` -- so the chip is not implicated.
 
 Parked deliberately. Tier 2 shares this board's sound topology and may show
 the same fault from an angle where it is easier to see.
+
+### The frame gate cannot see sprites, and its 100% was a blind frame, 2026-08-24
+
+A tester reported Explosive Breaker missing multiple enemy sprites in the
+public release — they are invisible but still shoot. Chasing it exposed two
+faults in the instrument before anything was learned about the bug.
+
+**The M0 frame gate does not test sprites at all.** `tb_kaneko_frame` renders
+the four tilemap layers and passes ZERO where the sprite pen and priority go.
+So the strongest video check in this project is structurally blind to the whole
+class of fault being reported, and has been since it was written. Every "100%"
+in the documentation means "the tilemaps match", not "the picture matches".
+
+**And Explosive Breaker's 100.00% came from a frame that cannot fail.** The
+testbench has a built-in offset sweep, `SWEEP=1`. On the frame `make gate`
+captures:
+
+```
+              -2      -1       0       1       2
+     0       448     224       0       0       0
+```
+
+Zero differences at xadj 0, 1 AND 2. A frame that scores identically at three
+different horizontal shifts is horizontally uniform enough that it could not
+detect a shift of any size. It was reporting a pass it was incapable of
+failing.
+
+**On a frame that can fail, we are one pixel out.** The frame `make frame`
+captures (600) gives:
+
+```
+              -2      -1       0       1       2
+     0      9602       0    9589    9873    9945
+```
+
+Exact at xadj=-1 and nowhere else. Explosive Breaker's tilemaps render one
+pixel to the right of MAME, and nothing has ever shown it.
+
+That one is still unexplained. Checked against the oracle and matching:
+`set_offset(0x5b,-8)` giving dx=91; the `+2` on each chip's layer 1 and not
+layer 0; `(scroll_x + linescroll) >> 6` adding before shifting; the line-scroll
+enables at the asymmetric bits 11 and 3; and line-scroll indexed by MAP row.
+`LSOFF=1` changes nothing, so line scroll is not contributing on this frame at
+all.
+
+**The sprite bug itself is still open.** Ruled out so far:
+
+| | |
+|---|---|
+| the offscreen skip | tester turned it Off, sprites still missing |
+| sprite ROM layout | matches ROM_START exactly, both ROM_RELOADs included |
+| `keep_sprites` | correct: low-byte write only, inverted bit 2, starts false |
+| sprite list size | 1024, correct for this board |
+| sprite priorities | {8,8,8,8}, matches `set_priorities` |
+
+The next measurement is the overlay's WHITE row, which counts sprite passes
+that did not finish before the next frame. Zero means every sprite is reached
+and the fault is in what is drawn; non-zero means the pass is cut short, and
+since the table is walked DOWNWARDS whatever sits late in the list is never
+reached — which is exactly "missing but still shooting".
+
+**The lesson is the same one three times over.** The overlay's IPL row counted
+edges where only a level could answer; the overlay's address rows were
+unreadable over a bright picture; and now the frame gate reports a pass it
+cannot fail, on a class of object it does not render. Each looked green. The
+rule that follows: **an instrument that has never failed has not been shown to
+work.** Before trusting a gate, make it fail on purpose.

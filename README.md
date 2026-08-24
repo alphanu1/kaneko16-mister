@@ -85,9 +85,21 @@ blazeonj 100.00%   (exact)
 wingforc 100.00%   (exact, 71680 pixels)
 ```
 
-The gate is scanline-exact. Three of the four are pixel-exact; mgcrystl's
-298-pixel difference is an unresolved line-scroll anomaly on odd rows, recorded
-in `docs/findings.md`.
+**Read those numbers narrowly. They mean less than they look.**
+
+**The gate does not render sprites.** `tb_kaneko_frame` composites the four
+tilemap layers and passes zero where the sprite pen and priority go, so a
+100% here says the TILEMAPS match — nothing about sprites. A tester found
+Explosive Breaker missing enemy sprites in a build scoring 100%.
+
+**And a frame can be incapable of failing.** The testbench has an offset sweep,
+`SWEEP=1`. On the frame the gate captures for Explosive Breaker, xadj 0, 1 and
+2 all score zero differences — the picture is horizontally uniform enough that
+no shift of any size would show. On a frame that CAN fail, the same code is one
+pixel out. See `docs/findings.md`.
+
+Both are being fixed. Until they are, treat these figures as a check on the
+tilemap address maths and not as a statement about the picture.
 
 CPU gate, the core's 68000 bus trace against MAME's on explbrkr:
 

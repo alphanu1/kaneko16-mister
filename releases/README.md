@@ -36,7 +36,7 @@ bases, screen geometry, layer count, sprite list size and input wiring.
 
 | Game | State |
 |---|---|
-| Explosive Breaker | playable, with sound |
+| Explosive Breaker | playable, with sound — **but missing some enemy sprites**, see below |
 | Blaze On (Japan) | playable, with music and effects |
 | Wing Force (prototype) | playable, with in-game music; **no OKI sound effects, and no music in the attract demo** |
 | Magical Crystals | playable, with sound |
@@ -50,6 +50,17 @@ This list describes the RBF named above. Every entry is removed in the same
 change as the RBF that fixes it, so if an item is still here it is still true
 of the newest build in this directory. **The heading carries the RBF's name for
 exactly that reason — if they disagree, trust neither and check.**
+
+- **Explosive Breaker is missing enemy sprites.** Reported from hardware on
+  2026-08-24 against this release: several enemies are invisible while still
+  firing at you, so the game logic is running and the drawing is not. Turning
+  `Sprite offscreen skip` Off does not restore them. Cause not yet found; the
+  ROM layout, sprite list size, priorities and the keep-on-screen flag have all
+  been checked against MAME and match. Tracked in `docs/findings.md`.
+
+  It is worth saying why this reached a release: the M0 frame gate does not
+  render sprites at all, so no automated check in this project could have
+  caught it.
 
 - **Wing Force has no sound effects**, and no music in the attract demo. Its
   in-game music is correct. The OKI on that board hangs off the Z80's I/O ports
