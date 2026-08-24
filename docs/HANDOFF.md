@@ -253,8 +253,7 @@ on purpose before trusting it.
    orientation rather than the rotation to apply, because on a portrait
    monitor a ROT90 game wants no rotation while a ROT0 game wants 90 degrees.
 
-1. **Tier 2 and Tier 3 should become their own core. NOT branched yet, by
-   decision -- finish Tier 1 first.** Recorded 2026-08-24.
+1. **Tier 2 has left this core. Branch `tier2` holds it.** Done 2026-08-24.
 
    The bisect that found the Magical Crystals regression measured what Tier 2
    costs this device, and the numbers say it does not belong in the same
@@ -283,8 +282,18 @@ on purpose before trusting it.
    - `f8c00ac` -- current main, which carries the hit calculator and the ROM
      tables as well, none of it hardware-verified.
 
-   Nothing is branched yet. Branching fixes a point in history and there was
-   no reason to fix one before Tier 1 was finished.
+   `main` now carries none of it: the hit calculator, the 8 KB MCU RAM, the
+   second OKI and the tenth SDRAM port are gone, and `NPORTS` is back to 9.
+   Tier 1 builds at **+0.636 ns** with 41% of the ALMs -- more margin than it
+   ever had with the port sharing in place (+0.479 ns) -- and all four games
+   were verified on hardware afterwards.
+
+   The `tier2` branch is the CALC3 work as it stood, including the ROM tables
+   and the hit calculator with its 202,615-check testbench. It is a starting
+   point, not a working core: `67ea051` never fitted and `239d83f` never
+   timed. Whoever picks it up needs to solve the MCU RAM first -- 64 KB does
+   not infer into M10K here and asks the fitter for more logic than the device
+   has.
 
 1. **Screen timing is not PCB-verified.** MAME uses `set_refresh_hz(60)` with
    no `set_raw()`. We run 384x264 at 6 MHz, 59.1856 Hz. No amount of simulation

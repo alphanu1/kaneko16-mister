@@ -58,7 +58,6 @@ HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_vuspr:kaneko_vuspr:sim/video/tb_kaneko_vuspr.cpp \
              kaneko_tmap_fetch:kaneko_tmap_fetch:sim/video/tb_kaneko_tmap_fetch.cpp \
              kaneko_vuspr_draw:kaneko_vuspr_draw:sim/video/tb_kaneko_vuspr_draw.cpp \
-             kaneko_hit:kaneko_hit:sim/io/tb_kaneko_hit.cpp \
              kaneko_vmem:kaneko_vmem:sim/mem/tb_kaneko_vmem.cpp \
              kaneko_sdram:kaneko_sdram_harness:sim/mem/tb_kaneko_sdram.cpp \
              kaneko_romload:kaneko_romload_harness:sim/io/tb_kaneko_romload.cpp \
@@ -165,6 +164,33 @@ qsf-check:
 	  for f in $$miss; do echo "         $$f"; done; \
 	  echo "         add a SYSTEMVERILOG_FILE line for each."; exit 1; fi
 	@echo "qsf: all $(words $(RTL)) RTL file(s) in the project"
+
+# ------------------------------------------------------- synthesis check
+# Analysis & Synthesis ONLY, which is a minute or two rather than the ~25 a
+# full build takes. It exists because commit 67ea051 was pushed in a state
+# Quartus could not compile at all -- two nets used and never declared -- and
+# nothing caught it: `make lint && make test` cannot, because Kaneko16.sv is
+# outside the lint set (it instantiates VHDL and vendor IP), and a full build
+# is far too slow to sit in the gate.
+#
+# The cost of that was paid during a bisect: 67ea051 could not be built and
+# 239d83f could not close timing, so two commits in the middle of a range gave
+# no answer and the fault could only be bracketed, not pinned.
+#
+# This does not replace `make quartus`. It catches the errors that stop
+# synthesis dead -- undeclared nets, width mismatches, missing files -- and
+# says nothing about fit or timing.
+.PHONY: synth-check
+synth-check: qsf-check quartus-check
+	@mkdir -p build/tmp build/quartus build/db build/incremental_db
+	@[ -L db ] || { rm -rf db; ln -s build/db db; }
+	@[ -L incremental_db ] || { rm -rf incremental_db; ln -s build/incremental_db incremental_db; }
+	@echo "== quartus_map (synthesis only)"
+	@$(QUARTUS_BIN)/quartus_map --read_settings_files=on --write_settings_files=off \
+	  Kaneko16 -c Kaneko16 > build/quartus_map.log 2>&1 \
+	  || { echo "SYNTHESIS FAILED:"; grep -E "^Error" build/quartus_map.log | head -20; exit 1; }
+	@tools/check_ports.py build/quartus/Kaneko16.map.rpt || exit 1
+	@echo "synth-check: Kaneko16.sv synthesises"
 
 quartus: qsf-check nports-check lint test quartus-check
 	@mkdir -p build/tmp build/quartus build/db build/incremental_db

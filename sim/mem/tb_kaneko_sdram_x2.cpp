@@ -26,7 +26,7 @@
 
 namespace {
 
-constexpr int NP = 10;
+constexpr int NP = 9;
 Vkaneko_sdram_x2_harness* d;
 long checks = 0, fails = 0;
 

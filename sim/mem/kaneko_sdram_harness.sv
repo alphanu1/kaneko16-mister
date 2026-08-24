@@ -45,9 +45,14 @@ module kaneko_sdram_harness #(
   // port it both reads and writes, which is why it carries its own we/din/be
   // rather than sharing p0's.
   input  logic        p0_req, p1_req, p2_req, p3_req, p4_req, p5_req, p6_req, p7_req, p8_req, p9_req,
-  input  logic        p9_we,
-  input  logic [15:0] p9_din,
-  input  logic [1:0]  p9_be,
+  // The write path, on the TOP port. Named for the role rather than the index
+  // because the index moved when Tier 2's second OKI came and went: it was
+  // port 9 while a tenth master existed, and hard-coding it meant the width
+  // silently truncated when the count went back to nine, so no write reached
+  // the controller at all and every shadow check missed.
+  input  logic        pw_we,
+  input  logic [15:0] pw_din,
+  input  logic [1:0]  pw_be,
   input  logic        p0_we,
   input  logic [COL_BITS+15:1] p9_addr,
   input  logic [COL_BITS+15:1] p0_addr, p1_addr, p2_addr, p3_addr, p4_addr,
@@ -77,7 +82,7 @@ module kaneko_sdram_harness #(
   // sprite bitmap as a candidate master; the core has since caught up by
   // giving that port to the CALC3 board's second OKI, so the ahead-by-one
   // exemption is gone and nports-check demands an exact match again.
-  localparam int unsigned NP    = 10;
+  localparam int unsigned NP    = 9;
   localparam int unsigned T_RCD = 2;
   localparam int unsigned T_RP  = 2;
   localparam int unsigned T_RC  = 7;
@@ -101,10 +106,10 @@ module kaneko_sdram_harness #(
   // driving a nine-bit signal, left behind when NP went from 5 to 9. It worked
   // by zero-extension and would have silently mis-wired the moment a port
   // above the fifth needed to write.
-  assign p_we   = {p9_we, 9'b0};
+  assign p_we   = {pw_we, {(NP-1){1'b0}}};
   assign p_addr = {p9_addr, p8_addr, p7_addr, p6_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr};
-  assign p_din  = {p9_din, {9{16'd0}}};
-  assign p_be   = {p9_be, {9{2'b11}}};
+  assign p_din  = {pw_din, {(NP-1){16'd0}}};
+  assign p_be   = {pw_be, {(NP-1){2'b11}}};
 
   assign {p9_ack, p8_ack, p7_ack, p6_ack, p5_ack, p4_ack, p3_ack, p2_ack, p1_ack, p0_ack} = p_ack;
   assign p0_dout = p_dout[0];

@@ -40,7 +40,13 @@
 // and it was also the one port blen() forgot, which is how a single-word burst
 // reached hardware and made the sound path silent.
 // // Ten, matching Kaneko16.sv. The tenth port is the CALC3 board's second OKI.
-static const int NP = 10;
+static const int NP = 9;
+// The write path used in these tests. It was hard-coded to 9 while a tenth
+// port existed for the sprite-bitmap experiment; when Tier 2 left the core the
+// port count went back to nine and `port[9]` walked off the end of the array,
+// which reads as three collision failures rather than as an out-of-range
+// index. Derived from NP so it cannot drift again.
+static const int WRP = NP - 1;
 
 // Burst length per port. This mirrored a per-port blen() in kaneko_sdram.sv and
 // got it wrong twice — once claiming ports 1 and 2 burst four where the RTL said
@@ -225,8 +231,8 @@ struct Harness {
     // harness's original single write path and are gone; a write issued on any
     // other port would silently become a read, which is the sort of thing a
     // throughput number hides completely.
-    if (write && p != 9) { printf("  BUG: write issued on port %d\n", p); fails++; }
-    if (p == 9) { d->p9_we = write; d->p9_din = data; d->p9_be = be; }
+    if (write && p != WRP) { printf("  BUG: write issued on port %d\n", p); fails++; }
+    if (p == WRP) { d->pw_we = write; d->pw_din = data; d->pw_be = be; }
     setReq(p, 1);
     port[p].req_held = true;
     if (write) {
@@ -381,11 +387,11 @@ int main(int argc, char** argv) {
       uint32_t rbase = (1u << 22) | (3u << 9);
       uint32_t wbase = (2u << 22) | (5u << 9);
       if (!h.port[1].busy) h.issue(1, rbase + ((n * 4) & 0x1fc), false, 0);
-      // Writes go on port 9, the only port wired to write. This used port 0,
+      // Writes go on the top port, the only one wired to write. This used port 0,
       // which was the harness's single write path before the sprite-bitmap
       // port existed.
-      if (!h.port[9].busy)
-        h.issue(9, wbase + (n & 0x1ff), true, (uint16_t)(0x5a00 + (n & 0xff)));
+      if (!h.port[WRP].busy)
+        h.issue(WRP, wbase + (n & 0x1ff), true, (uint16_t)(0x5a00 + (n & 0xff)));
       h.step();
     }
     h.drain();
@@ -515,12 +521,12 @@ int main(int argc, char** argv) {
           h.issue(p, cursor[p], false, 0);
           cursor[p] += burst_of(p);
         }
-        if (!h.port[9].busy) {
+        if (!h.port[WRP].busy) {
           if (got < BURSTS) {                        // scanout read, deadline
-            h.issue(9, bmp_rd, false, 0);
+            h.issue(WRP, bmp_rd, false, 0);
             bmp_rd += 4; got++;
           } else if (wr_budget > 0) {                // renderer write, slack
-            h.issue(9, bmp_wr + (uint32_t)(line * 7 + wr_budget), true,
+            h.issue(WRP, bmp_wr + (uint32_t)(line * 7 + wr_budget), true,
                     (uint16_t)(0x1000 + wr_budget));
             wr_budget--; writes_done++;
           }
@@ -580,10 +586,10 @@ int main(int argc, char** argv) {
           h.issue(p, cursor[p], false, 0);
           cursor[p] += burst_of(p);
         }
-        if (!h.port[9].busy) {
-          if (got < BURSTS) { h.issue(9, bmp_rd, false, 0); bmp_rd += 4; got++; }
+        if (!h.port[WRP].busy) {
+          if (got < BURSTS) { h.issue(WRP, bmp_rd, false, 0); bmp_rd += 4; got++; }
           else if (wr_budget > 0) {
-            h.issue(9, bmp_wr + (uint32_t)(line * 7 + wr_budget), true,
+            h.issue(WRP, bmp_wr + (uint32_t)(line * 7 + wr_budget), true,
                     (uint16_t)(0x2000 + wr_budget));
             wr_budget--; writes_done++;
           }

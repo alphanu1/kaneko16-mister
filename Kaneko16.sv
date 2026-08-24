@@ -179,9 +179,6 @@ wire [SDR_AW-1:0] BASE_Z80;
 wire        HAS_Z80;
 wire [2:0]  OKI_MAX_BANK;
 wire        OKI_ON_Z80;
-wire        CALC3_IO;
-wire [SDR_AW:1] OKI2_BASE;
-wire [2:0]  OKI2_MAX_BANK;
 wire [15:0] IN_UNK_VAL;
 wire        OKI_CEN_HALF;
 
@@ -245,7 +242,6 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 	.inputs_blazeon(INPUTS_BLAZEON),
 	.base_z80(BASE_Z80), .has_z80(HAS_Z80),
 	.oki_max_bank(OKI_MAX_BANK), .oki_on_z80(OKI_ON_Z80),
-	.calc3_io(CALC3_IO), .base_oki2(OKI2_BASE), .oki2_max_bank(OKI2_MAX_BANK),
 	.in_unk_val(IN_UNK_VAL),
 	.oki_cen_half(OKI_CEN_HALF),
 	.rot_en(ROT_EN), .rot_ccw(ROT_CCW)
@@ -346,7 +342,7 @@ localparam int unsigned SDR_AW  = 2 + 13 + SDR_COL;   // 25
 // samples from its own region. It was going to be the sprite bitmap; that move
 // is blocked on SDRAM bandwidth (D5), and this is a better use of the port
 // meanwhile.
-localparam int unsigned NPORTS  = 10;
+localparam int unsigned NPORTS  = 9;
 
 wire              mem_ready;
 wire              ldr_wr_req, ldr_wr_ack;
@@ -369,8 +365,6 @@ wire [SDR_AW:1]   p5_addr;
 wire              p8_req;
 wire [SDR_AW:1]   p8_addr;
 // Second OKI sample fetch, CALC3 board only. Idle on every other game.
-wire              p9_req;
-wire [SDR_AW:1]   p9_addr;
 // Two ports for the sprite ROM, not one: a sprite row needs a block from each
 // half of its address space and they are fetched CONCURRENTLY. See the header
 // of kaneko_sprrom for the derivation of that pattern.
@@ -409,13 +403,6 @@ wire              p5_ack  = p_ack_bus[5];
 wire [63:0]       p5_dout = p_dout_bus[5];
 assign p67_ack  = {p_ack_bus[7],  p_ack_bus[6]};
 assign p67_dout = {p_dout_bus[7], p_dout_bus[6]};
-// Port 9, the CALC3 board's second OKI. These were used by u_oki2rom and never
-// declared; Quartus caught it as an implicit net because Kaneko16.sv sets
-// `default_nettype none, which is the guard that makes the top level safe to
-// edit at all given it is outside the lint set.
-wire              p9_ack  = p_ack_bus[9];
-wire [63:0]       p9_dout = p_dout_bus[9];
-
 wire sd_dq_oe;
 wire [15:0] sd_dq_o;
 assign SDRAM_DQ  = sd_dq_oe ? sd_dq_o : 16'bZ;
@@ -476,9 +463,9 @@ kaneko_sdram_x2 #(.NP(NPORTS), .AW(SDR_AW)) u_sdr_x2
 (
 	.clk_fast(clk_sdram),
 
-	.s_req  (rom_loaded ? {p9_req, p8_req, p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}
+	.s_req  (rom_loaded ? {p8_req, p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}
 	                    : {NPORTS{1'b0}}),
-	.s_addr ({p9_addr, p8_addr, p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
+	.s_addr ({p8_addr, p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
 	// No port writes yet: the sprite bitmap will be the first, and until it
 	// exists every master is a reader. Driven explicitly rather than left off
 	// the instance -- an omitted input is tied to GND without an error, which
@@ -631,7 +618,6 @@ fx68k u_cpu
 wire        vram0_we, vram1_we, spr_we, pal_we;
 wire        ym0_we, ym1_we, eeprom_we, oki_we;
 wire [7:0]  oki_din, oki_dout;
-wire        oki2_we, okibk_we;
 wire [3:0]  ym_addr;
 wire [7:0]  ym_din, eeprom_din;
 wire        v2r0_we, v2r1_we, sprreg_we, sprreg2_we;
@@ -669,10 +655,6 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.ym0_q(ym0_q), .ym1_q(ym1_q),
 	.eeprom_we(eeprom_we), .eeprom_din(eeprom_din),
 	.oki_we(oki_we), .oki_din(oki_din), .oki_dout(oki_dout),
-	.oki2_we(oki2_we), .okibk_we(okibk_we), .oki2_dout(oki2_dout),
-	.hit_we(hit_we), .hit_addr(hit_addr), .hit_dout(hit_dout),
-	.mcu_we(mcu_we), .mcu_addr(mcu_addr), .mcu_dout(mcu_dout),
-	.calc3_io(CALC3_IO),
 
 	.v2r0_we(v2r0_we), .v2r1_we(v2r1_we), .sprreg_we(sprreg_we),
 	.sprreg2_we(sprreg2_we), .sprreg2_q(q_sprreg2),
@@ -773,13 +755,12 @@ wire [10:0] ym_sum = {1'b0, ym0_snd} + {1'b0, ym1_snd};
 // Both parts made signed before mixing. jt49's level is unsigned around a
 // midpoint; jt6295's sample is already signed. AUDIO_S is 1 accordingly.
 wire signed [11:0] ym_ctr = $signed({1'b0, ym_sum}) - 12'sd1024;
-// The CALC3 board has no YM2149 and two OKIs; every other board has two
-// YM2149s and one OKI. Summing all three unconditionally is right for both:
-// the parts that do not exist are held silent by their own reset, and MAME
-// routes both OKIs at the same level on shogwarr.
+// Two YM2149s and one OKI on every board this core runs. Summing both
+// unconditionally is right: a part that does not exist is held silent by its
+// own reset. The CALC3 board's second OKI left with the rest of Tier 2.
 wire signed [16:0] snd_mix = {{3{ym_ctr[11]}}, ym_ctr, 2'd0}      // YM, scaled
-                           + {{3{oki_snd[13]}}, oki_snd}          // OKI 1
-                           + {{3{oki2_snd[13]}}, oki2_snd};       // OKI 2
+                           + {{3{oki_snd[13]}}, oki_snd};         // OKI 1
+
 // SCALED UP, BECAUSE THE HEADROOM IS FOR A SUM THAT NEVER HAPPENS.
 //
 // This was snd_mix[16:1] -- a straight halving -- which reserves room for both
@@ -947,117 +928,18 @@ kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_okirom
 	.sdr_ack(p5_ack), .sdr_dout(p5_dout)
 );
 
-// ------------------------------------------- hit calculator and MCU RAM
-// The CALC3 board only. Both are inert on every other game: the decode is
-// gated by calc3_io, so nothing else can reach them, and the MCU RAM's block
-// memory is the only cost they carry when idle.
-wire        hit_we, mcu_we;
-wire [5:0]  hit_addr;
-wire [15:0] hit_dout;
-wire [15:0] mcu_addr, mcu_dout;
-
-// A free-running LFSR for the calculator's random register. The oracle returns
-// machine().rand() there, so there is nothing to agree with -- only a
-// requirement that it not be constant, which a tie to zero would make it.
-// Maximal-length 16-bit, taps 16,14,13,11.
-reg [15:0] hit_lfsr;
-always @(posedge clk_sys) begin
-	if (rst_sys) hit_lfsr <= 16'hace1;
-	else hit_lfsr <= {hit_lfsr[14:0],
-	                  hit_lfsr[15] ^ hit_lfsr[13] ^ hit_lfsr[12] ^ hit_lfsr[10]};
-end
-
-kaneko_hit u_hit
-(
-	.clk(clk_sys), .rst(rst_sys),
-	.addr(hit_addr), .din(oEdb), .we(hit_we),
-	.uds(~UDSn), .lds(~LDSn), .dout(hit_dout),
-	.rnd(hit_lfsr)
-);
-
-// SHARED WITH THE CALC3 SIMULATION, AND CURRENTLY 8 KB RATHER THAN 64.
+// ------------------------------------------- Tier 2 hardware: REMOVED
+// The CALC3 board's hit calculator, its MCU RAM and its second OKI lived here
+// and have moved to their own core -- see docs/HANDOFF.md.
 //
-// shogwarr_map declares 200000-20ffff, sixty-four kilobytes. That does not
-// fit, and the way it does not fit is the M10K cliff this core has hit before.
+// They were removed because they do not fit alongside Tier 1. Measured, in
+// order: 64 KB of MCU RAM asked the fitter for 6,773 LABs against the
+// device's 4,191; cutting it to 8 KB still missed setup by 0.773 ns; and the
+// VIEW2 read-port sharing done to recover the blocks broke Magical Crystals,
+// which reads VIEW2 724 times a frame against Explosive Breaker's 1.4.
 //
-// The 64 KB version costs about 64 M10K blocks. Taking them leaves too few for
-// kaneko_vmem, whose sprite and palette memories are ONE WRITE TWO READS --
-// which an M10K cannot be, so Quartus duplicates them, silently, and only
-// while blocks are spare. With the spare gone it built registers instead:
-// vmem alone asked for 65,563 of them and the fitter wanted 6,773 LABs against
-// the device's 4,191. The same failure kaneko_z80rom.sv's header describes,
-// from a different direction.
-//
-// Eight kilobytes is a PLACEHOLDER so the design builds while CALC3 is
-// written. It is certainly too small -- the init command alone places an
-// EEPROM copy at an address the game chooses -- and the real fix is one of:
-//
-//   - free the 192 blocks the sprite bitmap holds, which is blocked on SDRAM
-//     bandwidth (D5) and is the same 192 blocks Tier 3 needs
-//   - put this RAM in SDRAM, at the cost of latency on every MCU access
-//   - establish how much of the 64 KB the games actually touch
-//
-// Whichever it is, it has to be settled before Tier 2 can run. Recorded in
-// HANDOFF as the blocker rather than left to be rediscovered by a build.
-localparam int MCURAM_WORDS = 4096;      // 8 KB
-(* ramstyle = "M10K" *) reg [7:0] mcuram_hi [0:MCURAM_WORDS-1];
-(* ramstyle = "M10K" *) reg [7:0] mcuram_lo [0:MCURAM_WORDS-1];
-reg [15:0] mcu_q;
-always @(posedge clk_sys) begin
-	if (mcu_we && ~UDSn) mcuram_hi[mcu_addr[11:0]] <= oEdb[15:8];
-	if (mcu_we && ~LDSn) mcuram_lo[mcu_addr[11:0]] <= oEdb[7:0];
-	mcu_q <= {mcuram_hi[mcu_addr[11:0]], mcuram_lo[mcu_addr[11:0]]};
-end
-assign mcu_dout = mcu_q;
-
-// ---------------------------------------------------- second OKI (Tier 2)
-// The CALC3 board carries two M6295s, at 400001 and 480001, both clocked
-// 16 MHz/8 = 2 MHz with PIN7 LOW. Everything about the second is a copy of the
-// first except its sample region and its half of the bank register.
-//
-// shogwarr_oki_bank_w writes one byte at e00001 holding BOTH banks: the low
-// nibble selects chip 0's bank and the high nibble chip 1's. One register,
-// two consumers, which is why the write strobe is shared.
-reg [7:0] okibk_q;
-always @(posedge clk_sys) begin
-	if (rst_sys)      okibk_q <= 8'd0;
-	else if (okibk_we) okibk_q <= oki_din;
-end
-
-wire [17:0] oki2_rom_addr;
-wire [7:0]  oki2_rom_data;
-wire [0:0]  oki2_rom_ok;
-wire signed [13:0] oki2_snd;
-wire [7:0]  oki2_dout;
-wire [23:0] oki2_region_addr;
-
-kaneko_oki_bank u_okibank2
-(
-	.chip_addr(oki2_rom_addr),
-	.max_bank(OKI2_MAX_BANK),
-	.bank(okibk_q[6:4]),
-	.region_addr(oki2_region_addr)
-);
-
-kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_oki2rom
-(
-	.clk(clk_sys), .rst(rst_sys),
-	.req_addr(oki2_region_addr),
-	.base_addr(OKI2_BASE),
-	.req_data(oki2_rom_data),
-	.port_ready(oki2_rom_ok),
-	.sdr_req(p9_req), .sdr_addr(p9_addr),
-	.sdr_ack(p9_ack), .sdr_dout(p9_dout)
-);
-
-jt6295 u_oki2
-(
-	.rst(rst_sys), .clk(clk_sys), .cen(oki_cen),
-	.ss(1'b0),                       // PIN7_LOW: divide by 165
-	.wrn(~oki2_we), .din(oki_din), .dout(oki2_dout),
-	.rom_addr(oki2_rom_addr), .rom_data(oki2_rom_data), .rom_ok(oki2_rom_ok[0]),
-	.sound(oki2_snd), .sample()
-);
+// Tier 1 keeps its block memory and its nine SDRAM ports. The CALC3 board
+// gets a core sized for what it actually needs.
 
 // -------------------------------------------------------- Z80 sound CPU
 // The Blaze On board only: Z80 + YM2151, with the 68000 handing it one byte at

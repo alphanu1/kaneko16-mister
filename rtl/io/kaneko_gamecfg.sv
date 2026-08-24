@@ -100,12 +100,6 @@ module kaneko_gamecfg #(
     // difference between two games that share a PCB.
     output wire [2:0]  oki_max_bank,
     output wire        oki_on_z80,
-    // The CALC3 board only: two OKIs, a hit calculator, and 64 KB of MCU RAM.
-    output wire        calc3_io,
-    // Second sample region. Meaningless unless calc3_io, and driven to the
-    // first one's base so a stray fetch lands somewhere defined.
-    output wire [SDR_AW:1] base_oki2,
-    output wire [2:0]  oki2_max_bank,
     // The fourth input word, PER GAME. It is not a constant and it is not zero.
     //
     //   bakubrkr  e00006  high byte IPT_UNKNOWN, low byte NOT DECLARED -> ff00
@@ -312,14 +306,6 @@ module kaneko_gamecfg #(
     //   wingforc  oki1 0x080000 -> 3      blazeonj  no OKI at all
     assign oki_max_bank = is_wf ? 3'd3 : is_mg ? 3'd1 : 3'd7;
     assign oki_on_z80   = is_wf;
-    assign calc3_io     = calc3_board;
-    // oki2 sits at byte 0x560000 in the Tier 2 stream, word 0x2b0000.
-    assign base_oki2    = calc3_board ? SDR_AW'(25'h2b0000) : base_oki;
-    // (region - 0x20000) / 0x20000. oki1 is 0x100000 -> 7 on both Tier 2
-    // games; oki2 is 0x200000 -> 15, which does not fit three bits, so it
-    // saturates at 7 and the top banks alias. shogwarr's driver is not known
-    // to use them; revisit if a sample plays wrong.
-    assign oki2_max_bank = 3'd7;
     // mgcrystl has no fourth input word at all, so nothing it reads can be
     // right or wrong here; it keeps the value it has always been given rather
     // than being handed a new one that might disturb a game that now works.
