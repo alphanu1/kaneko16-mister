@@ -70,8 +70,11 @@ void cpu_write(int chip, uint16_t waddr, uint16_t v, bool hi = true, bool lo = t
 uint16_t cpu_read(int chip, uint16_t waddr) {
     d->cpu_addr = waddr;
     d->we_vram0 = d->we_vram1 = d->we_spr = d->we_pal = 0;
+    d->cpu_rd = 1;                // claim the shared read port
     tick();                       // address registered, array read
-    tick();                       // read-back mux registered
+    d->cpu_rd = 0;
+    tick();                       // data in the video register
+    tick();                       // CPU copies it, read-back mux registered
     return chip == 0 ? d->q_vram0 : d->q_vram1;
 }
 
@@ -98,6 +101,9 @@ int main(int argc, char** argv) {
     d->c0_t0_addr = d->c0_t1_addr = d->c1_t0_addr = d->c1_t1_addr = 0;
     d->c0_s0_addr = d->c0_s1_addr = d->c1_s0_addr = d->c1_s1_addr = 0;
     d->spr_addr = 0; d->pal_addr = 0;
+    // The VIEW2 read port is now shared: cpu_rd asks for the cycle. Held low
+    // except where a CPU read is being made.
+    d->cpu_rd = 0;
     tick(); tick();
 
     // ------------------------------------------------------------------ 1
@@ -187,7 +193,20 @@ int main(int argc, char** argv) {
     // and both must get their own answer. The duplication provides this for
     // free today; a shared port has to arrange it, and this is the check that
     // will fail if it does not.
-    printf("== both sides read different addresses at once\n");
+    // THE CONTRACT OF THE SHARED PORT.
+    //
+    // Before the ports were shared, both sides read different addresses in the
+    // same cycle and both got their own answer -- the duplication gave that
+    // for free. It is now bought with a stolen cycle, and the contract is:
+    //
+    //   the CPU gets its answer, always;
+    //   the video side's registered data is WRONG the cycle after a steal;
+    //   vid_stall marks exactly that cycle so the fetch does not sample it;
+    //   with no steal, the video side is undisturbed.
+    //
+    // Both halves are checked. A vid_stall that were always low would pass the
+    // first and corrupt the picture, which is the failure this is guarding.
+    printf("== the shared read port: CPU answered, video stall flagged\n");
     {
         for (int i = 0; i < 64; i++) {
             cpu_write(0, addr_of(V0, i * 2 + 0), (uint16_t)(0x0100 + i));
@@ -195,16 +214,26 @@ int main(int argc, char** argv) {
         }
         for (int i = 0; i < 64; i++) {
             int other = 63 - i;
-            d->c0_t0_addr = other;               // video reads one entry
-            d->cpu_addr   = addr_of(V0, i * 2);  // CPU reads a different one
+            // No steal: the video side reads undisturbed and is NOT stalled.
+            d->c0_t0_addr = other; d->cpu_rd = 0;
             d->we_vram0 = 0;
-            tick(); tick();
-            uint32_t vq = d->c0_t0_q;
-            uint16_t cq = d->q_vram0;
-            check(vq == (uint32_t)(((0x0200 + other) << 16) | (0x0100 + other)),
-                  "video side got its own address");
-            check(cq == (uint16_t)(0x0100 + i),
-                  "CPU side got its own address");
+            tick();
+            check(d->vid_stall == 0, "no steal, no stall");
+            tick();
+            check(d->c0_t0_q == (uint32_t)(((0x0200 + other) << 16) | (0x0100 + other)),
+                  "video side undisturbed when the CPU is quiet");
+
+            // Steal: the CPU gets its own address, and the cycle after is
+            // flagged so the fetch ignores what it sees.
+            d->cpu_addr = addr_of(V0, i * 2); d->cpu_rd = 1;
+            tick();
+            d->cpu_rd = 0;
+            check(d->vid_stall == 1, "the stolen cycle is flagged");
+            tick();
+            check(d->vid_stall == 0, "the stall lasts exactly one cycle");
+            tick();
+            check(d->q_vram0 == (uint16_t)(0x0100 + i),
+                  "CPU got its own address from the shared port");
         }
     }
 

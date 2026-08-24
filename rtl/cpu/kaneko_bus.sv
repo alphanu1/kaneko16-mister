@@ -82,6 +82,12 @@ module kaneko_bus #(
 
     // ---- video-side memories, written by the CPU
     output logic        vram0_we, vram1_we, spr_we, pal_we,
+    // A VIEW2 READ, which now claims a shared port. kaneko_vmem's tile and
+    // scroll arrays have one read port between the CPU and the tile fetch, so
+    // the CPU has to ask for the cycle. Raised for the access cycle of a read
+    // from either VIEW2 window and low otherwise -- the games read these about
+    // 1.4 times a frame, so the fetch is almost never stalled.
+    output logic        vram_rd,
     output logic [12:0] vmem_addr,     // word address within the selected window
     output logic [15:0] vmem_din,
     input  wire  [15:0] vram0_q, vram1_q, spr_q, pal_q,
@@ -378,6 +384,7 @@ module kaneko_bus #(
 
     always_ff @(posedge clk) begin
         vram0_we <= 1'b0; vram1_we <= 1'b0; spr_we <= 1'b0; pal_we <= 1'b0;
+        vram_rd  <= 1'b0;
         v2r0_we  <= 1'b0; v2r1_we  <= 1'b0; sprreg_we <= 1'b0; sprreg2_we <= 1'b0;
         ym0_we   <= 1'b0; ym1_we   <= 1'b0; eeprom_we <= 1'b0;
         oki_we   <= 1'b0; snd_we <= 1'b0;
@@ -416,6 +423,10 @@ module kaneko_bus #(
                                 state    <= S_ROM;
                             end
                         end else begin
+                            // The read half of the same access cycle. Raised
+                            // for a READ of either VIEW2 window; `wr` below
+                            // handles the write half.
+                            vram_rd <= ~wr && (sel_v2w0 || sel_v2w1);
                             if (wr) begin
                                 vram0_we  <= sel_v2w0;
                                 vram1_we  <= sel_v2w1;
