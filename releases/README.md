@@ -4,7 +4,7 @@ Copy to the SD card:
 
 | from | to |
 |---|---|
-| `Kaneko16_20260823.rbf` | `/media/fat/_Arcade/cores/` — **rename to `Kaneko16.rbf` on the card** |
+| `Kaneko16_20260824.rbf` | `/media/fat/_Arcade/cores/` — **rename to `Kaneko16.rbf` on the card** |
 | `Explosive Breaker (World).mra` | `/media/fat/_Arcade/` |
 | `Blaze On (Japan).mra` | `/media/fat/_Arcade/` |
 | `Wing Force (Japan, prototype).mra` | `/media/fat/_Arcade/` |
@@ -12,6 +12,14 @@ Copy to the SD card:
 
 ROMs are supplied by you and must be in `/media/fat/games/mame/` as the MRA
 names them. Nothing here contains ROM data.
+
+**Check what you are running.** `Kaneko16_20260824.rbf` is
+`e662d4543ee88aaf10d0e004316e6347`, 3,936,852 bytes. If the core on your card
+does not have that md5, you are not running this build -- and the usual reason
+is a second file: MiSTer keeps the lexicographically greatest name beginning
+`Kaneko16` followed by `.` or `_`, and `_` sorts after `.`, so a spare
+`Kaneko16_old.rbf` in `cores/` silently wins over `Kaneko16.rbf`. Keep exactly
+one.
 
 **SDRAM:** all four games fit a 32 MB module by size, though everything here
 was developed and tested on a **128 MB** one — that is the only module any of
@@ -44,23 +52,47 @@ bases, screen geometry, layer count, sprite list size and input wiring.
 An MRA is shipped only for a game somebody has played on hardware. One that
 merely builds and passes its gates is a candidate, not a release.
 
-## Not finished, as of `Kaneko16_20260823.rbf`
+## Not finished, as of `Kaneko16_20260824.rbf`
 
 This list describes the RBF named above. Every entry is removed in the same
 change as the RBF that fixes it, so if an item is still here it is still true
 of the newest build in this directory. **The heading carries the RBF's name for
 exactly that reason — if they disagree, trust neither and check.**
 
-- **Explosive Breaker is missing enemy sprites.** Reported from hardware on
-  2026-08-24 against this release: several enemies are invisible while still
-  firing at you, so the game logic is running and the drawing is not. Turning
-  `Sprite offscreen skip` Off does not restore them. Cause not yet found; the
-  ROM layout, sprite list size, priorities and the keep-on-screen flag have all
-  been checked against MAME and match. Tracked in `docs/findings.md`.
+- **Explosive Breaker: graphics reported missing on ONE machine, not
+  reproducible on another.** Reported from hardware on 2026-08-24 against the
+  previous release, `Kaneko16_20260823.rbf`: several enemies invisible while
+  still firing, and the large boss at the start absent. The boss is drawn on
+  the tilemap rather than as sprites -- it disappears when `Tilemaps` is turned
+  off -- so at least part of what was reported is VIEW2 and not the sprite
+  engine.
 
-  It is worth saying why this reached a release: the M0 frame gate does not
-  render sprites at all, so no automated check in this project could have
-  caught it.
+  **The build in this directory does not show it.** This RBF is the one running
+  on the machine where the fault cannot be reproduced, which is why it is here
+  and the previous one is not. What differs between the two builds has not been
+  established; the tilemap and sprite logic are equivalent under the frame gate,
+  so the difference is somewhere the gate does not reach.
+
+  If it appears on your machine, two settings are worth trying before anything
+  else, because both are genuinely board-dependent:
+
+  - `SDRAM capture` — CL+4 is the default and boards disagree about it. This
+    core reads SDRAM at 96 MHz and the right capture depth is not the same on
+    every module.
+  - Check `_Arcade/cores/` holds **no other file** named `Kaneko16_*.rbf`.
+    MiSTer keeps the lexicographically greatest name beginning `Kaneko16`
+    followed by `.` or `_`, and `_` sorts after `.`, so `Kaneko16_old.rbf`
+    silently wins over `Kaneko16.rbf` and you run the wrong core.
+
+  Tracked in `docs/findings.md`, with the measurements taken so far.
+
+- **Explosive Breaker's tilemap is one pixel right of MAME**, on chip 1's
+  layer 0. Measured rather than estimated: the frame gate matches MAME on
+  57,344 of 57,344 pixels once a one-pixel correction is applied, and does not
+  match without it. Not corrected, because Magical Crystals wants no such
+  correction and the two games are configured identically -- so the rule is not
+  yet known, and guessing one would trade a visible fault in one game for a
+  hidden one in another.
 
 - **Wing Force has no sound effects**, and no music in the attract demo. Its
   in-game music is correct. The OKI on that board hangs off the Z80's I/O ports
