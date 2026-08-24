@@ -6587,7 +6587,7 @@ cannot be causing anything on this game today. Left recorded rather than
 fixed, because unlike the sprite case there is no measurement showing it
 matters, and every region here is a power of two where a mask would do.
 
-### The released build and the current one are the SAME core, everywhere the gate can see
+### The released build and the current one are equivalent IN THE GATE -- which is not the same as on hardware
 
 The fault was reported against the release by a third party; the owner cannot
 reproduce it on the build on the board. That difference is what needed
@@ -6612,10 +6612,38 @@ Identical, to the pixel. The port sharing changed nothing the gate can
 observe, which is expected -- the gate does not exercise the CPU stealing a
 video cycle.
 
-**So the bitstream is not the variable.** Whatever the tester saw, this core
-does the same thing in both builds. What is left is the tester's setup or the
-point in the game, and two setup faults are already documented here as having
-cost whole sessions:
+**That does NOT mean the bitstreams are the same, and the first version of
+this entry wrongly said so.** The gate exercises the tilemap layer logic
+against a VRAM dump. It does not exercise the fitted memories, SDRAM, the
+sprite renderer, or the CPU stealing a VIEW2 read cycle. Equivalent logic can
+still be a materially different build, and here it is:
+
+```
+M10K blocks   522 -> 495 of 553      (355bf50, the VIEW2 port sharing)
+ALMs          16,670 -> 17,840
+```
+
+The released build sat at **522 of 553 blocks, 94%**. The build after the port
+sharing sits at 495, 89.5%. That is the regime this file already warns about:
+
+> 1W2R memories are silently duplicated ONLY WHILE BLOCKS ARE SPARE.
+
+The released build had 31 spare blocks while the VIEW2 arrays alone wanted
+about 32 for duplication. A design scraping the bottom of the block pool is
+exactly where the fitter's choices stop being neutral, and where a build can
+work almost everywhere and lose particular data -- which is the shape of what
+was reported.
+
+So the leading explanation is that the port sharing, done for Tier 2 headroom,
+also relieved the pressure that produced the fault. That is a mechanism, not a
+proof; the cheap test is to give the tester the current build, because the
+owner already runs it and does not see the fault.
+
+The released build's own timing slack was never recorded, which is a gap --
+there is nothing to compare +0.559 ns against.
+
+Two setup faults documented here remain worth excluding at the same time, since
+each has cost a session:
 
 - **A shadowing core.** MiSTer resolves `<rbf>Kaneko16</rbf>` by keeping the
   lexicographically greatest name beginning `Kaneko16` followed by `.` or `_`,
