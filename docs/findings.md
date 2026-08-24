@@ -6587,7 +6587,49 @@ cannot be causing anything on this game today. Left recorded rather than
 fixed, because unlike the sprite case there is no measurement showing it
 matters, and every region here is a power of two where a mask would do.
 
-### Both bitstreams render Explosive Breaker's sprites identically
+### The released build and the current one are the SAME core, everywhere the gate can see
+
+The fault was reported against the release by a third party; the owner cannot
+reproduce it on the build on the board. That difference is what needed
+explaining, and it is not in the RTL.
+
+**Sprites.** Nothing in `kaneko_vuspr_draw.sv`, `kaneko_spr_sys.sv` or
+`kaneko_vuspr.sv` has changed since the released bitstream (`6a1af58`), and
+every `kaneko_gamecfg` change since is gated on `calc3_board` -- game ids 4 and
+5. Verified by building both revisions of the module and diffing the **values**
+rather than the source: every output identical for all four Tier 1 games.
+
+**Tilemaps.** `kaneko_vmem.sv` and `kaneko_tmap_line.sv` did change, for the
+shared VIEW2 read port. So the released tree was checked out into a worktree
+and run through the frame gate against the same dump:
+
+```
+released 6a1af58 : pixels=57344 diff=9589 match=83.2781%
+HEAD             : pixels=57344 diff=9589 match=83.2781%
+```
+
+Identical, to the pixel. The port sharing changed nothing the gate can
+observe, which is expected -- the gate does not exercise the CPU stealing a
+video cycle.
+
+**So the bitstream is not the variable.** Whatever the tester saw, this core
+does the same thing in both builds. What is left is the tester's setup or the
+point in the game, and two setup faults are already documented here as having
+cost whole sessions:
+
+- **A shadowing core.** MiSTer resolves `<rbf>Kaneko16</rbf>` by keeping the
+  lexicographically greatest name beginning `Kaneko16` followed by `.` or `_`,
+  and `_` (0x5F) beats `.` (0x2E) -- so any `Kaneko16_*.rbf` left in
+  `_Arcade/cores/` silently wins every load. This cost twelve hours once
+  already.
+- **A mismatched MRA.** The MRA and the RBF are a pair whenever the SDRAM
+  layout is involved; an older MRA with a newer core loads every ROM region at
+  the wrong offset, which shows as graphics missing or wrong rather than as a
+  failure.
+
+Both are a minute to check and neither can be checked from here. Ask for the
+core's md5 as it sits on the card, and for the MRA to be the one from the same
+release.
 
 Checked because the fault was reported against the release while the build on
 the board looked correct. It is not a difference between the two. Since the
