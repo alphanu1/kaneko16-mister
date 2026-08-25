@@ -98,10 +98,21 @@ IMPROVED: SDRAM went from +1.126 to +1.261 ns and the core from +1.880 to
 +2.182. What fails is `pll_hdmi`, the framework's HDMI path, and it fails
 because the fitter has run out of room:
 
-| | before Tier 2 | with Tier 2 |
-|---|---|---|
-| ALMs | 16,670 (40%) | 21,456 (51%) |
-| **M10K blocks** | — | **522 / 553 (94%)** |
+| | before Tier 2 | with Tier 2 | MCU RAM in SDRAM |
+|---|---|---|---|
+| ALMs | 16,670 (40%) | 21,456 (51%) | **14,187 (34%)** |
+| **M10K blocks** | — | **522 / 553 (94%)** | **467 / 553 (84%)** |
+| worst-case slack | — | **-0.771 ns, FAILS** | **+0.331 ns, closes** |
+
+The third column is this branch as it stands, 2026-08-25: the CALC3 core with
+the Tier 1 hardware it does not need stripped out and the MCU's 64 KB moved to
+SDRAM. Both numbers that mattered moved the right way at once — 57 blocks back,
+and a build that could not close timing now closes with room. `check_ports`
+is clean, so no `kaneko_*` input is dangling.
+
+**It has not run on hardware, and it cannot yet run a game.** The CALC3 MCU
+itself is unwritten, so both titles will sit waiting on a device that never
+answers. This build is a fit-and-timing measurement, not something to play.
 
 ## THE BLOCK MEMORY IS THE BLOCKER FOR TIER 2
 
