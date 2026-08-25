@@ -139,6 +139,16 @@ obj_dir/
 *.7z
 *.hex
 
+# The CALC3 key ROM is the ONE exception, and it is explicit because the
+# blanket above would swallow it in silence -- the same shape as the blanket
+# *.rbf that ate a `git add releases/` and left upstream with no core at all.
+# This data is not ROM-derived: the CALC3's internal ROM has never been
+# dumped, and these are reverse-engineered constants from MAME's source
+# (BSD-3-Clause), so there is no romset to load them from and nothing for an
+# MRA to carry. tools/gen_calc3_keys.py regenerates them.
+!rtl/mcu/calc3_keys.hex
+!rtl/mcu/calc3_keyidx.hex
+
 # ------------------------------------------------------------------ editor
 # Shared project settings are committed; everything else under .vscode/ is not.
 # The directory itself must not be excluded — git will not re-include a file
