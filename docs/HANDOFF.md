@@ -205,14 +205,29 @@ checksum and EEPROM copy, then transfer commands, each decompressing a table to
 a rolling write pointer and writing the header and a 32-bit data pointer back
 to the address the command names.
 
-`make calc3` is the check. It captures what MAME writes, replays the same
-command stream through the model, and diffs both the ADDRESSES and the BYTES:
+`make calc3` is the check, on both games — `CALC3_SET` picks which. It captures
+what MAME writes, replays the same command stream through the model, and diffs
+both the ADDRESSES and the BYTES:
 
     table 19  207fe0    216 bytes  ok
     table 80  2080bc    686 bytes  ok
     table 41  20836e   4102 bytes  ok
     table 10  209378   1328 bytes  ok
     table 11  2098ac   1010 bytes  ok
+
+B.Rap Boys passes the same way: tables 10, 11, 16, 12 and 1d at 200872, 200944,
+200a44, 200bd0 and 200c22.
+
+**The init parameters are MAME's documented ones, not inferred.**
+`kaneko_calc3.cpp` records the command each game issues —
+`00FF 0059 019E 030A FFFE 0042 0020 7FE0` for shogwarr and
+`00FF 00C2 0042 0830 082E 00C8 0020 0872` for brapboys — being the busy flag,
+DSW address, EEPROM address, future command base, poll address, checksum
+address and a 32-bit write base. Four were guessed here first and two of those
+guesses were wrong; every table still matched, because a table's content does
+not depend on them. That is how a wrong value survives a passing test. The
+write bases confirm the captures independently: shogwarr's first run landed at
+207fe0 and brapboys' at 200872.
 
 The addresses are the part that confirms the pointer arithmetic — each is the
 previous plus `(length + 3) & ~1` where length counts the two header bytes.

@@ -288,14 +288,35 @@ class Sequencer:
 # The command streams MAME logged, with the write base its first table landed
 # on. Both are observations, not guesses: the commands come from the driver's
 # own "MCU executed command" log and the base from the first captured run.
+# The init parameters are the ones MAME's own header records, not values
+# inferred here. kaneko_calc3.cpp quotes the command each game issues:
+#
+#   shogwarr: 00FF 0059 019E 030A FFFE 0042 0020 7FE0
+#   brapboys: 00FF 00C2 0042 0830 082E 00C8 0020 0872
+#
+# which is busy flag, DSW address, EEPROM address, future command base, poll
+# address, checksum address, then a 32-bit write base. Four of these were
+# guessed here first and two of those guesses were wrong; the tables still
+# matched, because a table's content does not depend on them, which is exactly
+# how a wrong value survives. The write bases confirm the capture independently:
+# shogwarr's first run landed at 207fe0 and brapboys' at 200872.
 SELFTEST = {
     "shogwarr": dict(
-        params=dict(dsw=0x0000, eeprom=0x0100, cmdbase=0x030a, poll=0x0000,
-                    checksum=0x0200, write=0x00207fe0),
+        params=dict(dsw=0x0059, eeprom=0x019e, cmdbase=0x030a, poll=0xfffe,
+                    checksum=0x0042, write=0x00207fe0),
         commands=[(1, [0x19]), (3, [0x80, 0x41, 0x10]), (2, [0x11, 0x11])],
         expect=[(0x19, 0x207fe0, 216), (0x80, 0x2080bc, 686),
                 (0x41, 0x20836e, 4102), (0x10, 0x209378, 1328),
                 (0x11, 0x2098ac, 1010)],
+    ),
+    "brapboys": dict(
+        params=dict(dsw=0x00c2, eeprom=0x0042, cmdbase=0x0830, poll=0x082e,
+                    checksum=0x00c8, write=0x00200872),
+        commands=[(1, [0x10]), (1, [0x11]), (1, [0x16]), (1, [0x12]),
+                  (1, [0x1d])],
+        expect=[(0x10, 0x200872, 206), (0x11, 0x200944, 252),
+                (0x16, 0x200a44, 392), (0x12, 0x200bd0, 78),
+                (0x1d, 0x200c22, 3584)],
     ),
 }
 
