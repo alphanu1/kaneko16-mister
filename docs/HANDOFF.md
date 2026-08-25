@@ -171,6 +171,38 @@ records what MAME's CALC3 puts into MCU RAM: a per-frame diff of the 64 KB at
 so the RTL is fed exactly the bytes MAME was fed. On `shogwarr`, 8 seconds is
 475 frames and 134,554 changed words; the init burst lands at frame 188.
 
+**The per-frame diff cannot see the MCU on `shogwarr`, and that matters.** The
+68000 fills MCU RAM with a repeating 7-byte pattern (55 dd bb 99 00 ff aa) and
+overwrites the MCU's output between two samples, so every apparent "MCU burst"
+in that trace is the CPU's fill. `tools/mame_calc3_writes.lua` replaces it for
+this purpose: it taps writes in order and keeps maximal ascending byte-stride
+runs of 64 bytes or more, which is what the decompressor produces and the
+fill does not.
+
+**The decompressor is transcribed and verified.** `tools/calc3_ref.py` is the
+reference model — the linked-list table walk, both encryption paths, four
+subtract types, four alternate-swap modes, the keyed rotate and the inline key
+table with its two magic arrays. It reads the key table out of MAME's source
+rather than keeping a second copy, so there is one copy of that data and it
+stays attributed.
+
+Checked against MAME's own writes on both games, byte for byte:
+
+| | tables the game pulled | result |
+|---|---|---|
+| `shogwarr` | 19, 80, 41, 10, 11 (216 to 4,102 bytes) | all five identical |
+| `brapboys` | 10, 11, 16, 12, 1d, 1a twice (78 to 3,584 bytes) | all seven identical |
+
+What comes out is 68000 machine code — `48e7fffe` MOVEM.L, `4e56ffbc` LINK A6.
+The CALC3 decompresses subroutines into RAM and the game calls them, which is
+why a stub cannot fake it. B.Rap Boys pulls table 1a twice to 202000 both
+times, so the mode 06 write-pointer reset MAME hardcodes for that game is
+real and observable rather than a guess.
+
+Still to write: the command sequencer around it (`mcu_run` — the four status
+bits, the 0xff init with its seven parameters, the ROM checksum, the 64 EEPROM
+words) and then the RTL, with `calc3_ref.py` as the golden model.
+
 A diff rather than a write tap deliberately — a tap sees every access through
 the space and cannot say who made it, so the 68000's own use of that RAM would
 be indistinguishable from the MCU's. The MCU writes in bursts from a timer
