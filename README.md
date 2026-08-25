@@ -6,9 +6,16 @@ as the original silicon did, verified against MAME as an oracle.
 
 **Status: all four Tier 1 games are playable on hardware.** Explosive Breaker,
 Magical Crystals, Blaze On and Wing Force run with graphics, input and sound,
-and all four are shipped. Wing Force is missing its OKI sound effects and its
-attract music; everything else plays. Later titles needing the CALC3 or TOYBOX
-MCUs are not attempted. See `docs/HANDOFF.md` for the gap analysis.
+and all four are shipped. Later titles needing the CALC3 or TOYBOX MCUs are not
+attempted.
+
+**Wing Force's attract mode is silent on the original hardware, and this core
+is silent there too.** Its music plays on the title screen and in game; the
+attract demo and the attract high-score table have no sound at all. That was
+treated as a defect for a long time before it was checked: counting OKI writes
+in MAME alongside screenshots taken at the same instant gives 183 writes in
+five seconds on the title screen and exactly zero on both attract screens. The
+board does the same. Nothing is missing there. See `docs/HANDOFF.md` for the gap analysis.
 
 ## The hardware
 
@@ -43,7 +50,7 @@ Miles Rally 1/2.
 | EEPROM (93C46) | working; 20,910 reads replayed against MAME, zero mismatches |
 | Inputs | two players, 2 buttons each, start/coin/service, and the board's DIPs — assembled per board, because the two boards wire the words differently, not just relocate them |
 | Game configuration table | `rtl/io/kaneko_gamecfg.sv` — one bitstream, four games; memory-map pages, ROM bases, video geometry, layer count, sprite list size and input wiring all selected by the MRA's game-id byte |
-| Z80 + YM2151 sound (Blaze On board) | **working on Blaze On** — music and effects. T80 at 4 MHz, jt51, and a 256-byte cache over SDRAM for the program ROM; a 48 KB copy in block RAM did not fit. Wing Force has in-game music but no OKI effects and no attract music; its OKI hangs off the Z80's I/O ports rather than the 68000's bus, and that path is still open |
+| Z80 + YM2151 sound (Blaze On board) | **working on Blaze On** — music and effects. T80 at 4 MHz, jt51, and a 256-byte cache over SDRAM for the program ROM; a 48 KB copy in block RAM did not fit. Wing Force's OKI hangs off the Z80's I/O ports rather than the 68000's bus. Its attract mode is SILENT ON THE ORIGINAL HARDWARE and correctly silent here -- see the note at the top |
 | Screen rotation | **working on hardware** — per game, because it is per game in both senses: Explosive Breaker is ROT90 and Wing Force ROT270, turned in OPPOSITE directions, while Blaze On and Magical Crystals are ROT0. Uses MiSTer's `screen_rotate` and the DDR3 framebuffer, so it costs no M10K and no SDRAM bandwidth. **Off by default** — on a landscape monitor a turned game is a tall strip, and the framebuffer path costs a frame of latency. OSD: Off / Auto (per game) / CW 90 / CCW 90 / 180. The half turn is there because a physically portrait monitor needs it: `screen_rotate` reaches it by not rotating and raising `flip`, and without it three of the settings are each a quarter turn out and none is right |
 
 All four games are playable on hardware. The 68000 completes its

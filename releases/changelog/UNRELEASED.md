@@ -1,0 +1,60 @@
+# Kaneko16 — unreleased
+
+Changes since `Kaneko16_20260824.rbf` (md5 `e662d454`).
+
+**Not released.** Nothing here ships until the build has been played on
+hardware and confirmed.
+
+## Sound
+
+**Wing Force — sound effects now audible.** The OKI M6295 was mixed far too
+quietly against the music. MAME routes this board's YM2151 at 0.2 and its OKI
+at 0.5 — the effects are two and a half times *louder* than the music — where
+every other board in the driver routes both equally, and the core was using the
+other boards' balance. The effects were being produced correctly the whole time
+and were simply buried.
+
+**Blaze On board — the YM2151 is no longer corrupted by phantom writes.** The
+Z80's *reads* of the YM status port were being delivered as *writes*, putting
+whatever happened to be on the data bus into a sound register about 105 times a
+second. This affects **both Blaze On and Wing Force**, and it was silent in
+every sense: nothing upstream looked wrong, the chip simply produced less than
+it should. The write rate is now 8–15 a frame against MAME's ~15, measured on
+hardware; it was 120.
+
+**Wing Force — the attract mode is silent on the original hardware.** This is
+**not a fault**. The game plays music on the title screen and in game; the
+attract demo and the attract high-score table have no sound at all. Confirmed
+against MAME by counting sound-chip writes alongside screenshots taken at the
+same instant: 183 writes in five seconds on the title screen, and exactly zero
+on both attract screens. This core does the same.
+
+## Graphics
+
+**Sprite codes are now bounded per game.** A sprite whose code ran past the end
+of its ROM region fetched from outside it and drew nothing — invisible, while
+its game logic carried on. The hardware wraps the code by the number of tiles
+in the region, and that count differs per game; two of the six are not powers
+of two, so a mask cannot stand in for the division. Measured on Explosive
+Breaker's attract loop: 283 on-screen sprites in 7,081 frames were affected.
+
+## Options
+
+**Rotation now offers 180°.** It was Off / Auto / CW / CCW — three of the four
+quarter turns, with the half turn unreachable, which left a physically portrait
+monitor with no correct setting in any position. Now Off / Auto / CW 90 /
+CCW 90 / 180.
+
+**Sprite offscreen skip now defaults to Off.**
+
+## Known issues
+
+- Tier 2 and Tier 3 are not attempted. Shogun Warriors and B.Rap Boys need the
+  CALC3 MCU; Great 1000 Miles Rally, Blood Warrior and Bonk's Adventure need
+  TOYBOX, and GTMR additionally needs the KC-002 sprite chip's 8bpp path.
+- Explosive Breaker's tilemap sits one pixel right of MAME on chip 1's layer 0.
+  Measured exactly — the frame gate matches on all 57,344 pixels once a
+  one-pixel correction is applied — but not corrected, because Magical Crystals
+  wants no such correction and the rule that separates them is not yet known.
+- Screen timing is not PCB-verified. MAME uses `set_refresh_hz(60)` with no
+  `set_raw()`; this core runs 384x264 at 59.1856 Hz.

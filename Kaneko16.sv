@@ -840,7 +840,33 @@ wire signed [23:0] z80_ym_l24 = 24'sd13 * $signed({{8{ym2151_l[15]}}, ym2151_l})
 wire signed [23:0] z80_ym_r24 = 24'sd13 * $signed({{8{ym2151_r[15]}}, ym2151_r});
 wire signed [17:0] z80_ym_l  = z80_ym_l24[23:6];      // x13/64 = x0.203
 wire signed [17:0] z80_ym_r  = z80_ym_r24[23:6];
-wire signed [17:0] z80_oki_w = $signed({{4{oki_snd[13]}}, oki_snd}) >>> 1;  // x0.5
+// x2, NOT x0.5, AND THE DIFFERENCE IS THE NATIVE RANGES.
+//
+// MAME's weights are OKI 0.5 against YM2151 0.2 -- the effects two and a half
+// times LOUDER than the music -- and applying those numbers literally was
+// wrong, because the two chips do not start from the same scale. jt51's sample
+// is 16-bit and jt6295's is 14, a factor of four, so `oki * 0.5` landed at
+// 4096 against the YM's 6656: the OKI came out QUIETER than the music instead
+// of 2.5x louder, still four times short.
+//
+// Scaling by 2 puts the PEAKS at 16,384 against 6,656, MAME's 2.5 to 1 within
+// 2% -- and on hardware that was still barely audible, exactly as Explosive
+// Breaker was before its mix was boosted.
+//
+// MATCHING THE PEAKS IS THE WRONG MODEL, and the 68000 board's mix already
+// says why a few lines above: the OKI's full scale is theoretical. ADPCM
+// samples carry their own volume attenuation and rarely approach +/-8192,
+// while jt51 really does use its range. So a ratio computed from peaks gives
+// the OKI far less than 2.5 to 1 of what is actually heard.
+//
+// x8 rather than x2, which is the same judgement Explosive Breaker's `<<< 2`
+// makes and for the same reason: it scales past the point where the sum can be
+// proven not to clip and relies on the saturation below. A rare clipped effect
+// is a better trade than effects nobody can hear.
+//
+// If loud effects distort, back this off to <<< 2 -- that is the largest shift
+// whose peak still fits beside the music without saturating.
+wire signed [17:0] z80_oki_w = $signed({{4{oki_snd[13]}}, oki_snd}) <<< 3;   // x8
 
 wire signed [17:0] z80_sum_l = z80_ym_l + z80_oki_w;
 wire signed [17:0] z80_sum_r = z80_ym_r + z80_oki_w;

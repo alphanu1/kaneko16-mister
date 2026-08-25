@@ -13,6 +13,9 @@ Copy to the SD card:
 ROMs are supplied by you and must be in `/media/fat/games/mame/` as the MRA
 names them. Nothing here contains ROM data.
 
+**What changed:** `changelog/` carries one file per released bitstream, named
+after it, plus `UNRELEASED.md` for whatever ships next.
+
 **Check what you are running.** `Kaneko16_20260824.rbf` is
 `e662d4543ee88aaf10d0e004316e6347`, 3,936,852 bytes. If the core on your card
 does not have that md5, you are not running this build -- and the usual reason
