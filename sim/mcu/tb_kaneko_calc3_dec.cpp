@@ -20,58 +20,16 @@
 #include <cstdio>
 #include <cstdint>
 #include <random>
+#include "calc3_model.h"
 #include "Vkaneko_calc3_dec.h"
 #include "verilated.h"
 
-namespace {
-
-const uint8_t EXTRA[31] = {
-    0x14,0xf0,0xf8,0xd2,0xbe,0xfc,0xac,0x86,0x64,0x08,0x0c,0x74,0xd6,0x6a,
-    0x24,0x12,0x1a,0x72,0xba,0x48,0x76,0x66,0x4a,0x7c,0x5c,0x82,0x0a,0x86,
-    0x82,0x02,0xe6 };
-const uint8_t EXTRA2[30] = {
-    0x2f,0x04,0xd1,0x69,0xad,0xeb,0x10,0x95,0xb0,0x2f,0x0a,0x83,0x7d,0x4e,
-    0x2a,0x07,0x89,0x52,0xca,0x41,0xf1,0x4f,0xaf,0x1c,0x01,0xe9,0x89,0xd2,
-    0xaf,0xcd };
-
-// calc3_rotate_bits, verbatim in behaviour: a left rotate by bits & 7.
-uint8_t rot(uint8_t d, int bits) {
-  bits &= 7;
-  if (!bits) return d;
-  return (uint8_t)((d << bits) | (d >> (8 - bits)));
-}
-
-uint8_t ref_inline(uint8_t dat, int shift, int sub, int alt,
-                   uint8_t inlinet, int ii, bool half) {
-  if (sub == 3 && alt == 0) {
-    dat -= inlinet;
-    if (!(ii & 1)) dat -= EXTRA[ii >> 1];
-    return dat;
-  }
-  if (!half) {
-    if (ii & 1) return rot((uint8_t)(dat - inlinet), shift);
-    if (sub != 2) dat = (uint8_t)(dat - inlinet - EXTRA[ii >> 1]);
-    else          dat = (uint8_t)(dat + inlinet + EXTRA[ii >> 1]);
-    return rot(dat, 8 - shift);
-  }
-  if (!(ii & 1)) return rot((uint8_t)(dat - inlinet), shift);
-  if (sub != 2) dat = (uint8_t)(dat - EXTRA2[ii >> 1]);
-  else          dat = (uint8_t)(dat + EXTRA2[ii >> 1]);
-  return rot(dat, 8 - shift);
-}
-
-uint8_t ref_keyed(uint8_t dat, int shift, int sub, int alt,
-                  uint8_t keydat, bool odd) {
-  if (sub == 1)      dat = odd ? (uint8_t)(dat + keydat) : (uint8_t)(dat - keydat);
-  else if (sub == 2) dat = odd ? (uint8_t)(dat - keydat) : (uint8_t)(dat + keydat);
-  else if (sub == 3) dat = (uint8_t)(dat - keydat);
-
-  if (alt == 0 || alt == 3) return odd ? rot(dat, shift) : rot(dat, 8 - shift);
-  if (alt == 1)             return rot(dat, 8 - shift);
-  return rot(dat, shift);
-}
-
-}  // namespace
+// The C reference lives in calc3_model.h, shared with the table testbench.
+// It was duplicated here first; two transcriptions of an algorithm this fiddly
+// drift, and the drift reads as an RTL bug.
+using calc3::rot;
+using calc3::inline_path;
+using calc3::keyed_path;
 
 int main(int argc, char** argv) {
   Verilated::commandArgs(argc, argv);
@@ -112,11 +70,11 @@ int main(int argc, char** argv) {
 
     uint8_t want;
     if (size) {
-      want = ref_inline(dat, shift, sub, alt, inl, ii, half);
+      want = inline_path(dat, shift, sub, alt, inl, ii, half);
       inline_paths++;
       if (sub == 3 && alt == 0) special++;
     } else {
-      want = ref_keyed(dat, shift, sub, alt, key, odd);
+      want = keyed_path(dat, shift, sub, alt, key, odd);
       keyed_paths++;
     }
 

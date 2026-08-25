@@ -297,10 +297,35 @@ table-count byte before it starts. Reading one byte low gives a header that
 still looks plausible — a length, a mode, a key — and decodes to rubbish.
 Injecting exactly that fault makes the fuzz fail on the first trial.
 
-Still to write: the sequencer that drives these three — feeding bytes through
-the transform, running the inline/key index counters, the rolling write pointer
-and the MCU RAM writes, and the command dispatch that watches for a command
-word. `calc3_ref.py` is its golden model and `make calc3` is the check.
+**Fourth piece: `rtl/mcu/kaneko_calc3_table.sv`**, which drives the other
+three. It runs the walk, then streams the block's data a byte at a time, pulling
+each byte's key from the inline table or the key ROM and pushing both through
+the transform.
+
+Two details in it are the ones most likely to be subtly wrong:
+
+- **The inline index is a counter, not a modulo.** The inline table can be any
+  length, odd or even, so `i % size` would be a divide per byte. The index
+  counts and wraps, and `inline_half` — the C's `(i / size) & 1` — is a toggle
+  on each wrap.
+- **The first two decoded bytes are the data header, not table data.** They go
+  back to the address the command names and never into the table's destination.
+
+`tb_kaneko_calc3_table` fuzzes it over generated ROMs and a generated key table:
+53,217 checks, 0 fails, 52,345 decoded bytes, across 179 inline tables (94 of
+them an odd size), 93 keyed tables and 28 zero-length control blocks, with a
+variable ROM latency throughout. Removing the `inline_half` toggle fails at
+exactly the first wrap of the inline table; both faults above are the kind that
+look right for a table's first few bytes.
+
+The C reference is now one copy in `sim/mcu/calc3_model.h`, shared by both
+testbenches. It was duplicated, and two transcriptions of an algorithm this
+fiddly drift — the drift would read as an RTL bug.
+
+Still to write: the sequencer proper — command dispatch watching MCU RAM, the
+0xff init, the rolling write pointer, the header writeback, and the SDRAM
+plumbing that gives all of this its ROM reads and MCU RAM writes.
+`calc3_ref.py` is its golden model and `make calc3` is the check.
 
 A diff rather than a write tap deliberately — a tap sees every access through
 the space and cannot say who made it, so the 68000's own use of that RAM would
