@@ -22,7 +22,7 @@ QUARTUS_ROOT ?= /home/ben/intelFPGA_lite/17.0/quartus
 QUARTUS_BIN  := $(QUARTUS_ROOT)/bin
 QUARTUS_WANT := 17.0
 
-RTL_DIRS  := rtl/video rtl/cpu rtl/sound rtl/mem rtl/io rtl/pll
+RTL_DIRS  := rtl/video rtl/cpu rtl/sound rtl/mem rtl/io rtl/pll rtl/mcu
 RTL       := $(wildcard $(patsubst %,%/*.sv,$(RTL_DIRS)))
 # Simulation-only SystemVerilog (harness wrappers). Compiled into harnesses but
 # never linted as core RTL and never instantiated from rtl/.
@@ -73,6 +73,7 @@ HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_spr_sys:kaneko_spr_sys_harness:sim/video/tb_kaneko_spr_sys.cpp \
              kaneko_gamecfg:kaneko_gamecfg:sim/io/tb_kaneko_gamecfg.cpp \
              kaneko_oki:kaneko_oki_harness:sim/sound/tb_kaneko_oki.cpp:JT6295 \
+             kaneko_calc3_dec:kaneko_calc3_dec:sim/mcu/tb_kaneko_calc3_dec.cpp \
              kaneko_cpu:kaneko_cpu_harness:sim/cpu/tb_kaneko_cpu.cpp:FX68K
 
 # The frame gate is separate from `make test`: it needs a MAME dump and

@@ -227,7 +227,31 @@ Those four start at 202000, which is the mode 06 write-pointer reset: MAME's
 comment calls that "reasonable for brapboys, not sure about shogwarr", and the
 capture shows shogwarr using it as well.
 
-Next is the RTL, with `calc3_ref.py` as the golden model.
+**First RTL landed: `rtl/mcu/kaneko_calc3_dec.sv`**, the per-byte transform.
+Combinational, no memory, no state — the sequencer supplies the block
+parameters, the byte index's parity, and the inline or key byte for that index.
+Split out because it is the part that has to be exactly right and the part that
+can be fuzzed with no ROM data.
+
+`tb_kaneko_calc3_dec` runs it exhaustively over the mode space and randomly
+over the data: 614,400 checks, 0 fails, covering 409,600 inline-path and
+204,800 keyed-path cases and 25,600 of the Shogun Warriors table 0x40 special
+case. It fails when broken — swapping the rotate direction under alternate-swap
+modes 0 and 3 is caught on the first few cases.
+
+Two checks, and neither is sufficient alone. The fuzz takes every path but
+invents its data, and its reference is a second transcription of the same C, so
+by itself it shows agreement between two transcriptions. `make calc3` uses real
+data — what MAME's CALC3 actually wrote — but only the paths those two games
+take. Together they cover both axes.
+
+The `shift` port is three bits where the block header holds four. Every use in
+the C masks with `& 7`, and `8 - shift` feeds the same masked rotate, so bit 3
+cannot change a result: `shift == 9` and `shift == 1` agree both ways round.
+
+Still to write: the sequencer in RTL — the table walk over calc3_rom in SDRAM,
+the rolling write pointer, and the MCU RAM writes. `calc3_ref.py` is its golden
+model and `make calc3` is the check.
 
 A diff rather than a write tap deliberately — a tap sees every access through
 the space and cannot say who made it, so the 68000's own use of that RAM would
