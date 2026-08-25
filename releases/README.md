@@ -4,7 +4,7 @@ Copy to the SD card:
 
 | from | to |
 |---|---|
-| `Kaneko16_20260824.rbf` | `/media/fat/_Arcade/cores/` — **rename to `Kaneko16.rbf` on the card** |
+| `Kaneko16_20260825.rbf` | `/media/fat/_Arcade/cores/` — **rename to `Kaneko16.rbf` on the card** |
 | `Explosive Breaker (World).mra` | `/media/fat/_Arcade/` |
 | `Blaze On (Japan).mra` | `/media/fat/_Arcade/` |
 | `Wing Force (Japan, prototype).mra` | `/media/fat/_Arcade/` |
@@ -16,8 +16,8 @@ names them. Nothing here contains ROM data.
 **What changed:** `changelog/` carries one file per released bitstream, named
 after it, plus `UNRELEASED.md` for whatever ships next.
 
-**Check what you are running.** `Kaneko16_20260824.rbf` is
-`e662d4543ee88aaf10d0e004316e6347`, 3,936,852 bytes. If the core on your card
+**Check what you are running.** `Kaneko16_20260825.rbf` is
+`99b98dfec8e0073f8a7d28c2f788722c`. If the core on your card
 does not have that md5, you are not running this build -- and the usual reason
 is a second file: MiSTer keeps the lexicographically greatest name beginning
 `Kaneko16` followed by `.` or `_`, and `_` sorts after `.`, so a spare
@@ -55,7 +55,7 @@ bases, screen geometry, layer count, sprite list size and input wiring.
 An MRA is shipped only for a game somebody has played on hardware. One that
 merely builds and passes its gates is a candidate, not a release.
 
-## Not finished, as of `Kaneko16_20260824.rbf`
+## Not finished, as of `Kaneko16_20260825.rbf`
 
 This list describes the RBF named above. Every entry is removed in the same
 change as the RBF that fixes it, so if an item is still here it is still true

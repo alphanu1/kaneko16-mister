@@ -836,9 +836,9 @@ wire [15:0] ym_mix = (snd_gain >  19'sd32767) ? 16'h7fff
 // So the product is formed at 24 bits and the shift is a bit-select of the
 // top 18, which cannot overflow and needs no multiplier inference to be
 // correct.
-wire signed [23:0] z80_ym_l24 = 24'sd13 * $signed({{8{ym2151_l[15]}}, ym2151_l});
-wire signed [23:0] z80_ym_r24 = 24'sd13 * $signed({{8{ym2151_r[15]}}, ym2151_r});
-wire signed [17:0] z80_ym_l  = z80_ym_l24[23:6];      // x13/64 = x0.203
+wire signed [23:0] z80_ym_l24 = 24'sd5 * $signed({{8{ym2151_l[15]}}, ym2151_l});
+wire signed [23:0] z80_ym_r24 = 24'sd5 * $signed({{8{ym2151_r[15]}}, ym2151_r});
+wire signed [17:0] z80_ym_l  = z80_ym_l24[23:6];      // x5/64 = x0.078
 wire signed [17:0] z80_ym_r  = z80_ym_r24[23:6];
 // x2, NOT x0.5, AND THE DIFFERENCE IS THE NATIVE RANGES.
 //
@@ -859,14 +859,26 @@ wire signed [17:0] z80_ym_r  = z80_ym_r24[23:6];
 // while jt51 really does use its range. So a ratio computed from peaks gives
 // the OKI far less than 2.5 to 1 of what is actually heard.
 //
-// x8 rather than x2, which is the same judgement Explosive Breaker's `<<< 2`
-// makes and for the same reason: it scales past the point where the sum can be
-// proven not to clip and relies on the saturation below. A rare clipped effect
-// is a better trade than effects nobody can hear.
+// THE BALANCE IS SET BY EAR AGAINST MAME; THE LEVEL IS SET BY THE HEADROOM.
 //
-// If loud effects distort, back this off to <<< 2 -- that is the largest shift
-// whose peak still fits beside the music without saturating.
-wire signed [17:0] z80_oki_w = $signed({{4{oki_snd[13]}}, oki_snd}) <<< 3;   // x8
+// Two separate questions, and conflating them cost three builds. The balance
+// that sounds right against the oracle is about 9.6 to 1 by peak -- far more
+// than MAME's nominal 2.5, because the OKI's full scale is theoretical while
+// jt51 genuinely uses its range, the same reason the 68000 board's mix is
+// boosted past what its arithmetic can prove safe.
+//
+// Reaching that balance by raising the OKI alone put the peak sum at 72,192
+// against a 16-bit range, and on hardware that was popping and crackling --
+// saturation, not distortion in the chips. The fix is to scale the PAIR, not
+// one side: x3/8 on both holds the balance at 9.6 to 1 and brings the peak sum
+// to 27,136, which leaves 5,631 of headroom and cannot saturate at all.
+//
+// So: ym x5/64 and oki x3. If it is too quiet overall, scale both again --
+// x1/4 on the pair keeps the same balance with 14,719 of headroom. Changing
+// only one of them changes the balance, which is the mistake this comment
+// exists to stop.
+wire signed [17:0] z80_oki_x1 = $signed({{4{oki_snd[13]}}, oki_snd});
+wire signed [17:0] z80_oki_w  = (z80_oki_x1 <<< 1) + z80_oki_x1;   // x3
 
 wire signed [17:0] z80_sum_l = z80_ym_l + z80_oki_w;
 wire signed [17:0] z80_sum_r = z80_ym_r + z80_oki_w;
