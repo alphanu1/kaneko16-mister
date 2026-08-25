@@ -406,6 +406,34 @@ def sdram_map(setname):
 def sdram_end(setname):
     return max(b + n for _, b, n in sdram_map(setname))
 
+
+# WHERE THE CALC3 MCU'S 64 KB OF RAM LIVES IN SDRAM.
+#
+# Not part of the ROM stream -- nothing loads it, the MCU fills it at runtime --
+# but it needs an address that cannot collide with anything the loader wrote,
+# and the RTL and this tool have to agree on where that is or the reads land in
+# the sprite ROM.
+#
+# It sits immediately above the stream, rounded up to a 64 KB boundary so the
+# base is a clean value in both places:
+#
+#   shogwarr   stream ends 0x1760000  ->  MCU RAM at 0x1760000
+#   brapboys   stream ends 0x0f60000  ->  MCU RAM at 0x0f60000
+#
+# 64 KB above a 23.4 MB stream is comfortable even on a 32 MB module.
+#
+# WHY IT IS IN SDRAM AT ALL. In block memory it costs 56 M10K and takes the
+# device to 95%, where MiSTer's HDMI PLL stops meeting timing -- this core's
+# own clocks are fine at +0.442 and +1.999 ns. Measured with
+# tools/mame_calc3_mcuram.lua, shogwarr touches it about 2,650 times a frame,
+# roughly 6.5% of a frame's clocks, so the bandwidth is affordable.
+MCURAM_BYTES = 0x10000
+
+def mcuram_base(setname):
+    """Byte address of the MCU RAM window, immediately above the ROM stream."""
+    end = sdram_end(setname)
+    return (end + 0xffff) & ~0xffff
+
 REGION_SIZE = {
     # Tier 2. shogwarr's sprite region is 0x1000000 with ROMREGION_ERASEFF and
     # only 0x700000 loaded, so nine megabytes of it read 0xff on the board.

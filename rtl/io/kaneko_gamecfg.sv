@@ -62,6 +62,13 @@ module kaneko_gamecfg #(
 
     // ---- SDRAM region bases, WORD addresses (half the byte offset)
     output wire [SDR_AW:1] base_trom0, base_trom1, base_spr, base_oki,
+    // WHERE THE CALC3 MCU'S 64 KB OF RAM LIVES IN SDRAM.
+    //
+    // Not loaded -- the MCU fills it at runtime -- but it needs an address the
+    // ROM stream cannot reach, and this and tools/build_rom_regions.py have to
+    // agree or the reads land in the sprite ROM. It sits immediately above the
+    // stream, and check_bases.py holds the two in step.
+    output wire [SDR_AW:1] base_mcuram,
 
     // ---- video
     output wire signed [10:0] v2_dx, v2_dy,
@@ -211,6 +218,11 @@ module kaneko_gamecfg #(
                       : is_wf ? SDR_AW'(25'h180000)     // byte 0x300000
                       : is_bz ? SDR_AW'(25'h100000)     // byte 0x200000
                               : SDR_AW'(25'h140000);    // byte 0x280000
+    // shogwarr's stream ends at byte 0x1760000 and brapboys' at 0x0f60000; both
+    // are already 64 KB aligned, so the MCU RAM starts exactly there.
+    assign base_mcuram = is_bb ? SDR_AW'(25'h07b0000)   // byte 0x0f60000
+                               : SDR_AW'(25'h0bb0000);  // byte 0x1760000
+
     assign base_oki   = calc3_board ? SDR_AW'(25'h230000)  // byte 0x460000
                       : is_wf ? SDR_AW'(25'h280000)
                       : is_mg ? SDR_AW'(25'h280000) : SDR_AW'(25'h260000);

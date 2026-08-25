@@ -176,6 +176,12 @@ wire [7:0]  PG_SND;
 wire        ROM_1MB;
 wire        BLAZEON_IO;
 wire [SDR_AW-1:0] BASE_Z80;
+// Where the CALC3 MCU's 64 KB of RAM sits in SDRAM: immediately above the ROM
+// stream, so it cannot collide with anything the loader wrote. check_bases.py
+// holds this and tools/build_rom_regions.py in step, because a base that
+// landed inside the stream would put the MCU's working memory on top of the
+// sprite ROM -- which loads without error and looks like an MCU fault.
+wire [SDR_AW:1] BASE_MCURAM;
 wire        HAS_Z80;
 wire [2:0]  OKI_MAX_BANK;
 wire        OKI_ON_Z80;
@@ -243,7 +249,7 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 	.h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
 	.v_start(CFG_V_START), .h_sync_start(CFG_HSYNC), .h_start(CFG_H_START),
 	.inputs_blazeon(INPUTS_BLAZEON),
-	.base_z80(BASE_Z80), .has_z80(HAS_Z80),
+	.base_z80(BASE_Z80), .has_z80(HAS_Z80), .base_mcuram(BASE_MCURAM),
 	.oki_max_bank(OKI_MAX_BANK), .oki_on_z80(OKI_ON_Z80),
 	.calc3_io(CALC3_IO), .base_oki2(OKI2_BASE), .oki2_max_bank(OKI2_MAX_BANK),
 	.in_unk_val(IN_UNK_VAL),

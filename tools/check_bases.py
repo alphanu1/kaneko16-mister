@@ -45,9 +45,14 @@ def rtl_bases(path="rtl/io/kaneko_gamecfg.sv"):
     """Every 25'hXXXXXX literal on each base_* assignment, in source order."""
     src = open(path).read()
     out = {}
-    for name in REGION:
+    # base_mcuram is checked too, though it is not a loaded region and so has
+    # no entry in REGION. It is scanned the same way.
+    for name in list(REGION) + ["base_mcuram"]:
         m = re.search(rf"assign\s+{name}\s*=(.*?);", src, re.S)
         if not m:
+            if name == "base_mcuram":
+                out[name] = []          # this core may not have an MCU at all
+                continue
             sys.exit(f"{name}: no assignment found in {path}")
         out[name] = [int(h, 16) for h in re.findall(r"25'h([0-9a-fA-F]+)", m.group(1))]
     return out
@@ -68,6 +73,22 @@ def main():
                       f"(byte {layout[region]:#08x}) for {region}; "
                       f"RTL has {[hex(v) for v in rtl[name]]}")
                 bad += 1
+    # THE MCU RAM IS NOT A LOADED REGION, so it is not in SDRAM_MAPS and the
+    # loop above cannot see it. It still has to agree: it sits above the ROM
+    # stream, and a base that landed inside the stream would put the CALC3's
+    # working memory on top of the sprite ROM -- which loads without error and
+    # looks like an MCU fault rather than an address fault.
+    if hasattr(tool, "mcuram_base"):
+        for game in ("shogwarr", "brapboys"):
+            if game not in tool.SDRAM_MAPS:
+                continue
+            want = tool.mcuram_base(game) // 2
+            if want not in rtl.get("base_mcuram", []):
+                print(f"  {game}: base_mcuram must include word {want:#08x} "
+                      f"(byte {tool.mcuram_base(game):#08x}); "
+                      f"RTL has {[hex(v) for v in rtl.get('base_mcuram', [])]}")
+                bad += 1
+
     if bad:
         print("\nkaneko_gamecfg's SDRAM bases disagree with the ROM layout.")
         print("A base that points into another region loads without error and")
