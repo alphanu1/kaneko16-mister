@@ -40,7 +40,12 @@
 // and it was also the one port blen() forgot, which is how a single-word burst
 // reached hardware and made the sound path silent.
 // // Ten, matching Kaneko16.sv. The tenth port is the CALC3 board's second OKI.
-static const int NP = 10;
+static const int NP = 11;
+
+// The write port's index, DERIVED. This was a hardcoded 9 in six places; when
+// NP went to 11 for the CALC3 MCU RAM the writer moved and the constants did
+// not, so every write landed on a read-only port.
+static const int WRP = NP - 1;
 
 // Burst length per port. This mirrored a per-port blen() in kaneko_sdram.sv and
 // got it wrong twice — once claiming ports 1 and 2 burst four where the RTL said
@@ -105,6 +110,7 @@ struct Harness {
       case 6: d->p6_req = v; break; case 7: d->p7_req = v; break;
       case 8: d->p8_req = v; break;
       case 9: d->p9_req = v; break;
+      case 10: d->p10_req = v; break;
       default: abortPort(p);
     }
   }
@@ -116,6 +122,7 @@ struct Harness {
       case 6: d->p6_addr = a; break; case 7: d->p7_addr = a; break;
       case 8: d->p8_addr = a; break;
       case 9: d->p9_addr = a; break;
+      case 10: d->p10_addr = a; break;
       default: abortPort(p);
     }
   }
@@ -126,6 +133,7 @@ struct Harness {
       case 4: return d->p4_ack; case 5: return d->p5_ack;
       case 6: return d->p6_ack; case 7: return d->p7_ack;
       case 8: return d->p8_ack; case 9: return d->p9_ack;
+      case 10: return d->p10_ack;
       default: abortPort(p); return false;
     }
   }
@@ -136,6 +144,7 @@ struct Harness {
       case 4: return d->p4_dout; case 5: return d->p5_dout;
       case 6: return d->p6_dout; case 7: return d->p7_dout;
       case 8: return d->p8_dout; case 9: return d->p9_dout;
+      case 10: return d->p10_dout;
       default: abortPort(p); return 0;
     }
   }
@@ -176,8 +185,12 @@ struct Harness {
 
             // If a write to this address landed after this read was issued,
             // the pre-write value is equally correct.
-            const bool raced = last_write_cyc.count(a) &&
-                               last_write_cyc[a] >= port[p].issued_at;
+            // Correct answer either way while the write has not demonstrably
+            // landed before this read's data was captured.
+            const bool raced =
+                (last_write_cyc.count(a) && last_write_cyc[a] >= port[p].issued_at) ||
+                (write_pending.count(a) && write_pending[a]) ||
+                (write_ack_cyc.count(a) && write_ack_cyc[a] >= cyc);
             if (raced && pre_write_val.count(a) && g == pre_write_val[a]) {
               races++;
               continue;
@@ -192,6 +205,10 @@ struct Harness {
               fails++;
             }
           }
+        }
+        if (port[p].write) {
+          write_pending[port[p].addr] = false;
+          write_ack_cyc[port[p].addr]  = cyc;
         }
         port[p].busy = false;
         port[p].n_done++;
@@ -213,6 +230,13 @@ struct Harness {
   // own. These two maps record what a raced read is allowed to return.
   std::map<uint32_t,long>     last_write_cyc;   // address -> cycle of last write
   std::map<uint32_t,uint16_t> pre_write_val;    // address -> value before it
+  // ...and when that write was ACKNOWLEDGED. Issue time is not enough: a write
+  // issued before a read can still be serviced after it, because the two sit at
+  // different points in the round-robin. That window was invisible while the
+  // writer was port 9; moving it to port 10 -- LAST in the order -- widened it
+  // until a read legitimately returning the pre-write value was scored a fail.
+  std::map<uint32_t,long>     write_ack_cyc;    // address -> cycle the write landed
+  std::map<uint32_t,bool>     write_pending;    // address -> issued, not yet acked
 
   void issue(int p, uint32_t addr, bool write, uint16_t data, uint8_t be = 3) {
     int words = write ? 1 : burst_of(p);
@@ -221,15 +245,16 @@ struct Harness {
     port[p].write = write; port[p].wdata = data; port[p].be = be;
     port[p].issued_at = cyc;
     setAddr(p, addr);
-    // Port 9 is the only one that writes. p0's write signals were the
+    // Port WRP is the only one that writes. p0's write signals were the
     // harness's original single write path and are gone; a write issued on any
     // other port would silently become a read, which is the sort of thing a
     // throughput number hides completely.
-    if (write && p != 9) { printf("  BUG: write issued on port %d\n", p); fails++; }
-    if (p == 9) { d->p9_we = write; d->p9_din = data; d->p9_be = be; }
+    if (write && p != WRP) { printf("  BUG: write issued on port %d\n", p); fails++; }
+    if (p == WRP) { d->p10_we = write; d->p10_din = data; d->p10_be = be; }
     setReq(p, 1);
     port[p].req_held = true;
     if (write) {
+      write_pending[addr] = true;
       if (be & 1) shadow[addr] = (shadow.count(addr) ? shadow[addr] : 0);
       const uint16_t before = shadow.count(addr) ? shadow[addr] : 0;
       uint16_t cur = before;
@@ -330,10 +355,10 @@ int main(int argc, char** argv) {
         // which is what the real board presents.
         unsigned thresh = (p == 0) ? 40 : (p == 2) ? 30 : 12;
         if ((rng() % 100) >= thresh) continue;
-        // Port 9 is the writer now -- the sprite bitmap is the only master
+        // Port WRP is the writer -- the CALC3 MCU RAM is the only master
         // that writes during a frame. This said p == 0, which was the
         // harness's write path before that port existed.
-        bool write = (p == 9) && ((rng() & 7) == 0);
+        bool write = (p == WRP) && ((rng() & 7) == 0);
         uint8_t be = 3;
         if (write && (rng() & 7) == 0) be = (rng() & 1) ? 1 : 2;  // byte writes
         h.issue(p, pick_addr(rng), write, (uint16_t)rng(), be);
@@ -381,11 +406,11 @@ int main(int argc, char** argv) {
       uint32_t rbase = (1u << 22) | (3u << 9);
       uint32_t wbase = (2u << 22) | (5u << 9);
       if (!h.port[1].busy) h.issue(1, rbase + ((n * 4) & 0x1fc), false, 0);
-      // Writes go on port 9, the only port wired to write. This used port 0,
-      // which was the harness's single write path before the sprite-bitmap
-      // port existed.
-      if (!h.port[9].busy)
-        h.issue(9, wbase + (n & 0x1ff), true, (uint16_t)(0x5a00 + (n & 0xff)));
+      // Writes go on port WRP, the only port wired to write. This used port 0,
+      // which was the harness's single write path before the MCU RAM port
+      // existed.
+      if (!h.port[WRP].busy)
+        h.issue(WRP, wbase + (n & 0x1ff), true, (uint16_t)(0x5a00 + (n & 0xff)));
       h.step();
     }
     h.drain();
@@ -510,17 +535,17 @@ int main(int argc, char** argv) {
       long t0 = h.cyc, got = 0;
       int  wr_budget = 15;           // ~a quarter of worst case, per line
       while (h.cyc - t0 < LINE_SDCLK) {
-        for (int p = 0; p < NP - 1; p++) {          // the nine existing masters
+        for (int p = 0; p < NP - 1; p++) {          // the ten existing masters
           if (h.port[p].busy) continue;
           h.issue(p, cursor[p], false, 0);
           cursor[p] += burst_of(p);
         }
-        if (!h.port[9].busy) {
+        if (!h.port[WRP].busy) {
           if (got < BURSTS) {                        // scanout read, deadline
-            h.issue(9, bmp_rd, false, 0);
+            h.issue(WRP, bmp_rd, false, 0);
             bmp_rd += 4; got++;
           } else if (wr_budget > 0) {                // renderer write, slack
-            h.issue(9, bmp_wr + (uint32_t)(line * 7 + wr_budget), true,
+            h.issue(WRP, bmp_wr + (uint32_t)(line * 7 + wr_budget), true,
                     (uint16_t)(0x1000 + wr_budget));
             wr_budget--; writes_done++;
           }
@@ -580,10 +605,10 @@ int main(int argc, char** argv) {
           h.issue(p, cursor[p], false, 0);
           cursor[p] += burst_of(p);
         }
-        if (!h.port[9].busy) {
-          if (got < BURSTS) { h.issue(9, bmp_rd, false, 0); bmp_rd += 4; got++; }
+        if (!h.port[WRP].busy) {
+          if (got < BURSTS) { h.issue(WRP, bmp_rd, false, 0); bmp_rd += 4; got++; }
           else if (wr_budget > 0) {
-            h.issue(9, bmp_wr + (uint32_t)(line * 7 + wr_budget), true,
+            h.issue(WRP, bmp_wr + (uint32_t)(line * 7 + wr_budget), true,
                     (uint16_t)(0x2000 + wr_budget));
             wr_budget--; writes_done++;
           }

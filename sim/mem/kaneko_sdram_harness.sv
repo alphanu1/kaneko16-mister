@@ -41,21 +41,22 @@ module kaneko_sdram_harness #(
 
   // p0 V60 (read/write), p1 tile char, p2 polygon/TGP, p3 sound 68000,
   // p4 MultiPCM. See docs/00-decisions.md D8.
-  // p9 is the SPRITE BITMAP, the candidate tenth master. Unlike every other
-  // port it both reads and writes, which is why it carries its own we/din/be
-  // rather than sharing p0's.
-  input  logic        p0_req, p1_req, p2_req, p3_req, p4_req, p5_req, p6_req, p7_req, p8_req, p9_req,
-  input  logic        p9_we,
-  input  logic [15:0] p9_din,
-  input  logic [1:0]  p9_be,
+  // p10 is the CALC3 MCU RAM, the eleventh master. Unlike every other port it
+  // both reads and writes, which is why it carries its own we/din/be rather
+  // than sharing p0's. It is the ONLY writer among the masters, matching
+  // Kaneko16.sv, where s_we is zero for ports 0..9.
+  input  logic        p0_req, p1_req, p2_req, p3_req, p4_req, p5_req, p6_req, p7_req, p8_req, p9_req, p10_req,
+  input  logic        p10_we,
+  input  logic [15:0] p10_din,
+  input  logic [1:0]  p10_be,
   input  logic        p0_we,
-  input  logic [COL_BITS+15:1] p9_addr,
+  input  logic [COL_BITS+15:1] p9_addr, p10_addr,
   input  logic [COL_BITS+15:1] p0_addr, p1_addr, p2_addr, p3_addr, p4_addr,
                                p5_addr, p6_addr, p7_addr, p8_addr,
   input  logic [15:0] p0_din,
   input  logic [1:0]  p0_be,
-  output logic [63:0] p0_dout, p1_dout, p2_dout, p3_dout, p4_dout, p5_dout, p6_dout, p7_dout, p8_dout, p9_dout,
-  output logic        p0_ack, p1_ack, p2_ack, p3_ack, p4_ack, p5_ack, p6_ack, p7_ack, p8_ack, p9_ack,
+  output logic [63:0] p0_dout, p1_dout, p2_dout, p3_dout, p4_dout, p5_dout, p6_dout, p7_dout, p8_dout, p9_dout, p10_dout,
+  output logic        p0_ack, p1_ack, p2_ack, p3_ack, p4_ack, p5_ack, p6_ack, p7_ack, p8_ack, p9_ack, p10_ack,
 
   // Device model observability
   output int unsigned violations,
@@ -77,7 +78,7 @@ module kaneko_sdram_harness #(
   // sprite bitmap as a candidate master; the core has since caught up by
   // giving that port to the CALC3 board's second OKI, so the ahead-by-one
   // exemption is gone and nports-check demands an exact match again.
-  localparam int unsigned NP    = 10;
+  localparam int unsigned NP    = 11;
   localparam int unsigned T_RCD = 2;
   localparam int unsigned T_RP  = 2;
   localparam int unsigned T_RC  = 7;
@@ -96,17 +97,17 @@ module kaneko_sdram_harness #(
   logic [NP-1:0][63:0] p_dout;
   logic [NP-1:0]       dbg_req, dbg_grant;
 
-  assign p_req  = {p9_req, p8_req, p7_req, p6_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req};
+  assign p_req  = {p10_req, p9_req, p8_req, p7_req, p6_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req};
   // WIDTH-CORRECT, and it was not. This read {4'b0000, p0_we} -- five bits
   // driving a nine-bit signal, left behind when NP went from 5 to 9. It worked
   // by zero-extension and would have silently mis-wired the moment a port
   // above the fifth needed to write.
-  assign p_we   = {p9_we, 9'b0};
-  assign p_addr = {p9_addr, p8_addr, p7_addr, p6_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr};
-  assign p_din  = {p9_din, {9{16'd0}}};
-  assign p_be   = {p9_be, {9{2'b11}}};
+  assign p_we   = {p10_we, 10'b0};
+  assign p_addr = {p10_addr, p9_addr, p8_addr, p7_addr, p6_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr};
+  assign p_din  = {p10_din, {10{16'd0}}};
+  assign p_be   = {p10_be, {10{2'b11}}};
 
-  assign {p9_ack, p8_ack, p7_ack, p6_ack, p5_ack, p4_ack, p3_ack, p2_ack, p1_ack, p0_ack} = p_ack;
+  assign {p10_ack, p9_ack, p8_ack, p7_ack, p6_ack, p5_ack, p4_ack, p3_ack, p2_ack, p1_ack, p0_ack} = p_ack;
   assign p0_dout = p_dout[0];
   assign p1_dout = p_dout[1];
   assign p2_dout = p_dout[2];
@@ -117,6 +118,7 @@ module kaneko_sdram_harness #(
   assign p7_dout = p_dout[7];
   assign p8_dout = p_dout[8];
   assign p9_dout = p_dout[9];
+  assign p10_dout = p_dout[10];
 
   logic        cke, cs_n, ras_n, cas_n, we_n;
   logic [1:0]  ba, dqm;

@@ -113,22 +113,24 @@ gone it builds registers instead: vmem alone asked for **65,563 registers** and
 the fitter wanted 6,773 LABs against the device's 4,191. The same cliff
 `kaneko_z80rom.sv`'s header describes, reached from the other side.
 
-The MCU RAM is currently a **placeholder 8 KB** so the design fits at all. It is
-certainly too small: the init command alone writes an EEPROM copy at an address
-the game chooses.
+**Resolved: option 2. The MCU RAM is in SDRAM**, the full 64 KB, on SDRAM
+port 10. It is no longer a placeholder and no longer costs a single M10K.
 
-Three ways out, and the awkward part is which:
+The three options were:
 
 1. **Free the sprite bitmap's ~192 blocks.** Blocked on SDRAM bandwidth (D5),
    and they are the same 192 blocks Tier 3 needs. Tier 2 and Tier 3 are
    competing for one pool.
 2. **Put the MCU RAM in SDRAM**, at the cost of latency on every MCU access.
-3. **Find out how much of the 64 KB the games actually touch.** Cheapest to
-   answer -- a write tap in MAME over a few minutes of play -- and it should be
-   done before either of the others.
+   **Taken.** MAME measured the CALC3 MCU at ~2,650 accesses per frame, about
+   6.5% of available clocks, so the latency is affordable where the block
+   memory was not.
+3. **Find out how much of the 64 KB the games actually touch.** Moot: in SDRAM
+   the full 64 KB costs nothing worth economising on.
 
-Option 3 first. If the games use a few kilobytes, the placeholder becomes the
-answer and the problem disappears.
+`kaneko_bus.sv` gained an `S_MCU` wait state that holds DTACK until the SDRAM
+acknowledges, so a 68000 access to 200000 completes at SDRAM latency rather
+than block-RAM latency. None of this has run on hardware yet.
 
 ## Tier 2 — where it stands, 2026-08-24
 
@@ -146,7 +148,7 @@ throughout: lint, nports-check and test.
 | Video | one VIEW2 chip, VU-002 sprites, `set_offset(0x33,-8)`, priorities {1,3,5,7}, `set_offsets(0xa00,-0x40)` |
 | Second OKI | ports 400001 and 480001, SDRAM port 9, shared bank register at e00001 |
 | Hit calculator | `kaneko_hit`, type 1, fuzzed 202,615 checks / 0 fails |
-| MCU RAM | 64 KB at 200000, byte-enabled, two arrays so it infers as M10K |
+| MCU RAM | 64 KB at 200000, byte-enabled, **in SDRAM on port 10** — zero M10K |
 
 **Not started: the CALC3 simulation itself.** It is the largest single piece
 and it is what makes the games run at all — everything above is inert without

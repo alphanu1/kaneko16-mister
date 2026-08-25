@@ -110,8 +110,28 @@ module kaneko_bus #(
     // Hit calculator and MCU RAM, CALC3 board only.
     output logic        hit_we,
     output wire  [5:0]  hit_addr,
-    output logic        mcu_we,
-    output wire  [15:0] mcu_addr,
+    // THE CALC3 MCU'S RAM IS IN SDRAM, NOT BLOCK MEMORY.
+    //
+    // 64 KB of it costs 56 M10K and takes the device to 95%, where the
+    // framework's HDMI PLL stops meeting timing. Measured, the MCU touches it
+    // about 2,650 times a frame -- roughly 6.5% of a frame's clocks at a
+    // 20-clock round trip -- so it can afford to go out to SDRAM.
+    //
+    // Which means it can no longer answer in the cycle it is asked. This
+    // requests, waits for the acknowledge and only then releases DTACK, the
+    // same shape S_ROM already uses. Answering early is precisely the fault
+    // that made Magical Crystals read stale VIEW2 words: the 68000 latches
+    // whatever the previous access left behind, and every count upstream looks
+    // correct while the picture comes apart.
+    output logic            mcuram_req,
+    output logic [SDR_AW:1] mcuram_addr,
+    output logic            mcuram_we,
+    output logic [15:0]     mcuram_din,
+    output logic [1:0]      mcuram_be,
+    input  wire             mcuram_ack,
+    input  wire  [63:0]     mcuram_dout,
+    // Where the window starts in SDRAM. Per game, from kaneko_gamecfg.
+    input  wire  [SDR_AW:1] base_mcuram,
     output wire  [7:0]  oki_din,
     input  wire  [7:0]  oki_dout,
 
@@ -128,7 +148,7 @@ module kaneko_bus #(
     output logic [15:0] reg_din,
     input  wire  [15:0] v2r0_q, v2r1_q, sprreg_q, sprreg2_q,
     input  wire  [7:0]  oki2_dout,
-    input  wire  [15:0] hit_dout, mcu_dout,
+    input  wire  [15:0] hit_dout,
 
     // ---- inputs, active low as the hardware presents them
     input  wire [15:0]  in_p1, in_p2, in_system, in_unk,
@@ -313,12 +333,14 @@ module kaneko_bus #(
     assign eeprom_din = oEdb[7:0];
     assign oki_din    = oEdb[7:0];
     assign hit_addr   = a[6:1];
-    assign mcu_addr   = a[16:1];
+    // Which 16-bit word of the returned 64-bit line was asked for.
+    wire [1:0]  mcu_lane = a[2:1];
+    logic [15:0] mcu_q;
     // The EVEN byte of the word, which on a big-endian 68000 is the UPPER half.
     assign snd_din    = oEdb[15:8];
 
     // ---------------------------------------------------------- sequencing
-    typedef enum logic [1:0] { S_IDLE, S_ROM, S_DONE } state_t;
+    typedef enum logic [2:0] { S_IDLE, S_ROM, S_DONE, S_MCU } state_t;
     state_t state;
 
     logic [15:0] rom_word;
@@ -382,13 +404,14 @@ module kaneko_bus #(
         ym0_we   <= 1'b0; ym1_we   <= 1'b0; eeprom_we <= 1'b0;
         oki_we   <= 1'b0; snd_we <= 1'b0;
         oki2_we  <= 1'b0; okibk_we <= 1'b0;
-        hit_we   <= 1'b0; mcu_we   <= 1'b0;
+        hit_we   <= 1'b0;
         unmapped_hit <= 1'b0;
 
         if (rst) begin
             state      <= S_IDLE;
             DTACKn     <= 1'b1;
             rom_req    <= 1'b0;
+            mcuram_req <= 1'b0;
             cvalid     <= '0;
         end else begin
             case (state)
@@ -437,7 +460,7 @@ module kaneko_bus #(
                                 oki2_we   <= sel_oki_b && ~LDSn;
                                 okibk_we  <= sel_okibk && ~LDSn;
                                 hit_we    <= sel_hit;
-                                mcu_we    <= sel_mcu;
+
                                 snd_we    <= sel_snd  && ~UDSn;
                             end
                             // Everything else answers in one cycle, INCLUDING
@@ -457,8 +480,20 @@ module kaneko_bus #(
                             // behind; answering on this edge would hand the CPU
                             // whatever register the previous access happened to
                             // land on. They spend the extra edge.
-                            if (!(sel_ym0 || sel_ym1)) DTACKn <= 1'b0;
-                            state <= S_DONE;
+                            // The MCU RAM is out in SDRAM and cannot answer
+                            // now. Issue the access and wait; DTACK is
+                            // deliberately left high until the data is here.
+                            if (sel_mcu) begin
+                                mcuram_req  <= 1'b1;
+                                mcuram_addr <= base_mcuram + SDR_AW'(a[16:1]);
+                                mcuram_we   <= wr;
+                                mcuram_din  <= oEdb;
+                                mcuram_be   <= {~UDSn, ~LDSn};
+                                state       <= S_MCU;
+                            end else begin
+                                if (!(sel_ym0 || sel_ym1)) DTACKn <= 1'b0;
+                                state <= S_DONE;
+                            end
                         end
                     end
                 end
@@ -497,6 +532,17 @@ module kaneko_bus #(
                     state    <= S_DONE;
                 end
 
+                // The MCU RAM's SDRAM round trip. A write is acknowledged as
+                // soon as it is taken; a read brings back a 64-bit line and the
+                // wanted word is selected by the low address bits, exactly as
+                // S_ROM does with rom_dout.
+                S_MCU: if (mcuram_ack) begin
+                    mcuram_req <= 1'b0;
+                    mcu_q      <= mcuram_dout[{mcu_lane, 4'd0} +: 16];
+                    DTACKn     <= 1'b0;
+                    state      <= S_DONE;
+                end
+
                 S_DONE: begin
                     DTACKn <= 1'b0;
                     if (!as) begin          // cycle over
@@ -529,7 +575,7 @@ module kaneko_bus #(
         else if (sel_oki_a) iEdb = {8'h00, oki_dout};
         else if (sel_oki_b) iEdb = {8'h00, oki2_dout};
         else if (sel_hit)   iEdb = hit_dout;
-        else if (sel_mcu)   iEdb = mcu_dout;
+        else if (sel_mcu)   iEdb = mcu_q;
         // A YM2149 register reads back as a byte. MAME promotes data_r() to
         // u16, so the high half is zero; the game only reads the low half, but
         // matching it keeps the bus traces comparable.

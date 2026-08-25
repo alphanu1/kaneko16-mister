@@ -352,7 +352,7 @@ localparam int unsigned SDR_AW  = 2 + 13 + SDR_COL;   // 25
 // samples from its own region. It was going to be the sprite bitmap; that move
 // is blocked on SDRAM bandwidth (D5), and this is a better use of the port
 // meanwhile.
-localparam int unsigned NPORTS  = 10;
+localparam int unsigned NPORTS  = 11;
 
 wire              mem_ready;
 wire              ldr_wr_req, ldr_wr_ack;
@@ -377,6 +377,16 @@ wire [SDR_AW:1]   p8_addr;
 // Second OKI sample fetch, CALC3 board only. Idle on every other game.
 wire              p9_req;
 wire [SDR_AW:1]   p9_addr;
+// Port 10, the CALC3 MCU's 64 KB of RAM. THE FIRST MASTER IN THIS DESIGN THAT
+// WRITES: every other port is a reader, and s_we was tied off across all of
+// them until now. The controller has always carried p_we, p_din and p_be and
+// kaneko_sdram_x2 passes them through, but that path has never actually run on
+// hardware -- worth remembering if this misbehaves.
+wire              p10_req;
+wire [SDR_AW:1]   p10_addr;
+wire              p10_we;
+wire [15:0]       p10_din;
+wire [1:0]        p10_be;
 // Two ports for the sprite ROM, not one: a sprite row needs a block from each
 // half of its address space and they are fetched CONCURRENTLY. See the header
 // of kaneko_sprrom for the derivation of that pattern.
@@ -421,6 +431,8 @@ assign p67_dout = {p_dout_bus[7], p_dout_bus[6]};
 // edit at all given it is outside the lint set.
 wire              p9_ack  = p_ack_bus[9];
 wire [63:0]       p9_dout = p_dout_bus[9];
+wire              p10_ack  = p_ack_bus[10];
+wire [63:0]       p10_dout = p_dout_bus[10];
 
 wire sd_dq_oe;
 wire [15:0] sd_dq_o;
@@ -482,16 +494,25 @@ kaneko_sdram_x2 #(.NP(NPORTS), .AW(SDR_AW)) u_sdr_x2
 (
 	.clk_fast(clk_sdram),
 
-	.s_req  (rom_loaded ? {p9_req, p8_req, p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}
+	.s_req  (rom_loaded ? {p10_req, p9_req, p8_req, p67_req, p5_req, p4_req, p3_req, p2_req, p1_req, p0_req}
 	                    : {NPORTS{1'b0}}),
-	.s_addr ({p9_addr, p8_addr, p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
-	// No port writes yet: the sprite bitmap will be the first, and until it
-	// exists every master is a reader. Driven explicitly rather than left off
-	// the instance -- an omitted input is tied to GND without an error, which
-	// is how the per-game memory map shipped broken for eleven commits.
-	.s_we   ({NPORTS{1'b0}}),
-	.s_din  ({NPORTS{16'd0}}),
-	.s_be   ({NPORTS{2'b11}}),
+	.s_addr ({p10_addr, p9_addr, p8_addr, p67_addr, p5_addr, p4_addr, p3_addr, p2_addr, p1_addr, p0_addr}),
+	// PORT 10 WRITES; EVERY OTHER MASTER IS A READER.
+	//
+	// The CALC3 MCU's RAM is the first thing in this design ever to write to
+	// SDRAM. The controller has always carried p_we, p_din and p_be and
+	// kaneko_sdram_x2 passes them through, but the path had never run --
+	// worth knowing if the MCU's memory misbehaves in a way that looks like
+	// the MCU.
+	//
+	// Driven explicitly rather than left off the instance: an omitted input is
+	// tied to GND without an error, which is how the per-game memory map
+	// shipped broken for eleven commits.
+	.s_we   ({p10_we,  {(NPORTS-1){1'b0}}}),
+	.s_din  ({p10_din, {(NPORTS-1){16'd0}}}),
+	// Byte enables matter now: the 68000 writes bytes as well as words, and a
+	// byte write that lands as a word clobbers the neighbour.
+	.s_be   ({p10_be, {(NPORTS-1){2'b11}}}),
 	.s_ack  (p_ack_bus),
 	.s_dout (p_dout_bus),
 
@@ -677,7 +698,11 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.oki_we(oki_we), .oki_din(oki_din), .oki_dout(oki_dout),
 	.oki2_we(oki2_we), .okibk_we(okibk_we), .oki2_dout(oki2_dout),
 	.hit_we(hit_we), .hit_addr(hit_addr), .hit_dout(hit_dout),
-	.mcu_we(mcu_we), .mcu_addr(mcu_addr), .mcu_dout(mcu_dout),
+	// The MCU's RAM is an SDRAM master on port 10, not a block memory.
+	.mcuram_req(p10_req), .mcuram_addr(p10_addr), .mcuram_we(p10_we),
+	.mcuram_din(p10_din), .mcuram_be(p10_be),
+	.mcuram_ack(p10_ack), .mcuram_dout(p10_dout),
+	.base_mcuram(BASE_MCURAM),
 	.calc3_io(CALC3_IO),
 
 	.v2r0_we(v2r0_we), .v2r1_we(v2r1_we), .sprreg_we(sprreg_we),
@@ -939,10 +964,9 @@ kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_okirom
 // The CALC3 board only. Both are inert on every other game: the decode is
 // gated by calc3_io, so nothing else can reach them, and the MCU RAM's block
 // memory is the only cost they carry when idle.
-wire        hit_we, mcu_we;
+wire        hit_we;
 wire [5:0]  hit_addr;
 wire [15:0] hit_dout;
-wire [15:0] mcu_addr, mcu_dout;
 
 // A free-running LFSR for the calculator's random register. The oracle returns
 // machine().rand() there, so there is nothing to agree with -- only a
@@ -987,65 +1011,21 @@ kaneko_hit u_hit
 //
 // Whichever it is, it has to be settled before Tier 2 can run. Recorded in
 // HANDOFF as the blocker rather than left to be rediscovered by a build.
-// STILL 8 KB, AND THE 64 KB VERSION IS MEASURED RATHER THAN GUESSED AT NOW.
+// THE MCU'S 64 KB LIVES IN SDRAM NOW, NOT HERE.
 //
-// The full 64 KB FITS in block memory -- built, 524 of 553 blocks, 95%. What
-// fails is timing, and not in this core: our own clocks pass at +0.442 and
-// +1.999 ns while MiSTer's HDMI PLL domain misses by 771 ps, congested by a
-// device filled that far. Seed 5 was tried and gave -0.835, worse than seed
-// 7's -0.771, so it is structural rather than placement luck.
+// In block memory it cost 56 M10K and took the device to 95%, where the
+// framework's HDMI PLL stopped meeting timing -- this core's own clocks were
+// fine at +0.442 and +1.999 ns, and a different fitter seed made it worse
+// rather than better, so it was structural rather than placement luck.
 //
-// THE ANSWER IS SDRAM, and the objection to it has now been measured instead
-// of assumed. shogwarr touches this RAM about 2,650 times a frame in steady
-// state -- 2,600 reads to 600 writes -- which at roughly 20 clocks a round
-// trip is about 6.5% of a frame's 811,008 clocks. Startup peaks near 3,500 a
-// frame while the MCU initialises and copies the EEPROM, which is bursty but
-// happens while nothing is being drawn.
+// Measured with tools/mame_calc3_mcuram.lua before moving it: shogwarr touches
+// this RAM about 2,650 times a frame in steady state, roughly 6.5% of a
+// frame's 811,008 clocks at a 20-clock round trip, with reads outnumbering
+// writes four to one. Startup peaks near 3,500 while the MCU initialises and
+// copies the EEPROM, which is bursty but happens before anything is drawn.
 //
-// That is affordable, and this core has more room than the figure it is being
-// compared against: the 203-clocks-free measurement came from Tier 1 with FOUR
-// tile feeders, where this board has one VIEW2 chip and therefore two, and no
-// Z80 fetching its program.
-//
-// Two things to do first, in this order, because doing them together is how a
-// simple fault becomes a seven-build bisect:
-//
-//   1. Prove the SDRAM WRITE path on hardware. It is plumbed and passes its
-//      harness, but every master in this design is a reader -- `s_we` is tied
-//      off across all ten ports -- so it has never actually run.
-//   2. Add the eleventh port. The last time the port count moved it took every
-//      harness with it.
-//
-// THE OLD NOTE. It was a placeholder because 64 KB did not infer into M10K at
-// all: the arrays became registers and the fitter asked for 6,773 LABs against
-// the device's 4,191. Stripping the Z80, the YM2151, both YM2149s and the
-// second VIEW2 chip fixed that -- it fits now, and only the framework's timing
-// stands in the way. shogwarr_map declares 200000-20ffff and the games
-// use all of it -- that was checked, and it is not a case where a smaller
-// window would do.
-//
-// It was an 8 KB placeholder because 64 KB did not fit: the arrays became
-// registers and the fitter asked for 6,773 LABs against the device's 4,191,
-// and even at 8 KB the design missed setup by 0.773 ns. Stripping what the
-// CALC3 board does not have -- the Z80, the YM2151, both YM2149s and the
-// second VIEW2 chip -- freed 47 blocks and closed timing, which is what makes
-// this possible.
-//
-// It matters beyond capacity. The MCU's init command places an EEPROM copy at
-// an address THE GAME CHOOSES, so a RAM that is too small fails in ways that
-// look like faults in the MCU simulation rather than a wall being hit. Writing
-// that simulation against a full-size RAM removes a whole class of false
-// leads before it starts.
-localparam int MCURAM_WORDS = 4096;      // 8 KB -- see the note above
-(* ramstyle = "M10K" *) reg [7:0] mcuram_hi [0:MCURAM_WORDS-1];
-(* ramstyle = "M10K" *) reg [7:0] mcuram_lo [0:MCURAM_WORDS-1];
-reg [15:0] mcu_q;
-always @(posedge clk_sys) begin
-	if (mcu_we && ~UDSn) mcuram_hi[mcu_addr[11:0]] <= oEdb[15:8];
-	if (mcu_we && ~LDSn) mcuram_lo[mcu_addr[11:0]] <= oEdb[7:0];
-	mcu_q <= {mcuram_hi[mcu_addr[11:0]], mcuram_lo[mcu_addr[11:0]]};
-end
-assign mcu_dout = mcu_q;
+// kaneko_bus issues the access on port 10 and holds DTACK until the
+// acknowledge comes back -- see S_MCU there.
 
 // ---------------------------------------------------- second OKI (Tier 2)
 // The CALC3 board carries two M6295s, at 400001 and 480001, both clocked

@@ -15,7 +15,7 @@
 module kaneko_sdram_x2_harness #(
     parameter int unsigned COL_BITS = 9,
     // Ten, matching Kaneko16.sv. The tenth is the CALC3 board's second OKI.
-    parameter int unsigned NP       = 10
+    parameter int unsigned NP       = 11
 ) (
     input  logic clk,              // FAST: the controller clock
     input  logic rst_n,
@@ -33,9 +33,14 @@ module kaneko_sdram_x2_harness #(
     // as a pragma. That is recorded against kaneko_mixer.sv and was walked
     // into again writing this one.)
     input  logic [NP-1:0] p_req,
-    input  logic [COL_BITS+15:1] a0, a1, a2, a3, a4, a5, a6, a7, a8, a9,
+    input  logic [COL_BITS+15:1] a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+    // Port NP-1 is the CALC3 MCU RAM: the one master that WRITES, and the
+    // only reason the adapter's write pass-through is reachable at all.
+    input  logic        pw_we,
+    input  logic [15:0] pw_din,
+    input  logic [1:0]  pw_be,
     output logic [NP-1:0] p_ack,
-    output logic [63:0] d0, d1, d2, d3, d4, d5, d6, d7, d8,
+    output logic [63:0] d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10,
 
     input  logic        wr_req,
     input  logic [COL_BITS+15:1] wr_addr,
@@ -67,6 +72,9 @@ module kaneko_sdram_x2_harness #(
     wire [NP-1:0]       f_req, f_ack;
     wire [NP-1:0][AW:1] f_addr;
     wire [NP-1:0][63:0] f_dout;
+    wire [NP-1:0]       f_we;
+    wire [NP-1:0][15:0] f_din;
+    wire [NP-1:0][1:0]  f_be;
     wire                f_wr_req, f_wr_ack;
     wire [AW:1]         f_wr_addr;
     wire [15:0]         f_wr_din;
@@ -91,12 +99,16 @@ module kaneko_sdram_x2_harness #(
 
     kaneko_sdram_x2 #(.NP(NP), .AW(AW)) u_x2 (
         .clk_fast(clk),
-        .s_req(p_req), .s_addr({a9, a8, a7, a6, a5, a4, a3, a2, a1, a0}),
-        // Reads only in this harness; the adapter's write pass-through is
-        // exercised by tb_kaneko_sdram, which has the writing port.
-        .s_we({NP{1'b0}}), .s_din({NP{16'd0}}), .s_be({NP{2'b11}}),
-        .f_we(), .f_din(), .f_be(),
-        .s_ack(p_ack), .s_dout({d8, d7, d6, d5, d4, d3, d2, d1, d0}),
+        .s_req(p_req), .s_addr({a10, a9, a8, a7, a6, a5, a4, a3, a2, a1, a0}),
+        // The write pass-through is carried THROUGH the adapter here. It
+        // used to be tied off, with a comment saying tb_kaneko_sdram covered
+        // it -- that tb instantiates the controller directly and never sees
+        // this adapter, so the crossing's write path was tested by nothing
+        // while the core depended on it.
+        .s_we({pw_we, {(NP-1){1'b0}}}), .s_din({pw_din, {(NP-1){16'd0}}}),
+        .s_be({pw_be, {(NP-1){2'b11}}}),
+        .f_we(f_we), .f_din(f_din), .f_be(f_be),
+        .s_ack(p_ack), .s_dout({d10, d9, d8, d7, d6, d5, d4, d3, d2, d1, d0}),
         .s_wr_req(wr_req), .s_wr_addr(wr_addr), .s_wr_din(wr_din),
         .s_wr_be(wr_be), .s_wr_ack(wr_ack),
         .f_req(f_req), .f_addr(f_addr), .f_ack(f_ack), .f_dout(f_dout),
@@ -123,8 +135,8 @@ module kaneko_sdram_x2_harness #(
         .sd_dq_o(sd_dq_o), .sd_dq_oe(sd_dq_oe), .sd_dq_i(sd_dq_i),
         .wr_req(f_wr_req), .wr_addr(f_wr_addr), .wr_din(f_wr_din),
         .wr_be(f_wr_be), .wr_ack(f_wr_ack),
-        .p_req(f_req), .p_addr(f_addr), .p_din({NP{16'd0}}),
-        .p_be({NP{2'b11}}), .p_we({NP{1'b0}}),
+        .p_req(f_req), .p_addr(f_addr), .p_din(f_din),
+        .p_be(f_be), .p_we(f_we),
         .p_ack(f_ack), .p_dout(f_dout),
         .dbg_req(), .dbg_grant()
     );

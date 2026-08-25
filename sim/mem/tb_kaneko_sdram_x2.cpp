@@ -26,7 +26,9 @@
 
 namespace {
 
-constexpr int NP = 10;
+constexpr int NP = 11;
+// The writing port, DERIVED from NP -- the CALC3 MCU RAM sits last.
+constexpr int WRP = NP - 1;
 Vkaneko_sdram_x2_harness* d;
 long checks = 0, fails = 0;
 
@@ -38,7 +40,8 @@ void set_addr(int p, uint32_t a) {
       case 2: d->a2 = a; break; case 3: d->a3 = a; break;
       case 4: d->a4 = a; break; case 5: d->a5 = a; break;
       case 6: d->a6 = a; break; case 7: d->a7 = a; break;
-      case 8: d->a8 = a; break;
+      case 8: d->a8 = a; break; case 9: d->a9 = a; break;
+      case 10: d->a10 = a; break;
       default: printf("  FATAL: port %d out of range\n", p); std::abort();
     }
 }
@@ -47,7 +50,8 @@ uint64_t get_dout(int p) {
       case 0: return d->d0; case 1: return d->d1; case 2: return d->d2;
       case 3: return d->d3; case 4: return d->d4; case 5: return d->d5;
       case 6: return d->d6; case 7: return d->d7;
-      case 8: return d->d8;
+      case 8: return d->d8; case 9: return d->d9;
+      case 10: return d->d10;
       default: printf("  FATAL: port %d out of range\n", p); std::abort();
     }
     return 0;
@@ -71,11 +75,18 @@ int main(int argc, char** argv) {
     // core already exposes four settings in the OSD for exactly this reason;
     // the right one at 48 MHz is not necessarily the right one at 96. Sweep it
     // rather than assume, which is what the OSD option is for on hardware.
-    const int sel = getenv("RDLAT") ? atoi(getenv("RDLAT")) : 0;
+    // DEFAULT 3, not 0. Against sdram_model at 96 MHz only 3 (CL+5) reads
+    // correct data -- 0, 1 and 2 fail every check, so a default of 0 meant
+    // this harness could never pass and was left out of the gate instead.
+    // The BOARD wants 2; that divergence is real, documented in Kaneko16.sv,
+    // and is the reason the capture depth is an OSD option at all. Sweep
+    // with RDLAT=n.
+    const int sel = getenv("RDLAT") ? atoi(getenv("RDLAT")) : 3;
     d->rd_lat_sel = sel;
     printf("== capture depth rd_lat_sel = %d\n", sel);
 
     d->rst_n = 0; d->wr_req = 0; d->wr_be = 3;
+    d->pw_we = 0; d->pw_din = 0; d->pw_be = 3;
     for (int p = 0; p < NP; p++) { d->p_req = 0; }
     d->p_req = 0;
     for (int i = 0; i < 40; i++) half();
@@ -101,6 +112,47 @@ int main(int argc, char** argv) {
         slow_tick();
     }
     printf("== wrote %d words\n", WORDS);
+
+    // ------------------------------------- write across the crossing
+    // The adapter's write pass-through had NO test: this harness tied s_we to
+    // zero and a comment sent the reader to tb_kaneko_sdram, which drives the
+    // controller directly and never instantiates this adapter. The core's MCU
+    // RAM writes through here, so the untested path was a live one.
+    printf("== write pass-through on port %d\n", WRP);
+    for (int t = 0; t < 64; t++) {
+        const uint32_t a = (uint32_t)(rng() % WORDS);
+        const uint16_t v = (uint16_t)(rng() & 0xffff);
+        set_addr(WRP, a);
+        d->pw_we = 1; d->pw_din = v; d->pw_be = 3;
+        d->p_req = (1u << WRP);
+        long g = 0;
+        while (!((d->p_ack >> WRP) & 1) && g++ < 100000) slow_tick();
+        checks++;
+        if (!((d->p_ack >> WRP) & 1)) {
+            printf("  write to %05x never acked\n", a); fails++; break;
+        }
+        d->p_req = 0; d->pw_we = 0;
+        slow_tick();
+        ref[a] = v;
+
+        // Read it back on a DIFFERENT port, so the check cannot be satisfied
+        // by a value that never left the writing port's own registers.
+        const uint32_t base = a & ~3u;
+        set_addr(0, base);
+        d->p_req = 1;
+        g = 0;
+        while (!(d->p_ack & 1) && g++ < 100000) slow_tick();
+        if (!(d->p_ack & 1)) { printf("  readback never acked\n"); fails++; break; }
+        const uint16_t got = (uint16_t)((get_dout(0) >> (16 * (a & 3))) & 0xffff);
+        checks++;
+        if (got != v) {
+            if (fails < 10)
+                printf("  WRITE LOST addr %05x got %04x want %04x\n", a, got, v);
+            fails++;
+        }
+        d->p_req = 0;
+        slow_tick();
+    }
 
     // ------------------------------------------------------- read back
     // Every port reads a distinct span, all at the slow rate, all concurrent.
@@ -128,7 +180,8 @@ int main(int argc, char** argv) {
                             (uint16_t)((get_dout(p) >> (16 * w)) & 0xffff);
                         checks++;
                         if (v != ref[addr[p] + w]) {
-                            if (fails < 10)
+                            static int shown = 0;
+                            if (shown++ < 8)
                                 printf("  MISMATCH p%d addr %05x word %d "
                                        "got %04x want %04x\n",
                                        p, addr[p], w, v, ref[addr[p] + w]);

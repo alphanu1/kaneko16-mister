@@ -6793,3 +6793,45 @@ unreadable over a bright picture; and now the frame gate reports a pass it
 cannot fail, on a class of object it does not render. Each looked green. The
 rule that follows: **an instrument that has never failed has not been shown to
 work.** Before trusting a gate, make it fail on purpose.
+
+## A harness nobody ran, on a path nothing tested, 2026-08-25
+
+`tb_kaneko_sdram_x2` was not in the Makefile's `HARNESSES` list, so `make test`
+never built it and never ran it. Found while moving the CALC3 MCU RAM into
+SDRAM, because the port count had to change and every harness had to follow.
+
+Three separate faults, each hidden by the one above it:
+
+- **It could not run.** Its port dispatch stopped at `case 8` while `NP` had
+  reached 10, so the first request to port 9 hit the `default:` and aborted.
+  The abort is the no-silent-default discipline working exactly as intended —
+  it refused to route port 9 onto port 4 and stayed loud about it. Nobody heard
+  it, because nothing invoked it.
+- **It could not pass.** Its capture depth defaulted to `RDLAT=0`. Against
+  `sdram_model` at 96 MHz only 3 (CL+5) reads correct data; 0, 1 and 2 fail
+  every check. So even once it ran, the default guaranteed a red result. The
+  default is now 3, with `RDLAT=n` kept for sweeping. The board wants 2 — that
+  divergence is real and documented in `Kaneko16.sv`; it is why the capture
+  depth is an OSD option.
+- **It tested the wrong thing.** Every port was tied `s_we = 0`, with a comment
+  saying the adapter's write pass-through was "exercised by tb_kaneko_sdram,
+  which has the writing port". It is not: that testbench instantiates
+  `kaneko_sdram` **directly** and never sees the adapter. The adapter's
+  `f_we`, `f_din` and `f_be` outputs were left dangling and the controller
+  underneath was hardwired `p_we({NP{1'b0}})`. The clock crossing's write path
+  was tested by nothing, while `Kaneko16.sv` carried a comment two floors up
+  saying that path had never run.
+
+All three are fixed: the harness is in the gate, carries writes through the
+adapter to the controller, and its testbench now writes on port 10 and reads
+the value back **on a different port**, so the check cannot be satisfied by a
+value that never left the writing port's registers. 8,930 checks, 0 fails.
+
+This matters beyond tidiness. The MCU RAM write is the core's first real use of
+a per-port SDRAM write, and it rides this crossing.
+
+**A comment that says another test covers this is not evidence.** Both halves
+of that claim were wrong — the other testbench did not instantiate the module,
+and the signals were not even connected. Check that the named test instantiates
+the thing it is said to cover; the citation costs nothing to write and nothing
+to leave stale.
