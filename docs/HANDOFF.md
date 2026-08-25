@@ -253,7 +253,7 @@ on purpose before trusting it.
    orientation rather than the rotation to apply, because on a portrait
    monitor a ROT90 game wants no rotation while a ROT0 game wants 90 degrees.
 
-1. **Tier 2 has left this core. Branch `tier2` holds it.** Done 2026-08-24.
+1. **Tier 2 has left this core and becomes its own REPOSITORY.** Decided 2026-08-25.
 
    The bisect that found the Magical Crystals regression measured what Tier 2
    costs this device, and the numbers say it does not belong in the same
@@ -290,10 +290,40 @@ on purpose before trusting it.
 
    The `tier2` branch is the CALC3 work as it stood, including the ROM tables
    and the hit calculator with its 202,615-check testbench. It is a starting
-   point, not a working core: `67ea051` never fitted and `239d83f` never
-   timed. Whoever picks it up needs to solve the MCU RAM first -- 64 KB does
-   not infer into M10K here and asks the fitter for more logic than the device
-   has.
+   point, NOT a working core: `67ea051` never fitted and `239d83f` never
+   timed. Whoever picks it up solves the MCU RAM first -- 64 KB does not infer
+   into M10K here and asks the fitter for more logic than the device has.
+
+   **It ships as its own repository, and NOT as a GitHub fork.** A fork carries
+   a "forked from" banner, shares the network graph and points pull requests at
+   the parent. A fresh empty repository with the branch pushed into it is not a
+   fork, keeps the full history and reasoning, and has none of that linkage:
+
+   ```
+   gh repo create alphanu1/KanekoCALC3 --public
+   git push git@github.com:alphanu1/KanekoCALC3.git tier2:main
+   ```
+
+   **THE CORE NAME MUST NOT BEGIN `Kaneko16` FOLLOWED BY `_` OR `.`.** MiSTer
+   resolves `<rbf>Kaneko16</rbf>` by scanning `_Arcade/cores/` for names
+   beginning `Kaneko16` followed by `.` or `_` and keeping the
+   lexicographically greatest -- and `_` is 0x5F against `.` at 0x2E, so
+   `Kaneko16_CALC3.rbf` BEATS `Kaneko16.rbf` and silently hijacks every Tier 1
+   game on a card holding both. That trap cost twelve hours once already. Use
+   `KanekoCALC3`, which cannot match at all.
+
+   A branch was considered and rejected. Users cannot reasonably download from
+   one -- every MiSTer updater scans repositories and their releases, not
+   branches -- and a branch nobody merges rots quietly, which this repository
+   demonstrated when three consecutive commits could not produce a working
+   bitstream and nothing noticed. The porting work is identical either way, so
+   the branch buys nothing.
+
+   **Shared code.** The sprite engine, the tilemap engine, `kaneko_vmem`,
+   `kaneko_bus` and the SDRAM controller are common to both cores. No submodule
+   for now: fixes are cherry-picked, and the modules that are shared are listed
+   here so a fix to one is known to need porting. Revisit if the two diverge
+   far enough that cherry-picking stops applying cleanly.
 
 1. **Screen timing is not PCB-verified.** MAME uses `set_refresh_hz(60)` with
    no `set_raw()`. We run 384x264 at 6 MHz, 59.1856 Hz. No amount of simulation
