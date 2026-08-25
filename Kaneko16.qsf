@@ -52,6 +52,18 @@ set_global_assignment -name ALM_REGISTER_PACKING_EFFORT MEDIUM
 # fault: the framework's HDMI output PLL runs at 148.5 MHz, and one build closed
 # at zero negative slack with MORE logic than the build that missed it by 84 ps.
 # Pinned so the result is reproducible instead of re-rolled every compile.
+#
+# ON THIS CORE THE GAP IS TOO BIG FOR A SEED TO BE THE ANSWER. With the CALC3
+# MCU's full 64 KB of RAM the device is 95% full -- 524 of 553 blocks -- and
+# the HDMI domain misses by 771 ps, not 84. Our own clocks pass at +0.442 and
+# +1.999 ns, so the design is fine and the framework is congested.
+#
+# TRIED, AND IT DOES NOT REACH. Seed 5 gave -0.835 ns against seed 7's -0.771:
+# worse, not better. A seed moves tens of picoseconds, and this is short by
+# nearly eight hundred. Pinned back at 7.
+#
+# The fix is to stop filling the device. Moving the MCU's 64 KB to SDRAM frees
+# 56 blocks and returns it to 86%, where this core closed at +0.46 ns.
 set_global_assignment -name SEED 7
 
 # ROTATION NEEDS THE FRAMEBUFFER PORTS, and they do not exist without this.

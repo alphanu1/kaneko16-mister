@@ -981,7 +981,56 @@ kaneko_hit u_hit
 //
 // Whichever it is, it has to be settled before Tier 2 can run. Recorded in
 // HANDOFF as the blocker rather than left to be rediscovered by a build.
-localparam int MCURAM_WORDS = 4096;      // 8 KB
+// STILL 8 KB, AND THE 64 KB VERSION IS MEASURED RATHER THAN GUESSED AT NOW.
+//
+// The full 64 KB FITS in block memory -- built, 524 of 553 blocks, 95%. What
+// fails is timing, and not in this core: our own clocks pass at +0.442 and
+// +1.999 ns while MiSTer's HDMI PLL domain misses by 771 ps, congested by a
+// device filled that far. Seed 5 was tried and gave -0.835, worse than seed
+// 7's -0.771, so it is structural rather than placement luck.
+//
+// THE ANSWER IS SDRAM, and the objection to it has now been measured instead
+// of assumed. shogwarr touches this RAM about 2,650 times a frame in steady
+// state -- 2,600 reads to 600 writes -- which at roughly 20 clocks a round
+// trip is about 6.5% of a frame's 811,008 clocks. Startup peaks near 3,500 a
+// frame while the MCU initialises and copies the EEPROM, which is bursty but
+// happens while nothing is being drawn.
+//
+// That is affordable, and this core has more room than the figure it is being
+// compared against: the 203-clocks-free measurement came from Tier 1 with FOUR
+// tile feeders, where this board has one VIEW2 chip and therefore two, and no
+// Z80 fetching its program.
+//
+// Two things to do first, in this order, because doing them together is how a
+// simple fault becomes a seven-build bisect:
+//
+//   1. Prove the SDRAM WRITE path on hardware. It is plumbed and passes its
+//      harness, but every master in this design is a reader -- `s_we` is tied
+//      off across all ten ports -- so it has never actually run.
+//   2. Add the eleventh port. The last time the port count moved it took every
+//      harness with it.
+//
+// THE OLD NOTE. It was a placeholder because 64 KB did not infer into M10K at
+// all: the arrays became registers and the fitter asked for 6,773 LABs against
+// the device's 4,191. Stripping the Z80, the YM2151, both YM2149s and the
+// second VIEW2 chip fixed that -- it fits now, and only the framework's timing
+// stands in the way. shogwarr_map declares 200000-20ffff and the games
+// use all of it -- that was checked, and it is not a case where a smaller
+// window would do.
+//
+// It was an 8 KB placeholder because 64 KB did not fit: the arrays became
+// registers and the fitter asked for 6,773 LABs against the device's 4,191,
+// and even at 8 KB the design missed setup by 0.773 ns. Stripping what the
+// CALC3 board does not have -- the Z80, the YM2151, both YM2149s and the
+// second VIEW2 chip -- freed 47 blocks and closed timing, which is what makes
+// this possible.
+//
+// It matters beyond capacity. The MCU's init command places an EEPROM copy at
+// an address THE GAME CHOOSES, so a RAM that is too small fails in ways that
+// look like faults in the MCU simulation rather than a wall being hit. Writing
+// that simulation against a full-size RAM removes a whole class of false
+// leads before it starts.
+localparam int MCURAM_WORDS = 4096;      // 8 KB -- see the note above
 (* ramstyle = "M10K" *) reg [7:0] mcuram_hi [0:MCURAM_WORDS-1];
 (* ramstyle = "M10K" *) reg [7:0] mcuram_lo [0:MCURAM_WORDS-1];
 reg [15:0] mcu_q;
