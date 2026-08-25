@@ -173,8 +173,8 @@ module kaneko_z80snd (
     // port cycle for about 24 clk_sys cycles at 4 MHz, and counting the level
     // would report that number instead of 1.
     logic oki_wr_d, ym_wr_d, latch_rd_d, bank_wr_d;
-    wire  oki_wr_lvl   = sel_oki      && ~wr_n;
-    wire  ym_wr_lvl    = sel_ym       && ~wr_n;
+    wire  oki_wr_lvl   = sel_oki      && ~wr_n && rd_n;
+    wire  ym_wr_lvl    = sel_ym       && ~wr_n && rd_n;
     wire  bank_wr_lvl  = sel_okibank  && ~wr_n;
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -196,7 +196,9 @@ module kaneko_z80snd (
     // The bank register is three bits, as kaneko_oki_bank takes it. MAME's
     // oki_bank0_w<0x3> masks the write to the low two bits plus the enable, so
     // the same three bits reach the banker either way.
-    assign oki_we  = sel_oki && ~wr_n;
+    // Same guard, same reason: an OKI command carried by a spurious write is
+    // as damaging as a YM one.
+    assign oki_we  = sel_oki && ~wr_n && rd_n;
     assign oki_din = cpu_dout;
 
     always_ff @(posedge clk) begin
@@ -259,7 +261,18 @@ module kaneko_z80snd (
     logic       ym_wr_req_d;
     logic [7:0] ym_din_q;
     logic       ym_a0_q;
-    wire        ym_wr_req  = sel_ym && ~wr_n;
+    // AND rd_n HIGH. A Z80 write cycle never has RD_n asserted, so this cannot
+    // reject a real write -- but it does reject a WR_n that appears during a
+    // READ, which is what T80's T2Write(1) can produce: the strobe moves into
+    // T2, early enough to overlap the read window.
+    //
+    // Measured on hardware, this core issued 120 YM port writes a frame where
+    // the oracle issues about fifteen, and the write count was IDENTICAL to
+    // the status-poll count -- 120 and 120. One write per read is not a driver
+    // being busy, it is a read being counted and delivered as a write, and
+    // every one of those carries whatever happened to be on the data bus into
+    // a YM register.
+    wire        ym_wr_req  = sel_ym && ~wr_n && rd_n;
     wire        ym_wr_edge = ym_wr_req && !ym_wr_req_d;
 
     always_ff @(posedge clk) begin
