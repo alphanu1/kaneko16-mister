@@ -85,9 +85,9 @@ localparam CONF_STR = {
 	"O[15],Sprite offscreen skip,Off,On;",
 	"O[16],Sprites,On,Off;",
 	"O[17],Tilemaps,On,Off;",
+	"O[26:24],Rotation,Off,Auto (per game),CW 90,CCW 90,180;",
 	"O[20:19],Game override,Off(MRA),1 Magical Crystals,2 Blaze On,3 Wing Force;",
 	"O[23:21],Layer1 dx,+2 (MAME),0,-2,+4;",
-	"O[26:24],Rotation,Off,Auto (per game),CW 90,CCW 90,180;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
@@ -710,7 +710,11 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 wire [10:0] pal_rd_addr;
 wire [15:0] pal_rd_q;
 
-kaneko_vmem u_vmem
+// ONE VIEW2 CHIP. shogwarr() and brapboys() instantiate m_view2[0] only, so
+// the second chip's tile and scroll arrays -- about sixteen M10K blocks -- are
+// not built. Its ports still exist and read zero, which is what a board with
+// no second chip returns.
+kaneko_vmem #(.CHIPS(1)) u_vmem
 (
 	.clk(clk_sys),
 	.cpu_addr(vmem_addr), .cpu_din(vmem_din),
@@ -1058,7 +1062,16 @@ jt6295 u_oki2
 jt6295 u_oki
 (
 	.rst(rst_sys), .clk(clk_sys), .cen(oki_cen),
-	.ss(1'b1),                       // PIN7_HIGH: divide by 132
+	// PIN7 LOW ON THIS BOARD, where every Tier 1 game is HIGH.
+	//
+	//   bakubrkr / mgcrystl / wingforc   PIN7_HIGH, two of them verified on pcb
+	//   shogwarr / brapboys              PIN7_LOW
+	//
+	// It selects the sample-rate divider -- 132 high, 165 low -- so the wrong
+	// one plays every sample about 20% out and sounds like a bad dump rather
+	// than a wrong constant. A constant is right here only because both games on
+	// this board agree; it stops being one the moment a third does not.
+	.ss(1'b0),                       // PIN7_LOW: divide by 165
 	.wrn(~oki_we_eff), .din(oki_din_eff), .dout(oki_dout),
 	.rom_addr(oki_rom_addr), .rom_data(oki_rom_data), .rom_ok(oki_rom_ok[0]),
 	.sound(oki_snd), .sample()
@@ -2372,6 +2385,15 @@ always @(posedge clk_sys) begin
 end
 
 // ------------------------------------------------------------- rotation
+// KEPT, THOUGH BOTH GAMES ON THIS BOARD ARE ROT0.
+//
+// It was removed on the grounds that shogwarr and brapboys are both ROT0 and
+// therefore never need turning. That reasoning is wrong: the option describes
+// the DISPLAY's orientation, not the game's. A ROT0 game on a physically
+// portrait monitor needs rotating exactly as much as a ROT90 one does, which
+// is the whole reason the 180 setting exists at all.
+//
+// It costs multipliers and the DDR3 interface, and it stays anyway.
 //
 // Explosive Breaker is ROT90 and Wing Force ROT270 -- two of the four games,
 // turned in OPPOSITE directions -- so the game table supplies both whether and

@@ -7,7 +7,7 @@ as the original silicon did, verified against MAME as an oracle.
 > ## THIS BRANCH IS A DIFFERENT CORE. IT MUST NOT BE NAMED `Kaneko16`.
 >
 > This is the CALC3 board — Shogun Warriors and B.Rap Boys — and it ships as
-> its own core, **`Kaneko_T2`**, in its own repository. It is not a variant of
+> its own core, **`KanekoCALC3`**, in its own repository. It is not a variant of
 > the Tier 1 core and the two cannot share a name.
 >
 > **Naming it `Kaneko16` would overwrite the Tier 1 core** on any card holding
@@ -19,11 +19,13 @@ as the original silicon did, verified against MAME as an oracle.
 > looking fine. That exact trap once cost twelve hours of measuring a bitstream
 > nobody meant to be running.
 >
-> `Kaneko_T2` is safe in both directions: `<rbf>Kaneko16</rbf>` compares eight
-> characters and gets `Kaneko_T`, and `<rbf>Kaneko_T2</rbf>` compares nine and
-> gets `Kaneko16.`. Neither matches the other.
+> `KanekoCALC3` is safe in both directions: `<rbf>Kaneko16</rbf>` compares
+> eight characters and gets `KanekoCA`, and `<rbf>KanekoCALC3</rbf>` compares
+> eleven and gets `Kaneko16.rb`. Neither matches the other. It is also named
+> for the board rather than for a tier, which is what someone searching for it
+> will actually type -- MAME calls this hardware CALC3 throughout.
 >
-> The same applies to the MRAs: they name `<rbf>Kaneko_T2</rbf>` and ship from
+> The same applies to the MRAs: they name `<rbf>KanekoCALC3</rbf>` and ship from
 > this core's own repository, never alongside Tier 1's.
 
 **Status: all four Tier 1 games are playable on hardware.** Explosive Breaker,

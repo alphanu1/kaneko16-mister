@@ -71,8 +71,6 @@ HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_tline:kaneko_tline_harness:sim/video/tb_kaneko_tline.cpp \
              kaneko_spr_sys:kaneko_spr_sys_harness:sim/video/tb_kaneko_spr_sys.cpp \
              kaneko_gamecfg:kaneko_gamecfg:sim/io/tb_kaneko_gamecfg.cpp \
-             kaneko_z80snd:kaneko_z80snd:sim/sound/tb_kaneko_z80snd.cpp \
-             kaneko_z80rom:kaneko_z80rom:sim/sound/tb_kaneko_z80rom.cpp \
              kaneko_oki:kaneko_oki_harness:sim/sound/tb_kaneko_oki.cpp:JT6295 \
              kaneko_cpu:kaneko_cpu_harness:sim/cpu/tb_kaneko_cpu.cpp:FX68K
 

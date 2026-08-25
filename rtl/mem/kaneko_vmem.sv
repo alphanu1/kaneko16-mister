@@ -28,7 +28,21 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-module kaneko_vmem (
+module kaneko_vmem #(
+    // HOW MANY VIEW2 CHIPS THIS BOARD HAS.
+    //
+    // Two on the Explosive Breaker and Magical Crystals boards, ONE on the
+    // Blaze On and CALC3 boards. It is a parameter rather than a per-game
+    // signal because the second chip's arrays are the cost -- about sixteen
+    // M10K blocks of tile and scroll storage -- and a signal cannot make
+    // memory that is not instantiated go away.
+    //
+    // With CHIPS=1 the c1_* ports still exist and read zero, so the top level
+    // and the tilemap engine need no conditional wiring; the layers simply
+    // never have anything solid in them, which is what `two_chips` already
+    // tells the mixer.
+    parameter int unsigned CHIPS = 2
+) (
     input  wire        clk,
 
     // ---- CPU side
@@ -130,7 +144,7 @@ module kaneko_vmem (
 
     genvar gc, gl;
     generate
-        for (gc = 0; gc < 2; gc = gc + 1) begin : g_chip
+        for (gc = 0; gc < CHIPS; gc = gc + 1) begin : g_chip
             for (gl = 0; gl < 2; gl = gl + 1) begin : g_layer
                 // 1024 tile entries per layer, attr and code held apart so a
                 // whole entry comes back in one cycle.
@@ -216,7 +230,9 @@ module kaneko_vmem (
     end
 
     assign q_vram0 = cpu_rq[0];
-    assign q_vram1 = cpu_rq[1];
+    // Chip 1's read-back is zero on a board that has no chip 1, which is what
+    // an absent device returns anyway.
+    assign q_vram1 = (CHIPS > 1) ? cpu_rq[1] : 16'd0;
     assign q_spr   = {qsh, qsl};
     assign q_pal   = {qph, qpl};
     assign spr_q   = {rsh, rsl};
@@ -225,13 +241,27 @@ module kaneko_vmem (
     // {code, attr} — the order kaneko_tmap_fetch expects.
     assign c0_t0_q = g_chip[0].g_layer[0].tile_q;
     assign c0_t1_q = g_chip[0].g_layer[1].tile_q;
-    assign c1_t0_q = g_chip[1].g_layer[0].tile_q;
-    assign c1_t1_q = g_chip[1].g_layer[1].tile_q;
+    generate
+        if (CHIPS > 1) begin : g_c1_out
+            assign c1_t0_q = g_chip[1].g_layer[0].tile_q;
+            assign c1_t1_q = g_chip[1].g_layer[1].tile_q;
+        end else begin : g_c1_none
+            assign c1_t0_q = 32'd0;
+            assign c1_t1_q = 32'd0;
+        end
+    endgenerate
 
     assign c0_s0_q = g_chip[0].g_layer[0].scr_q;
     assign c0_s1_q = g_chip[0].g_layer[1].scr_q;
-    assign c1_s0_q = g_chip[1].g_layer[0].scr_q;
-    assign c1_s1_q = g_chip[1].g_layer[1].scr_q;
+    generate
+        if (CHIPS > 1) begin : g_c1_scr
+            assign c1_s0_q = g_chip[1].g_layer[0].scr_q;
+            assign c1_s1_q = g_chip[1].g_layer[1].scr_q;
+        end else begin : g_c1_scr_none
+            assign c1_s0_q = 16'd0;
+            assign c1_s1_q = 16'd0;
+        end
+    endgenerate
 
 endmodule
 
