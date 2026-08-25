@@ -6520,6 +6520,45 @@ wrap. Reverting the reduction now gives 911,684 out-of-range fetches and
 Same family as every other default that returned a plausible value: the
 harness answered instead of failing.
 
+### Wing Force's silent attract demo is CORRECT, 2026-08-25
+
+Hours were spent on this as a defect. It is not one.
+
+Wing Force plays its music on the TITLE screen. The gameplay demo and the
+high-score screen are silent on the original hardware. Measured in MAME by
+counting OKI writes alongside screenshots taken at the same moment:
+
+| t | screen | OKI writes in 5 s |
+|---|---|---|
+| 20 s | title screen | 183 |
+| 35 s | gameplay demo | **0** |
+| 50 s | high-score screen | **0** |
+
+That is exactly what this core does on hardware, and exactly what was reported
+as the fault: title plays, demo silent, attract high-score silent, gameplay
+plays.
+
+The `0x17` and `0x01` sound commands that framed the whole investigation
+bracket the TITLE SCREEN, not the demo. The 1002-frame gap between them -- 16.7
+seconds -- is the title tune's length. This core measured 1007 frames, which is
+the same interval at 59.1856 Hz against MAME's 60.
+
+**What went wrong in the diagnosis.** Hard rule 6 says to diff against MAME
+before hunting. The sound path was diffed against MAME exhaustively -- commands,
+order, latch handshake, interval, poll rates, timer flags, register writes --
+but the EXPECTED BEHAVIOUR never was. "No music in the attract demo" was taken
+as a defect on the strength of it sounding like one. A single screenshot at the
+right moment would have ended it in a minute.
+
+The corollary is worth keeping: **when a report describes something ABSENT,
+check the oracle has it before looking for what removed it.** A census that
+returns zero looks the same whether the thing is broken or was never there --
+the same trap this file already records for measurements that say "never".
+
+It was not wasted. Two genuine faults surfaced on the way and are fixed: the
+OKI routed ten times too quiet, and the Z80's reads being delivered as writes.
+Neither would have been found without it.
+
 ### The Z80's READS were being delivered as WRITES, 2026-08-25
 
 Measured on hardware, this core issued **120 YM2151 port writes a frame** where

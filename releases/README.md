@@ -94,9 +94,25 @@ exactly that reason — if they disagree, trust neither and check.**
   yet known, and guessing one would trade a visible fault in one game for a
   hidden one in another.
 
-- **Wing Force has no sound effects**, and no music in the attract demo. Its
-  in-game music is correct. The OKI on that board hangs off the Z80's I/O ports
-  rather than the 68000's bus, and that path is still being chased.
+- ~~**Wing Force has no sound effects**, and no music in the attract demo.~~
+  **Two real faults, both fixed. The third was not a fault at all.**
+
+  The OKI was routed about ten times too quiet: `kaneko16.cpp` routes Wing
+  Force's YM2151 at 0.2 and its OKI at 0.5 -- the effects are two and a half
+  times LOUDER than the music -- where every other board in the driver routes
+  its YM2149s at 0.5, the same as its OKI. This core applied the other boards'
+  balance and summed the two at equal weight.
+
+  And the Z80's READS were being delivered as WRITES: T80 with `T2Write(1)`
+  moves the write strobe early enough to overlap a read, so every status poll
+  wrote a YM register with whatever sat on the data bus, about 105 times a
+  frame. Both are fixed, and the second one affects Blaze On as well.
+
+  **The silent attract demo is correct behaviour.** Wing Force plays its music
+  on the TITLE screen and is silent through the gameplay demo and the
+  high-score screen. Confirmed against MAME by measuring OKI writes alongside
+  screenshots: 183 writes a second on the title screen, and exactly zero on
+  both attract screens. The board does the same.
 - Tier 2 and Tier 3 of the driver are not attempted. Shogun Warriors and B.Rap
   Boys need the CALC3 MCU; Great 1000 Miles Rally, Blood Warrior and Bonk's
   Adventure need TOYBOX and, for GTMR, the KC-002 sprite chip's 8bpp path.
