@@ -800,13 +800,59 @@ wire [15:0] ym_mix = (snd_gain >  19'sd32767) ? 16'h7fff
                                               : snd_gain[15:0];
 
 // Blaze On board: the YM2151 in stereo, plus the OKI on Wing Force, which puts
-// it on the Z80's I/O ports rather than the 68000's bus. Halved, because
-// 32768 + 8192 does not fit a 16-bit sample and a quiet mix is recoverable
-// where a clipped one is not.
-wire signed [16:0] z80_sum_l = {{3{oki_snd[13]}}, oki_snd} + {ym2151_l[15], ym2151_l};
-wire signed [16:0] z80_sum_r = {{3{oki_snd[13]}}, oki_snd} + {ym2151_r[15], ym2151_r};
-wire [15:0] z80_mix_l = z80_sum_l[16:1];
-wire [15:0] z80_mix_r = z80_sum_r[16:1];
+// it on the Z80's I/O ports rather than the 68000's bus.
+//
+// THE TWO ARE NOT ROUTED AT THE SAME LEVEL, AND THAT IS WHY WING FORCE HAD NO
+// SOUND EFFECTS.
+//
+// kaneko16.cpp, wingforc():
+//
+//     m_ymsnd->add_route(ALL_OUTPUTS, "mono", 0.2);
+//     m_oki[0]->add_route(ALL_OUTPUTS, "mono", 0.5);
+//
+// The OKI is routed two and a half times LOUDER than the music. Every other
+// board in this driver routes its YM2149s at 0.5, the same as its OKI, so the
+// balance used there is wrong here and was applied here anyway.
+//
+// This summed them at equal weight, and jt6295's sample is 14-bit where jt51's
+// is 16 -- so the OKI arrived a further four times down, about ten times
+// quieter than the oracle relative to the music, roughly 20 dB. The chip was
+// producing samples the whole time: the overlay's OKI chain showed writes,
+// rom_ok, busy and a non-zero output all running while nothing was audible.
+//
+// MAME's weights, applied directly. 13/64 is 0.203, within 2% of 0.2.
+//
+// WIDTH FIRST, ARITHMETIC SECOND. The first version of this wrote
+//
+//     wire signed [17:0] z80_ym_l = (18'sd13 * $signed({...})) >>> 6;
+//
+// and the multiply is evaluated at the EIGHTEEN bits of its target, not at the
+// width the product needs: 13 * 32768 is 425,984, which wants 20. It wrapped
+// before the shift ever happened. On hardware that was a second of correct
+// music and then hissing and popping -- quiet passages stayed under the wrap
+// and loud ones inverted. The OKI term had the same fault from the other
+// direction, a 20-bit vector assigned to an 18-bit wire.
+//
+// So the product is formed at 24 bits and the shift is a bit-select of the
+// top 18, which cannot overflow and needs no multiplier inference to be
+// correct.
+wire signed [23:0] z80_ym_l24 = 24'sd13 * $signed({{8{ym2151_l[15]}}, ym2151_l});
+wire signed [23:0] z80_ym_r24 = 24'sd13 * $signed({{8{ym2151_r[15]}}, ym2151_r});
+wire signed [17:0] z80_ym_l  = z80_ym_l24[23:6];      // x13/64 = x0.203
+wire signed [17:0] z80_ym_r  = z80_ym_r24[23:6];
+wire signed [17:0] z80_oki_w = $signed({{4{oki_snd[13]}}, oki_snd}) >>> 1;  // x0.5
+
+wire signed [17:0] z80_sum_l = z80_ym_l + z80_oki_w;
+wire signed [17:0] z80_sum_r = z80_ym_r + z80_oki_w;
+
+// Saturated rather than trusted, for the same reason the 68000 board's mix is:
+// a silent overflow inverts the waveform and sounds like a broken chip.
+wire [15:0] z80_mix_l = (z80_sum_l >  18'sd32767) ? 16'h7fff
+                      : (z80_sum_l < -18'sd32768) ? 16'h8000
+                                                  : z80_sum_l[15:0];
+wire [15:0] z80_mix_r = (z80_sum_r >  18'sd32767) ? 16'h7fff
+                      : (z80_sum_r < -18'sd32768) ? 16'h8000
+                                                  : z80_sum_r[15:0];
 // ZERO IN THE UPPER BITS, NOT ONES. MAME's read handler is
 //
 //     u8 kaneko16_state::eeprom_r() { return m_eeprom->do_read(); }
@@ -951,6 +997,59 @@ kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_okirom
 // CPU inside itself could not be unit-tested at all. The join happens here,
 // which is also where fx68k, jt49 and jt6295 are joined for the same reason.
 wire        z80_latch_we;
+// THE 68000 SIDE OF THE SOUND LATCH, which nothing counted.
+//
+// zlat_cnt already counts the Z80 READING the latch at port 06. What was
+// missing is the 68000 WRITING it -- and that is the interesting half, because
+// the fault now looks like missed commands rather than broken chips.
+//
+// Measured in MAME with tools/mame_wf_sound.lua, Wing Force writes this latch
+// only a handful of times a minute and not once during the attract demo: the
+// Z80 runs that sequence itself. So a command missed at a TRANSITION is enough
+// to leave a whole mode silent, which is exactly the reported shape -- the
+// high-score screen plays in game and not in attract.
+//
+// Saturating rather than wrapping: a stuck write would otherwise read as a
+// healthy small number.
+reg [15:0] lw_cnt, lw_lat, lw_tot;
+// lw_tot counts OUTSIDE the vbl branch for the same reason zlat_tot does: a
+// command arriving on the frame boundary would otherwise be dropped by the
+// very counter meant to catch it.
+always @(posedge clk_sys) begin
+	if (rst_sys)                        lw_tot <= 16'd0;
+	else if (z80_latch_we && !(&lw_tot)) lw_tot <= lw_tot + 16'd1;
+end
+reg  [7:0] lw_last;
+always @(posedge clk_sys) begin
+	if (rst_sys) begin
+		lw_cnt <= 16'd0; lw_lat <= 16'd0; lw_last <= 8'd0; lw_hist <= 16'd0;
+	end else if (vbl_rise) begin
+		lw_lat <= lw_cnt; lw_cnt <= 16'd0;
+	end else if (z80_latch_we) begin
+		if (!(&lw_cnt)) lw_cnt <= lw_cnt + 16'd1;
+		lw_last <= z80_latch_din;      // the command byte itself
+		lw_hist <= {lw_hist[7:0], z80_latch_din};   // and the two before it
+	end
+end
+
+// THE LAST TWO COMMANDS, NOT JUST THE LAST ONE.
+//
+// MAME sends this pair at the transition into the attract demo:
+//
+//     5s:01   5s:17
+//
+// and 0x17 is what starts the audio -- OKI traffic begins the second after it.
+// Measured on hardware, this core holds 0x17 on the title screen, which plays,
+// and 0x01 in the demo, which is silent. So we end up holding the STOP where
+// the oracle ends up holding the START.
+//
+// Two writes in quick succession is exactly where a latch can drop one, and a
+// single last-value register cannot tell "the 17 never arrived" from "the 17
+// arrived and something sent 01 after it". This holds both, newest in the low
+// byte: 0x1701 means 01 then 17 -- the oracle's order, correct -- and 0x0117
+// means 17 then 01, which would be something stopping the music after it
+// started.
+reg [15:0] lw_hist;
 wire [7:0]  z80_latch_din;
 
 wire [15:0] z80_a;
@@ -1054,6 +1153,12 @@ jt51 u_ym2151
 jt6295 u_oki
 (
 	.rst(rst_sys), .clk(clk_sys), .cen(oki_cen),
+	// PIN7 selects the sample-rate divider: HIGH is 132, LOW is 165. Every game
+	// this core runs is HIGH, and two of the three are marked "verified on pcb"
+	// in kaneko16.cpp -- bakubrkr and mgcrystl at 12 MHz/6, wingforc at
+	// 16 MHz/16. A constant here is therefore right, but it is right by
+	// coincidence rather than by nature: berlwall is PIN7_LOW, so this becomes a
+	// game-table entry the moment that board is attempted.
 	.ss(1'b1),                       // PIN7_HIGH: divide by 132
 	.wrn(~oki_we_eff), .din(oki_din_eff), .dout(oki_dout),
 	.rom_addr(oki_rom_addr), .rom_data(oki_rom_data), .rom_ok(oki_rom_ok[0]),
@@ -1215,7 +1320,17 @@ end
 wire z80_dbg_oki_wr, z80_dbg_ym_wr, z80_dbg_latch_rd, z80_dbg_bank_wr;
 reg [15:0] zoki_cnt, zoki_lat, zym_cnt, zym_lat;
 reg [15:0] zlat_cnt, zlat_lat, zbank_cnt, zbank_lat;
+// Cumulative, never reset: a once-per-transition event cannot be seen in a
+// per-frame count, which reads zero on every frame but the one.
+reg [15:0] zlat_tot;
 always @(posedge clk_sys) begin
+	// Outside the vbl branch, so a command landing on the frame boundary is
+	// still counted. The per-frame counters below cannot do this -- they are
+	// cleared there -- and a once-per-transition event is precisely the sort
+	// that hides in the one cycle a counter is being reset.
+	if (rst_sys)                 zlat_tot <= 16'd0;
+	else if (z80_dbg_latch_rd && !(&zlat_tot)) zlat_tot <= zlat_tot + 16'd1;
+
 	if (vbl_rise) begin
 		zoki_lat  <= zoki_cnt;  zoki_cnt  <= 16'd0;
 		zym_lat   <= zym_cnt;   zym_cnt   <= 16'd0;
@@ -1320,6 +1435,33 @@ reg [15:0] z80_stl_cnt,  z80_stl_lat;
 // delivery is one-shot and held for cen_p1 -- counting the CPU side would
 // count requests, not what the chip actually saw.
 reg  [7:0] ym_reg_addr;
+
+// THE STATUS BYTE THE Z80 READS BACK, which is what the sequencer runs on.
+//
+// MAME's Wing Force polls this about 120 times a frame and sees 0x02 -- Timer
+// B set, Timer A clear -- for 87% of them. It ticks only when bit 0 (Timer A)
+// appears, roughly 4 to 6 times a frame, and answers each tick with one write
+// to register 0x14 to reset the flag.
+//
+// This core polls at the same rate and writes 120 times a frame: one per poll.
+// That is what a Timer A flag STUCK SET looks like -- the driver ticks every
+// time it looks, so the sequence runs about thirty times too fast and collapses.
+//
+// So the reading that settles it is the status byte itself. Latched on the
+// read, and counted two ways: how often bit 0 is set, and how often the byte
+// is anything other than MAME's dominant 0x02.
+reg  [7:0] ym_status_lat;
+reg [15:0] ym_ta_cnt, ym_ta_lat;      // polls with bit 0 (Timer A) set
+always @(posedge clk_sys) begin
+	if (rst_sys) begin
+		ym_status_lat <= 8'd0; ym_ta_cnt <= 16'd0; ym_ta_lat <= 16'd0;
+	end else if (vbl_rise) begin
+		ym_ta_lat <= ym_ta_cnt; ym_ta_cnt <= 16'd0;
+	end else if (z80_io_rd_e && (z80_port[7:1] == 7'h01)) begin
+		ym_status_lat <= z80_ym_dout;
+		if (z80_ym_dout[0] && !(&ym_ta_cnt)) ym_ta_cnt <= ym_ta_cnt + 16'd1;
+	end
+end
 // The top-level wires, not a hierarchical reference into the instance. These
 // are kaneko_z80snd's OUTPUTS and are already brought out here, so reaching
 // inside was never necessary. Quartus does not resolve a hierarchical
@@ -2278,14 +2420,48 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 //   row 6  last UNMAPPED address, low half
 //   row 7  unmapped accesses per frame -- zero means it is not lost, it is
 //          waiting for something that never comes
-// The scratch block, pointed at the Z80 sound ports for Wing Force. The 68000
-// probe it carried is no longer needed: Magical Crystals boots.
-// The scratch block, pointed at SDRAM occupancy for the sprite-bitmap move.
-// All four are fast clocks out of the 768 a scanline lasts.
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? occ_any_l
-                        : (screen_y < 9'd52) ? occ_tile_l
-                        : (screen_y < 9'd58) ? occ_spr_l
-                                             : occ_peak_l;
+// THE SCRATCH BLOCK, POINTED AT THE Z80 FOR WING FORCE.
+//
+// It carried SDRAM occupancy for the sprite-bitmap move; that question is
+// answered -- the bitmap does not fit -- and Tier 2 has left the core, so the
+// counters it fed are gone with it.
+//
+// Wing Force plays its in-game music and no OKI at all: no sound effects and
+// nothing in the attract demo, which is probably one fault rather than two if
+// the attract music is PCM. MAME's Z80 drives the chip perfectly well there --
+// measured with tools/mame_z80_ports.lua, 2 to 54 writes a second to port 0a
+// with bank writes on 0c -- so the game is not simply quiet.
+//
+// The OKI chain answered its question already: on the title screen all four of
+// its stages run, and in the attract demo the FIRST one is zero -- the Z80
+// never writes port 0a at all. So the chip, its ROM, its banking and its clock
+// are right, and the commands are simply not being issued.
+//
+// That moves the question to the Z80 itself, and the measurement above says
+// what to expect. The 68000 barely speaks: `latch_w` is zero for the whole
+// attract demo, so the Z80 runs that sequence AUTONOMOUSLY, pacing itself off
+// the YM2151's timer flags -- which it polls about seven thousand times a
+// second, roughly 117 a frame at 60 Hz.
+//
+// This core has been bitten by exactly that before. When jt51 was clocked from
+// `ce` rather than `ym_ce`, a Z80 stalled on a program-ROM miss took the
+// YM2151's timers down with it, and the driver fell behind its own sequencer
+// and wedged -- music for a split second and then silence, with the stall
+// counter reading half its bits.
+//
+// So these four are the Z80's own chain:
+//
+//   ym_rd    YM status polls -- the sequencer's clock. Wants about 0075 a frame
+//   ym_wr    YM register writes -- about 0008 a frame while music plays
+//   oki_wr   OKI commands issued
+//   stall    cycles the Z80 was held waiting on a program-ROM miss
+//
+// Read the fourth first. A large stall count with a low poll count is a
+// starved Z80, and everything else follows from it.
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? lw_tot
+                        : (screen_y < 9'd52) ? lw_hist
+                        : (screen_y < 9'd58) ? zlat_tot
+                                             : z80_okiw_lat;
 wire       oki_set = oki_row_val[oki_bit];
 
 // Row 9, magenta: the RAW joystick word for pad 1, live — not a per-frame

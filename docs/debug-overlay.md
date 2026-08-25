@@ -66,34 +66,45 @@ diagnosis. Screen `y` is given because it is the one thing that cannot drift.
 ## The tall yellow block is a scratch area
 
 It gets repurposed for whatever is under investigation. **It currently shows
-SDRAM occupancy per scanline**, for the sprite-bitmap move: the bitmap has to
-leave block RAM before Tier 3 is reachable, and whether SDRAM has room is the
-open question. Estimates say no, by a margin small enough to sit inside their
-own error, so this measures it instead.
+the Z80's own chain**, for Wing Force.
 
-Every value is **fast clocks out of the 768 a scanline lasts**, counted in the
-96 MHz domain. Read them as a fraction of 768.
+The OKI chain it carried before answered its question: on the title screen all
+four of its stages run, and in the attract demo the FIRST one reads zero -- the
+Z80 never writes the OKI at all. So the chip, its base address, its banking and
+its clock are right, and the commands are simply not being issued.
 
-| Sub-row | y | Shows |
-|---|---|---|
-| 1st | 40-45 | **Total occupancy** — clocks with some port granted. This is the headline number. |
-| 2nd | 46-51 | The four **tile feeders**, ports 0, 2, 3, 4 |
-| 3rd | 52-57 | The two **sprite ROM** ports, 6 and 7 |
-| 4th | 58-63 | **Peak** total occupancy across the last frame, so one busy line cannot hide behind an average |
+Measured in MAME with `tools/mame_wf_sound.lua`, the 68000 barely speaks to the
+Z80: the sound latch is written a handful of times a minute and **not once**
+during the attract demo. The Z80 runs that sequence autonomously, pacing itself
+off the YM2151's timer flags, which it polls about **7,000 times a second** --
+roughly `0075` a frame at 60 Hz.
 
-Rough readings and what they mean for the move, given the bitmap needs roughly
-200 more clocks a line with write combining:
+| Sub-row | y | Shows | MAME says |
+|---|---|---|---|
+| 1st | 40-45 | **ym_rd** -- YM status polls, the sequencer's clock | about `0078` a frame |
+| 2nd | 46-51 | **timerA** -- polls where status bit 0 was SET | about `0006` a frame |
+| 3rd | 52-57 | **status** -- the last status byte read, low 8 bits | mostly `0002` |
+| 4th | 58-63 | **reg14** -- writes to the timer-control register | about `0004` a frame |
 
-| 1st sub-row | of 768 | verdict |
-|---|---|---|
-| under `0200` | under 42% | comfortable room |
-| `0200`-`0300` | 42-63% | fits, tight |
-| over `0300` | over 63% | the bitmap does not fit as designed |
+**Read the second and third rows together.** The Z80 waits for Timer A to set,
+then writes register `0x14` to reset it -- that pair is one tick of the music
+sequencer, and MAME does it 4 to 6 times a frame.
 
-The line boundary is a free-running divide-by-768 in the fast domain rather
-than anything sampled from the video timing. Both clocks come from one PLL at
-2:1, so 768 fast clocks is exactly a scanline and nothing needs crossing.
+Measured on hardware, this core polls at MAME's rate (`0078` a frame against
+the oracle's ~117) and is NOT starved -- the stall count was `003f`, nothing --
+but it writes the YM `0078` times a frame where MAME writes about 8. One write
+per poll is what a Timer A flag stuck SET produces: the driver ticks every time
+it looks, the sequence runs about thirty times too fast, and nothing audible
+survives.
+
+| reading | meaning |
+|---|---|
+| timerA ~= ym_rd, status odd | **the flag never clears.** A write to `0x14` is not resetting it -- either the write is not reaching jt51 or it is not being honoured |
+| timerA ~`0006`, status `0002` | the flag behaves; the fault is elsewhere and this line of enquiry is finished |
+| timerA `0000`, status `0000` | the chip is not running its timers at all -- clock or reset |
 
 The block has previously carried the 68000's bus-address probe, the IPL
-counter, the OKI chain, the YM2151 register count and the VIEW2 scroll probe.
+counter, the YM2151 register count, the VIEW2 scroll probe, the SDRAM occupancy
+census and the OKI chain -- that last one is finished: the sprite bitmap does not fit,
+and Tier 2 has left the core.
 Whenever it is repurposed, this table is updated in the same commit.

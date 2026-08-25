@@ -6520,6 +6520,83 @@ wrap. Reverting the reduction now gives 911,684 out-of-range fetches and
 Same family as every other default that returned a plausible value: the
 harness answered instead of failing.
 
+### Wing Force: the OKI was routed 10x too quiet, 2026-08-25
+
+MAME, `wingforc()`:
+
+```cpp
+m_ymsnd->add_route(ALL_OUTPUTS, "mono", 0.2);
+m_oki[0]->add_route(ALL_OUTPUTS, "mono", 0.5);
+```
+
+The OKI is routed **two and a half times louder than the music**. Every other
+board in this driver routes its YM2149s at 0.5, the same as its OKI, and that
+balance was applied here -- the two were summed at equal weight and halved.
+jt6295's sample is 14-bit where jt51's is 16, so the OKI arrived a further four
+times down: about ten times quieter than the oracle relative to the music,
+roughly 20 dB, which is inaudible under a tune.
+
+The chip was working the whole time. The overlay's OKI chain showed writes,
+rom_ok, busy and a non-zero output all running on the title screen while
+nothing could be heard -- which is exactly what a mix problem looks like and
+nothing like a chip problem.
+
+Now `ym * 13/64` and `oki * 1/2`, MAME's weights. Nothing is halved any more,
+so the board is louder as well as balanced; peak sum is 10,752 against 32,767.
+
+**The first attempt at this broke the audio, and the way it broke is worth
+recording.** It was written as
+
+```systemverilog
+wire signed [17:0] z80_ym_l = (18'sd13 * $signed({...})) >>> 6;
+```
+
+and Verilog evaluates the multiply at the width of its TARGET. 13 * 32768 is
+425,984, which wants 20 bits, so it wrapped before the shift ever ran. On
+hardware that was a second of correct music and then hissing and popping --
+quiet passages stayed under the wrap, loud ones inverted. The product is now
+formed at 24 bits and the scaling is a bit-select of the top 18. The arithmetic
+was checked numerically before the second build rather than reasoned about.
+
+### Wing Force's silent attract demo is NOT the sound path, 2026-08-25
+
+Measured end to end on hardware, and every stage is healthy:
+
+| | ours | MAME |
+|---|---|---|
+| YM status polls | 109-120 a frame | ~117 |
+| Timer A flags seen | 7 a frame | ~6 |
+| writes to reg 0x14 | 3 a frame | ~4 |
+| Z80 stall cycles | 63 a frame | -- |
+| sound-latch writes, total | **6** | 5 in the first six seconds |
+| sound-latch reads, total | **6** | -- |
+
+Six written and six read: **every command the 68000 sends is collected by the
+Z80.** The latch, the NMI, the YM clock and the Z80's own pacing are all
+correct, and the Z80 is not starved.
+
+What differs is the ORDER of the last two commands:
+
+```
+MAME   ... 01  ->  17      0x17 starts the attract audio; OKI traffic
+                           begins the second after it
+ours   ... 17  ->  01      the start, then the stop
+```
+
+So the 68000 issues the right commands and ends on the STOP where the oracle
+ends on the START. The music does begin and is immediately silenced, which is
+why every counter downstream looks healthy while the demo is silent, and why
+the same high-score screen plays in game and not in attract.
+
+That puts the fault in the 68000's own path -- it is branching differently,
+which means it is reading something we supply wrongly. Ruled out so far by
+reading them against `INPUT_PORTS_START(wingforc)`: the four input words are
+right, including that Wing Force has DIPs in the low bytes of P1 and P2 where
+Blaze On does not, and that SYSTEM's undeclared low byte reads 0x00.
+
+Not found. The next instrument is a 68000 comparison against MAME around the
+transition, not more reading.
+
 ### Explosive Breaker's tilemap is one pixel right, and it is chip 1 layer 0, 2026-08-24
 
 The frame gate localises this exactly. On the attract frame at 600:
