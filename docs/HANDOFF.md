@@ -275,9 +275,32 @@ romset to load it from and nothing for an MRA to carry, and hard rule 2 does
 not apply. Generating it at build time instead would make every build need a
 MAME checkout.
 
-Still to write: the sequencer in RTL — the table walk over calc3_rom in SDRAM,
-the rolling write pointer, and the MCU RAM writes. `calc3_ref.py` is its golden
-model and `make calc3` is the check.
+**Third piece: `rtl/mcu/kaneko_calc3_walk.sv`**, the block walk. The data ROM
+is a linked list with no index, so reaching block N means stepping over the N-1
+before it — a block's length is only known once its header has been read. The
+walk returns the block's parameters and its data base.
+
+`tb_kaneko_calc3_walk` fuzzes it over generated ROM images: 4,030 checks, 0
+fails, covering 188 blocks with inline tables, 44 zero-length blocks (the
+control operations) and 37 requests past the end of the chain, and it fails if
+any of those counts is zero. The walk's arithmetic depends only on structure and
+never on table content, which is why a generated ROM exercises it as well as a
+real one and lets this sit in `make test`.
+
+The ROM read in that testbench answers with a **variable** latency, 0 to 3
+cycles. On hardware this sits on SDRAM behind an arbiter and the latency is
+whatever the arbiter gives it; a testbench that always answered next cycle would
+pass a state machine that only works at a fixed latency.
+
+**Every offset in the walk is against ROM+1**, because the C steps past the
+table-count byte before it starts. Reading one byte low gives a header that
+still looks plausible — a length, a mode, a key — and decodes to rubbish.
+Injecting exactly that fault makes the fuzz fail on the first trial.
+
+Still to write: the sequencer that drives these three — feeding bytes through
+the transform, running the inline/key index counters, the rolling write pointer
+and the MCU RAM writes, and the command dispatch that watches for a command
+word. `calc3_ref.py` is its golden model and `make calc3` is the check.
 
 A diff rather than a write tap deliberately — a tap sees every access through
 the space and cannot say who made it, so the 68000's own use of that RAM would

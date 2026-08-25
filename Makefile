@@ -75,6 +75,7 @@ HARNESSES := kaneko_tmap:kaneko_tmap_layer:sim/video/tb_kaneko_tmap.cpp \
              kaneko_oki:kaneko_oki_harness:sim/sound/tb_kaneko_oki.cpp:JT6295 \
              kaneko_calc3_dec:kaneko_calc3_dec:sim/mcu/tb_kaneko_calc3_dec.cpp \
              kaneko_calc3_keys:kaneko_calc3_keys:sim/mcu/tb_kaneko_calc3_keys.cpp \
+             kaneko_calc3_walk:kaneko_calc3_walk:sim/mcu/tb_kaneko_calc3_walk.cpp \
              kaneko_cpu:kaneko_cpu_harness:sim/cpu/tb_kaneko_cpu.cpp:FX68K
 
 # The frame gate is separate from `make test`: it needs a MAME dump and
