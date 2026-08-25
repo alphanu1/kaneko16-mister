@@ -46,8 +46,8 @@ assign AUDIO_S   = 1;
 // one. Explosive Breaker's sound works on hardware and its mix stays bit for
 // bit what it was; a board with no YM2149s must also not inherit the -1024 DC
 // offset those chips contribute when present but silent.
-assign AUDIO_L   = HAS_Z80 ? z80_mix_l : ym_mix;
-assign AUDIO_R   = HAS_Z80 ? z80_mix_r : ym_mix;
+assign AUDIO_L   = ym_mix;
+assign AUDIO_R   = ym_mix;
 assign AUDIO_MIX = 0;
 
 assign LED_USER  = ioctl_download;
@@ -691,7 +691,8 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.pg_wram(PG_WRAM), .pg_v2w0(PG_V2W0), .pg_v2w1(PG_V2W1),
 	.pg_spr(PG_SPR), .pg_pal(PG_PAL), .pg_wdog(PG_WDOG), .pg_in(PG_IN),
 	.pg_snd(PG_SND), .rom_1mb(ROM_1MB), .blazeon_io(BLAZEON_IO),
-	.snd_we(z80_latch_we), .snd_din(z80_latch_din),
+	// No Z80 on this board: the sound latch goes nowhere.
+	.snd_we(), .snd_din(),
 
 	// Nothing pressed. The EEPROM is not implemented yet, so anything the game
 	// reads from it comes back as an unwritten device.
@@ -795,37 +796,28 @@ wire signed [16:0] snd_mix = {{3{ym_ctr[11]}}, ym_ctr, 2'd0}      // YM, scaled
 // doubling cannot reach +/-32767 -- but it is saturated rather than trusted,
 // because a silent overflow inverts the waveform and sounds like a broken
 // chip rather than a loud one.
-// TWO MORE DOUBLINGS THAN THE ARITHMETIC CALLS SAFE, DELIBERATELY.
+// THE CALC3 BOARD'S MIX IS TWO OKIs AND NOTHING ELSE.
 //
-// Equalising the two boards' theoretical full scale was the wrong target.
-// jt6295's sample is 14-bit and jt51's is 16-bit, so the YM2151 board is 4x
-// louder before any gain, and MAME widens that further: Blaze On routes its
-// YM2151 at 1.0 while Explosive Breaker routes everything at 0.5. Some of the
-// difference is therefore authentic.
+// shogwarr() routes them at 0.5 each -- equal, and there is no FM chip and no
+// YM2149 to balance against, so the only question is level. Both are jt6295
+// with a 14-bit sample, so the sum peaks at 16,384 and would sit two octaves
+// below full scale unshifted.
 //
-// The rest is that the OKI's full scale is theoretical. ADPCM samples carry
-// their own volume attenuation and rarely approach +/-8192, while the YM2151
-// really does use its range -- so matching the peaks left EB obviously quieter
-// by ear. This scales past the point where the sum can be proven not to clip
-// and relies on the saturation below, which is a judgement rather than a
-// derivation: a rare clipped peak is a better trade than a soundtrack nobody
-// can hear.
+// x2 on the sum, saturated. That is the same judgement the Tier 1 core makes
+// and for the same reason: the OKI's full scale is theoretical, ADPCM samples
+// carry their own attenuation and rarely approach it, so matching the peaks
+// leaves the board obviously quiet. Peak 32,768 against a 16-bit range, so the
+// saturation is reachable and is there to be used.
 //
-// If loud effects distort, back this off to <<< 1 -- that is the largest shift
-// that cannot clip.
-wire signed [18:0] snd_gain = {{2{snd_mix[16]}}, snd_mix} <<< 2;
+// If loud effects distort, drop the shift -- that is the largest that cannot
+// clip at all.
+wire signed [16:0] calc3_sum = {{3{oki_snd[13]}},  oki_snd}
+                             + {{3{oki2_snd[13]}}, oki2_snd};
+wire signed [18:0] snd_gain  = {{2{calc3_sum[16]}}, calc3_sum} <<< 1;
 wire [15:0] ym_mix = (snd_gain >  19'sd32767) ? 16'h7fff
                    : (snd_gain < -19'sd32768) ? 16'h8000
                                               : snd_gain[15:0];
 
-// Blaze On board: the YM2151 in stereo, plus the OKI on Wing Force, which puts
-// it on the Z80's I/O ports rather than the 68000's bus. Halved, because
-// 32768 + 8192 does not fit a 16-bit sample and a quiet mix is recoverable
-// where a clipped one is not.
-wire signed [16:0] z80_sum_l = {{3{oki_snd[13]}}, oki_snd} + {ym2151_l[15], ym2151_l};
-wire signed [16:0] z80_sum_r = {{3{oki_snd[13]}}, oki_snd} + {ym2151_r[15], ym2151_r};
-wire [15:0] z80_mix_l = z80_sum_l[16:1];
-wire [15:0] z80_mix_r = z80_sum_r[16:1];
 // ZERO IN THE UPPER BITS, NOT ONES. MAME's read handler is
 //
 //     u8 kaneko16_state::eeprom_r() { return m_eeprom->do_read(); }
@@ -843,25 +835,10 @@ wire [15:0] z80_mix_r = z80_sum_r[16:1];
 wire [7:0] ym1_ioa_in = {7'h00, eeprom_do};
 wire [7:0] ym1_iob_out;
 
-jt49 u_ym0
-(
-	.rst_n(~cpu_rst), .clk(clk_sys), .clk_en(ym_cen),
-	.addr(ym_addr), .cs_n(~ym0_we), .wr_n(~ym0_we), .din(ym_din),
-	.sel(1'b1), .dout(ym0_q),
-	.sound(ym0_snd), .A(), .B(), .C(), .sample(),
-	.IOA_in(8'hff), .IOA_out(), .IOA_oe(),
-	.IOB_in(8'hff), .IOB_out(ym0_iob_out), .IOB_oe()
-);
-
-jt49 u_ym1
-(
-	.rst_n(~cpu_rst), .clk(clk_sys), .clk_en(ym_cen),
-	.addr(ym_addr), .cs_n(~ym1_we), .wr_n(~ym1_we), .din(ym_din),
-	.sel(1'b1), .dout(ym1_q),
-	.sound(ym1_snd), .A(), .B(), .C(), .sample(),
-	.IOA_in(ym1_ioa_in), .IOA_out(), .IOA_oe(),
-	.IOB_in(8'hff), .IOB_out(ym1_iob_out), .IOB_oe()
-);
+// The two YM2149s are not on this board -- shogwarr() has no PSG at all.
+// Their register windows stay decoded in kaneko_bus so a stray access still
+// answers rather than hanging the 68000 on a DTACK that never comes, and they
+// read back zero.
 
 // eeprom_w at d00001 carries clk and di; they are held between writes, so they
 // are latched rather than pulsed.
@@ -919,8 +896,9 @@ wire signed [13:0] oki_snd;
 // `oki_we` while Wing Force drives the OKI from the Z80, so its row read zero
 // no matter what the Z80 did. A census of the wrong signal returns zero and
 // looks exactly like an answer -- the failure CLAUDE.md's rule 6 is about.
-wire       oki_we_eff  = OKI_ON_Z80 ? z80_oki_we  : oki_we;
-wire [7:0] oki_din_eff = OKI_ON_Z80 ? z80_oki_din : oki_din;
+// The 68000 drives both OKIs on this board; there is no Z80 to hand them to.
+wire       oki_we_eff  = oki_we;
+wire [7:0] oki_din_eff = oki_din;
 
 wire [23:0] oki_region_addr;
 kaneko_oki_bank u_okibank
@@ -929,7 +907,7 @@ kaneko_oki_bank u_okibank
 	.max_bank(OKI_MAX_BANK),
 	// Same split: Wing Force banks from Z80 port 0x0c, the rest from YM2149
 	// chip 0's port B.
-	.bank(OKI_ON_Z80 ? z80_oki_bank : ym0_iob_out[2:0]),
+	.bank(okibk_q[2:0]),
 	.region_addr(oki_region_addr)
 );
 
@@ -1059,115 +1037,23 @@ jt6295 u_oki2
 	.sound(oki2_snd), .sample()
 );
 
-// -------------------------------------------------------- Z80 sound CPU
-// The Blaze On board only: Z80 + YM2151, with the 68000 handing it one byte at
-// a time through a latch. Held in reset on every other board, where the sound
-// hardware is the two YM2149s and the OKI on the 68000's own bus.
+// ------------------------------------------ Z80 + YM2151: NOT ON THIS BOARD
+// The Blaze On board carries a Z80 and a YM2151; the CALC3 board does not.
+// shogwarr()'s machine config has one VIEW2 chip, VU-002 sprites, two OKIs, an
+// EEPROM and the CALC3 MCU -- and no CPU but the 68000, no FM chip and no
+// YM2149s.
 //
-// T80 is VHDL. That is why kaneko_z80snd brings the Z80 bus out instead of
-// instantiating it — Verilator cannot build VHDL, and a module that hid the
-// CPU inside itself could not be unit-tested at all. The join happens here,
-// which is also where fx68k, jt49 and jt6295 are joined for the same reason.
-wire        z80_latch_we;
-wire [7:0]  z80_latch_din;
-
-wire [15:0] z80_a;
-wire [7:0]  z80_do, z80_di;
-wire        z80_mreq_n, z80_iorq_n, z80_rd_n, z80_wr_n, z80_nmi_n;
-wire [15:0] z80_rom_addr;
-wire [7:0]  z80_rom_data;
-wire        z80_oki_we;
-wire [7:0]  z80_oki_din;
-wire [2:0]  z80_oki_bank;
-wire        z80_ym_cen, z80_ym_cen_p1, z80_ym_cs_n, z80_ym_wr_n, z80_ym_a0;
-wire [7:0]  z80_ym_din, z80_ym_dout;
-
-// 4 MHz, from MAME: Z80(config, m_audiocpu, 4000000) on Blaze On and
-// XTAL(16'000'000)/4 on Wing Force, which is the same number. 48/12 is exact,
-// so no fractional divider and no phase error.
-reg [3:0] z80_cediv;
-always @(posedge clk_sys) z80_cediv <= (z80_cediv == 4'd11) ? 4'd0 : z80_cediv + 4'd1;
-
-// STALLED BY WITHHOLDING THE CLOCK ENABLE, NOT BY WAIT_n.
+// So T80, kaneko_z80snd, kaneko_z80rom and jt51 are gone from this core along
+// with the two jt49s. That is a whole CPU, a whole FM chip and two PSGs of
+// logic, and about eleven M10K blocks -- the Z80's 8 KB of RAM, its
+// program-ROM cache and jt51's shift registers.
 //
-// The program ROM is a cache over SDRAM now, so a fetch can miss. Holding CEN
-// low is the unambiguous way to say "not yet" to T80s: the CPU does not
-// advance, its address and control lines hold, the line arrives, and it
-// resumes. Driving WAIT_n correctly alongside CEN and IOWait would be a second
-// timing contract to get right for no benefit.
+// They are removed rather than held in reset because this core exists to make
+// room: 64 KB of MCU RAM does not infer into M10K here and asks the fitter for
+// more logic than the device has, and this branch does not close timing even
+// at 8 KB. Every block and every ALM is wanted.
 //
-// The divider keeps counting through a stall, so the cost of a miss is rounded
-// up to the next 4 MHz tick. That is the right way round: it can only ever
-// make the Z80 slower than 4 MHz, never faster.
-wire        z80_rom_ready;
-wire        z80_rom_rd = ~z80_mreq_n && ~z80_rd_n && (z80_a < 16'hc000);
-wire        z80_stall  = z80_rom_rd && !z80_rom_ready;
-// The CPU's enable stalls; the sound chip's does not. z80_ce_free is the
-// unconditional 4 MHz tick and is what jt51 runs on.
-wire z80_ce_free = (z80_cediv == 4'd0);
-wire z80_ce      = z80_ce_free && !z80_stall;
-
-// Held in reset when the board has no Z80. Not merely idle: a Z80 free-running
-// over whatever the block RAM powered up with would drive the YM2151 with
-// noise, and the OKI board would gain a sound source it does not have.
-wire z80_rst_n = ~(cpu_rst | ~HAS_Z80);
-
-T80s #(.Mode(0), .T2Write(1), .IOWait(1)) u_z80
-(
-	.RESET_n(z80_rst_n), .CLK(clk_sys), .CEN(z80_ce),
-	.WAIT_n(1'b1),
-	// The YM2151's IRQ is not wired on this board — MAME sets no irq_handler,
-	// so the program polls the status register for its timers. NMI is the only
-	// interrupt, and it comes from the latch.
-	.INT_n(1'b1), .NMI_n(z80_nmi_n), .BUSRQ_n(1'b1),
-	.M1_n(), .MREQ_n(z80_mreq_n), .IORQ_n(z80_iorq_n),
-	.RD_n(z80_rd_n), .WR_n(z80_wr_n),
-	.RFSH_n(), .HALT_n(), .BUSAK_n(),
-	.OUT0(1'b0),
-	.A(z80_a), .DI(z80_di), .DO(z80_do)
-);
-
-kaneko_z80rom #(.SDR_AW(SDR_AW)) u_z80rom
-(
-	.clk(clk_sys), .rst(~z80_rst_n), .base(BASE_Z80),
-	.rom_addr(z80_rom_addr), .rom_rd(z80_rom_rd),
-	.rom_data(z80_rom_data), .rom_ready(z80_rom_ready),
-	.p_req(p8_req), .p_addr(p8_addr),
-	.p_ack(p_ack_bus[8]), .p_dout(p_dout_bus[8])
-);
-
-kaneko_z80snd u_z80snd
-(
-	.clk(clk_sys), .rst(~z80_rst_n), .ym_ce(z80_ce_free),
-	.latch_we(z80_latch_we), .latch_din(z80_latch_din),
-	.cpu_addr(z80_a), .cpu_dout(z80_do), .cpu_din(z80_di),
-	.mreq_n(z80_mreq_n), .iorq_n(z80_iorq_n),
-	.rd_n(z80_rd_n), .wr_n(z80_wr_n), .nmi_n(z80_nmi_n),
-	.rom_addr(z80_rom_addr), .rom_data(z80_rom_data),
-	.has_oki(OKI_ON_Z80),
-	.dbg_oki_wr(z80_dbg_oki_wr), .dbg_ym_wr(z80_dbg_ym_wr),
-	.dbg_latch_rd(z80_dbg_latch_rd), .dbg_bank_wr(z80_dbg_bank_wr),
-	.oki_we(z80_oki_we), .oki_din(z80_oki_din), .oki_dout(oki_dout),
-	.oki_bank(z80_oki_bank),
-	.ym_cen(z80_ym_cen), .ym_cen_p1(z80_ym_cen_p1),
-	.ym_cs_n(z80_ym_cs_n), .ym_wr_n(z80_ym_wr_n), .ym_a0(z80_ym_a0),
-	.ym_din(z80_ym_din), .ym_dout(z80_ym_dout)
-);
-
-// The YM2151 is stereo on this board — MAME routes channel 0 left and 1 right,
-// unlike every other Kaneko sound chip, which is mono to one speaker.
-wire signed [15:0] ym2151_l, ym2151_r;
-
-jt51 u_ym2151
-(
-	.rst(~z80_rst_n), .clk(clk_sys),
-	.cen(z80_ym_cen), .cen_p1(z80_ym_cen_p1),
-	.cs_n(z80_ym_cs_n), .wr_n(z80_ym_wr_n), .a0(z80_ym_a0),
-	.din(z80_ym_din), .dout(z80_ym_dout),
-	.ct1(), .ct2(), .irq_n(),
-	.sample(), .left(), .right(),
-	.xleft(ym2151_l), .xright(ym2151_r)
-);
+// They remain in the Tier 1 core, which is where Blaze On and Wing Force run.
 
 jt6295 u_oki
 (
@@ -1314,39 +1200,6 @@ always @(posedge clk_sdram) begin
 	end
 end
 
-// Z80 SOUND-PORT CENSUS, to diff against tools/mame_z80_ports.lua.
-//
-// Wing Force plays its in-game music and nothing else -- no OKI effects and no
-// attract music -- and two plausible causes were checked and were both wrong:
-// the fourth input word (real bug, fixed, changed nothing here) and jt6295
-// missing the write because its clock enable is slower than the Z80's strobe
-// (jt6295_ctrl samples wrn on the bare clock, so it cannot).
-//
-// MAME's census on wingforc, per second, is the thing to compare against:
-//
-//   w02/w03  232-564   YM2151, continuously, in attract AND in game
-//   r03      6300-7200 YM2151 status polled
-//   w0a      up to 54  OKI, ONLY during the attract demo
-//   r06      1-2       the latch, read only inside the NMI handler
-//
-// Divide by 60 for the per-frame numbers these rows show.
-wire z80_dbg_oki_wr, z80_dbg_ym_wr, z80_dbg_latch_rd, z80_dbg_bank_wr;
-reg [15:0] zoki_cnt, zoki_lat, zym_cnt, zym_lat;
-reg [15:0] zlat_cnt, zlat_lat, zbank_cnt, zbank_lat;
-always @(posedge clk_sys) begin
-	if (vbl_rise) begin
-		zoki_lat  <= zoki_cnt;  zoki_cnt  <= 16'd0;
-		zym_lat   <= zym_cnt;   zym_cnt   <= 16'd0;
-		zlat_lat  <= zlat_cnt;  zlat_cnt  <= 16'd0;
-		zbank_lat <= zbank_cnt; zbank_cnt <= 16'd0;
-	end else begin
-		if (z80_dbg_oki_wr   && !(&zoki_cnt))  zoki_cnt  <= zoki_cnt  + 16'd1;
-		if (z80_dbg_ym_wr    && !(&zym_cnt))   zym_cnt   <= zym_cnt   + 16'd1;
-		if (z80_dbg_latch_rd && !(&zlat_cnt))  zlat_cnt  <= zlat_cnt  + 16'd1;
-		if (z80_dbg_bank_wr  && !(&zbank_cnt)) zbank_cnt <= zbank_cnt + 16'd1;
-	end
-end
-
 // IPL ASSERTIONS, WHICH ARE NOT THE SAME THING AS ACKNOWLEDGEMENTS.
 //
 // irq_cnt above counts what the CPU ACCEPTED. Magical Crystals reads zero
@@ -1414,30 +1267,15 @@ end
 // loop; near zero means it is not running at all. The fourth row is how many
 // 4 MHz ticks were LOST to a ROM-cache stall, saturating, which says whether
 // the cause is the cache this session introduced.
-wire        z80_io_wr = ~z80_iorq_n && ~z80_wr_n;
-wire        z80_io_rd = ~z80_iorq_n && ~z80_rd_n;
-reg         z80_io_wr_d, z80_io_rd_d;
-always @(posedge clk_sys) begin
-	z80_io_wr_d <= z80_io_wr;
-	z80_io_rd_d <= z80_io_rd;
-end
 // Edges, because the Z80 holds its strobes for a whole 4 MHz bus cycle -- a
 // dozen clk_sys ticks -- and a level would count each access twelve times and
 // be incomparable with MAME's per-access figures.
-wire        z80_io_wr_e = z80_io_wr && !z80_io_wr_d;
-wire        z80_io_rd_e = z80_io_rd && !z80_io_rd_d;
-wire [7:0]  z80_port    = z80_a[7:0];
 
-reg [15:0] z80_ymw_cnt,  z80_ymw_lat;
-reg [15:0] z80_ymr_cnt,  z80_ymr_lat;
-reg [15:0] z80_okiw_cnt, z80_okiw_lat;
-reg [15:0] z80_stl_cnt,  z80_stl_lat;
 // THE ADDRESS HALF, LATCHED, so a write can be attributed to a register.
 // The YM2151 is written as a pair: register number to port 02, value to port
 // 03. Watching the delivered strobe rather than the Z80's bus, because the
 // delivery is one-shot and held for cen_p1 -- counting the CPU side would
 // count requests, not what the chip actually saw.
-reg  [7:0] ym_reg_addr;
 // The top-level wires, not a hierarchical reference into the instance. These
 // are kaneko_z80snd's OUTPUTS and are already brought out here, so reaching
 // inside was never necessary. Quartus does not resolve a hierarchical
@@ -1448,12 +1286,6 @@ reg  [7:0] ym_reg_addr;
 // (A comment must not put the simulator's name at the start of a line: it is
 // parsed as a pragma. Recorded against kaneko_mixer.sv and walked into again
 // writing this one.)
-wire       ym_deliv  = ~z80_ym_cs_n && ~z80_ym_wr_n && z80_ym_cen_p1;
-wire       ym_reg_wr = ym_deliv && z80_ym_a0;           // the data half
-always @(posedge clk_sys) begin
-	if (rst_sys)                     ym_reg_addr <= 8'd0;
-	else if (ym_deliv && !z80_ym_a0) ym_reg_addr <= z80_ym_din;
-end
 
 // WHERE THE 68000 IS, for a game that runs and never enables interrupts.
 // Magical Crystals shows a healthy bus-cycle count and zero interrupts
@@ -1504,48 +1336,20 @@ always @(posedge clk_sys) begin
 	end
 end
 
-reg [15:0] ym_key_cnt,   ym_key_lat;     // writes to 0x08, KEY ON/OFF
-reg [15:0] ym_tmr_cnt,   ym_tmr_lat;     // writes to 0x14, timer control
-reg [15:0] ym_nz_cnt,    ym_nz_lat;      // clocks where jt51's output is non-zero
-reg [15:0] mix_nz_cnt,   mix_nz_lat;     // clocks where the mixed output is non-zero
 always @(posedge clk_sys) begin
 	if (rst_sys) begin
-		z80_ymw_cnt <= 0; z80_ymr_cnt <= 0; z80_okiw_cnt <= 0; z80_stl_cnt <= 0;
-		ym_nz_cnt <= 0; mix_nz_cnt <= 0; ym_nz_lat <= 0; mix_nz_lat <= 0;
-		ym_key_cnt <= 0; ym_tmr_cnt <= 0; ym_key_lat <= 0; ym_tmr_lat <= 0;
-		// ym_reg_addr is NOT reset here: it has its own always block below,
 		// and driving one register from two of them is two constant drivers
 		// as far as Quartus is concerned -- eight errors, one per bit.
-		z80_ymw_lat <= 0; z80_ymr_lat <= 0; z80_okiw_lat <= 0; z80_stl_lat <= 0;
 	end else if (vbl_rise) begin
-		z80_ymw_lat  <= z80_ymw_cnt;  z80_ymw_cnt  <= 0;
-		z80_ymr_lat  <= z80_ymr_cnt;  z80_ymr_cnt  <= 0;
-		z80_okiw_lat <= z80_okiw_cnt; z80_okiw_cnt <= 0;
-		ym_nz_lat    <= ym_nz_cnt;    ym_nz_cnt    <= 0;
-		ym_key_lat   <= ym_key_cnt;   ym_key_cnt   <= 0;
-		ym_tmr_lat   <= ym_tmr_cnt;   ym_tmr_cnt   <= 0;
-		mix_nz_lat   <= mix_nz_cnt;   mix_nz_cnt   <= 0;
-		z80_stl_lat  <= z80_stl_cnt;  z80_stl_cnt  <= 0;
 	end else begin
-		if (z80_io_wr_e && (z80_port[7:1] == 7'h01)) z80_ymw_cnt  <= z80_ymw_cnt  + 1'd1;
-		if (z80_io_rd_e && (z80_port[7:1] == 7'h01)) z80_ymr_cnt  <= z80_ymr_cnt  + 1'd1;
-		if (z80_io_wr_e && (z80_port      == 8'h0a)) z80_okiw_cnt <= z80_okiw_cnt + 1'd1;
 		// PAST THE YM INTERFACE. The two rows above proved the Z80 writes the
 		// chip at MAME's rate while the board is silent, so the question moved
 		// downstream: is jt51 producing anything, and does it survive the mix?
-		if (ym2151_l != 16'sd0 && !(&ym_nz_cnt)) ym_nz_cnt <= ym_nz_cnt + 1'd1;
 		// WHICH YM REGISTER, not how many writes. The counts already match
 		// MAME; the content is the open question, and two registers decide
 		// whether anything is audible at all.
-		if (ym_reg_wr && (ym_reg_addr == 8'h08) && !(&ym_key_cnt))
-			ym_key_cnt <= ym_key_cnt + 1'd1;
-		if (ym_reg_wr && (ym_reg_addr == 8'h14) && !(&ym_tmr_cnt))
-			ym_tmr_cnt <= ym_tmr_cnt + 1'd1;
-		if (z80_mix_l != 16'd0 && !(&mix_nz_cnt)) mix_nz_cnt <= mix_nz_cnt + 1'd1;
 		// Saturating: a fully starved Z80 loses far more than 65535 ticks a
 		// frame, and a wrapped counter would read as a healthy small number.
-		if ((z80_cediv == 4'd0) && z80_stall && !(&z80_stl_cnt))
-			z80_stl_cnt <= z80_stl_cnt + 1'd1;
 	end
 end
 

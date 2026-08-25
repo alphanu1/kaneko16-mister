@@ -286,6 +286,36 @@ on purpose before trusting it.
    Nothing is branched yet. Branching fixes a point in history and there was
    no reason to fix one before Tier 1 was finished.
 
+1. **Folding the sprite mask into the bitmap: 20 blocks, and NOT free.**
+   Attempted 2026-08-25 and backed out before it could ship.
+
+   The idea is sound and the geometry supports it. The bitmap is 81,920 words
+   of 16 declared bits, of which twelve are used, and the fitter puts it in
+   2048x5 mode three blocks wide -- fifteen bits of storage per word. Bits
+   13:10 are a hole that is already being paid for. The two 1-bit mask arrays
+   cost **20 M10K blocks** and could live in that hole.
+
+   Two obstacles, both real, neither noticed until the layout was actually
+   read rather than assumed:
+
+   - **The transparency test would break.** `kaneko_mixer` has
+     `spr_here = |spr_pix` where `spr_pix` is `mix_word[13:0]` -- it ORs the
+     hole. A mask bit anywhere in 13:10 makes every marked-but-not-drawn pixel
+     opaque. Fixable: only `mix_word[9:0]` carries anything, so `spr_pix`
+     can be `{4'd0, mix_word[9:0]}`, which is identical today and frees the
+     hole properly.
+   - **The mask needs a partial write.** A losing sprite pixel marks the mask
+     without writing a colour, and the clear wipes the mask every pass but the
+     pixels only when `keep_sprites` is false. So the two halves of the word
+     are written independently, which means a read-modify-write or byte
+     enables on a 13-bit word -- and a conditional or split write to an
+     inferred array is the shape that has stopped M10K inference here twice,
+     once costing 194,328 ALMs against the device's 41,910.
+
+   Worth doing, with `tb_kaneko_spr_sys` covering first-writer-wins so a
+   mistake is caught in simulation rather than on hardware. Not worth doing
+   in a hurry.
+
 1. **Screen timing is not PCB-verified.** MAME uses `set_refresh_hz(60)` with
    no `set_raw()`. We run 384x264 at 6 MHz, 59.1856 Hz. No amount of simulation
    resolves this — it needs a hardware reference or a PCB capture. Wing Force's

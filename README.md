@@ -4,6 +4,28 @@ An FPGA implementation of Kaneko's 16-bit arcade hardware for MiSTer
 (Terasic DE10-Nano, Cyclone V 5CSEBA6U23I7). Not an emulator: RTL that behaves
 as the original silicon did, verified against MAME as an oracle.
 
+> ## THIS BRANCH IS A DIFFERENT CORE. IT MUST NOT BE NAMED `Kaneko16`.
+>
+> This is the CALC3 board — Shogun Warriors and B.Rap Boys — and it ships as
+> its own core, **`Kaneko_T2`**, in its own repository. It is not a variant of
+> the Tier 1 core and the two cannot share a name.
+>
+> **Naming it `Kaneko16` would overwrite the Tier 1 core** on any card holding
+> both, and naming it `Kaneko16_T2` would be worse: MiSTer resolves
+> `<rbf>Kaneko16</rbf>` by scanning `_Arcade/cores/` for names beginning
+> `Kaneko16` followed by `.` **or `_`**, keeping the lexicographically
+> greatest — and `_` is 0x5F against `.` at 0x2E. So `Kaneko16_T2.rbf` would
+> silently WIN every Tier 1 load while leaving `Kaneko16.rbf` sitting there
+> looking fine. That exact trap once cost twelve hours of measuring a bitstream
+> nobody meant to be running.
+>
+> `Kaneko_T2` is safe in both directions: `<rbf>Kaneko16</rbf>` compares eight
+> characters and gets `Kaneko_T`, and `<rbf>Kaneko_T2</rbf>` compares nine and
+> gets `Kaneko16.`. Neither matches the other.
+>
+> The same applies to the MRAs: they name `<rbf>Kaneko_T2</rbf>` and ship from
+> this core's own repository, never alongside Tier 1's.
+
 **Status: all four Tier 1 games are playable on hardware.** Explosive Breaker,
 Magical Crystals, Blaze On and Wing Force run with graphics, input and sound,
 and all four are shipped. Wing Force is missing its OKI sound effects and its
