@@ -6520,6 +6520,33 @@ wrap. Reverting the reduction now gives 911,684 out-of-range fetches and
 Same family as every other default that returned a plausible value: the
 harness answered instead of failing.
 
+### The Z80's READS were being delivered as WRITES, 2026-08-25
+
+Measured on hardware, this core issued **120 YM2151 port writes a frame** where
+MAME issues about 15 -- and the write count was IDENTICAL to the status-poll
+count, 120 and 120. One write per read is not a busy driver. It is a read being
+delivered as a write, and every one of those carried whatever happened to be on
+the data bus into a YM register, about 105 times a frame.
+
+T80 is instantiated `T80s #(.Mode(0), .T2Write(1), .IOWait(1))`. `T2Write`
+moves the write strobe into T2, early enough to overlap the read window, and
+nothing downstream rejected it: `ym_wr_req` was `sel_ym && ~wr_n` and the OKI's
+was `sel_oki && ~wr_n`.
+
+Both now also require `rd_n` HIGH. A Z80 write cycle never asserts RD_n, so the
+guard cannot reject a real write; it rejects only a strobe appearing during a
+read. Applied to the YM2151, the OKI and the OKI bank register.
+
+Confirmed on hardware: the write count fell from `0078` to `000f`-ish,
+flickering between 8 and 15 a frame, which is MAME's rate.
+
+**This affects every game on the Blaze On board**, not only Wing Force, and it
+was invisible on all of them because the corruption is silent -- the counts
+upstream all looked correct and the chip simply produced less than it should.
+
+Not the whole of Wing Force's silence: the attract demo is still quiet with
+this fixed. But it is a real fault and it was corrupting the YM continuously.
+
 ### Wing Force: the OKI was routed 10x too quiet, 2026-08-25
 
 MAME, `wingforc()`:

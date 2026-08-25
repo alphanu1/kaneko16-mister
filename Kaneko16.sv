@@ -1022,13 +1022,33 @@ end
 reg  [7:0] lw_last;
 always @(posedge clk_sys) begin
 	if (rst_sys) begin
-		lw_cnt <= 16'd0; lw_lat <= 16'd0; lw_last <= 8'd0; lw_hist <= 16'd0;
+		lw_cnt <= 16'd0; lw_lat <= 16'd0; lw_last <= 8'd0; lw_hist <= 16'd0; lw_hist2 <= 16'd0;
+		lw_gap <= 16'd0; lw_gapl <= 16'd0; lw_arm <= 1'b0;
 	end else if (vbl_rise) begin
 		lw_lat <= lw_cnt; lw_cnt <= 16'd0;
+		if (lw_arm && !(&lw_gap)) lw_gap <= lw_gap + 16'd1;
 	end else if (z80_latch_we) begin
 		if (!(&lw_cnt)) lw_cnt <= lw_cnt + 16'd1;
 		lw_last <= z80_latch_din;      // the command byte itself
 		lw_hist <= {lw_hist[7:0], z80_latch_din};   // and the two before it
+		lw_hist2 <= {lw_hist2[7:0], lw_hist[15:8]};  // and the two before THOSE
+		// HOW LONG THE MUSIC IS ALLOWED TO PLAY.
+		//
+		// The commands, their order and their sender all match MAME exactly --
+		// 01,01,17,01 with 0x17 starting the attract audio. What cannot match
+		// is the INTERVAL: the oracle leaves about eighteen seconds between
+		// the 17 and the 01 that follows it, roughly 1080 frames, and this
+		// core is silent through a demo that is still drawing normally.
+		//
+		// So count frames from the start command to the stop. A small number
+		// here is the fault, stated as a number rather than inferred.
+		if (z80_latch_din == 8'h17) begin
+			lw_gap  <= 16'd0;
+			lw_arm  <= 1'b1;
+		end else if (z80_latch_din == 8'h01 && lw_arm) begin
+			lw_gapl <= lw_gap;        // frames the music was allowed
+			lw_arm  <= 1'b0;
+		end
 	end
 end
 
@@ -1050,6 +1070,12 @@ end
 // means 17 then 01, which would be something stopping the music after it
 // started.
 reg [15:0] lw_hist;
+// Four deep in total, across two rows. MAME's sequence into the attract demo
+// is 01, 05, 01, 01, 17 -- five commands in six seconds -- and two is not
+// enough to line ours up against it.
+reg [15:0] lw_hist2;
+reg [15:0] lw_gap, lw_gapl;   // frames between the 0x17 and the next 0x01
+reg        lw_arm;
 wire [7:0]  z80_latch_din;
 
 wire [15:0] z80_a;
@@ -2458,9 +2484,9 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 //
 // Read the fourth first. A large stall count with a low poll count is a
 // starved Z80, and everything else follows from it.
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? lw_tot
-                        : (screen_y < 9'd52) ? lw_hist
-                        : (screen_y < 9'd58) ? zlat_tot
+wire [15:0] oki_row_val = (screen_y < 9'd46) ? z80_ymw_lat
+                        : (screen_y < 9'd52) ? z80_ymr_lat
+                        : (screen_y < 9'd58) ? lw_tot
                                              : z80_okiw_lat;
 wire       oki_set = oki_row_val[oki_bit];
 
