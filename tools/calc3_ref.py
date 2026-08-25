@@ -78,6 +78,10 @@ class Calc3:
     def __init__(self, rom: bytes, keydata):
         self.rom = rom
         self.key = keydata
+        # The mode byte of the LAST table walked. A zero-length table is a
+        # control operation and the mode says which, so the sequencer needs it
+        # after decompress() has returned nothing.
+        self.last_mode = None
 
     def decompress(self, tabnum):
         """Return (header, data) for a table, or (None, None) for a blank one.
@@ -115,6 +119,8 @@ class Calc3:
         offset += blocksize_offset + 1
         length = d[offset + 0] | (d[offset + 1] << 8)
         offset += 2
+
+        self.last_mode = mode
 
         if length == 0:
             return None, None
@@ -192,12 +198,184 @@ class Calc3:
         return dat
 
 
+class Sequencer:
+    """mcu_run: the command loop that drives the decompressor.
+
+    Operates on a 64 KB MCU RAM image so the RTL can be diffed against it
+    directly. Everything MAME reaches through `m_mcuram[]` is a plain array
+    access here for the same reason it is there: those accesses bypass the
+    68000's address space, which is why no MAME write tap can see the command
+    handshake or the ROM checksum, and why they had to be read out of the
+    algorithm rather than measured.
+    """
+
+    def __init__(self, c3, ram=None, crc=0):
+        self.c3 = c3
+        self.ram = ram if ram is not None else bytearray(0x10000)
+        self.crc = crc
+        self.cmd_off = 0
+        self.write_cur = 0
+        self.dsw_addr = self.eeprom_addr = self.poll_addr = 0
+        self.checksum_addr = 0
+        self.placements = []          # (table, address, length) in order
+
+    # MCU RAM is 68000 memory: big-endian words, byte addressed from 0.
+    def rd16(self, off):
+        return (self.ram[off] << 8) | self.ram[off + 1]
+
+    def wr16(self, off, val):
+        self.ram[off] = (val >> 8) & 0xff
+        self.ram[off + 1] = val & 0xff
+
+    def command(self, value, eeprom=None):
+        """Run one command, as if the 68000 had just written `value`."""
+        if value == 0:
+            return
+        self.wr16(self.cmd_off, 0)        # handshake, before anything else
+
+        if value == 0xff:
+            self.dsw_addr      = self.rd16(2)
+            self.eeprom_addr   = self.rd16(4)
+            self.cmd_off       = self.rd16(6)
+            self.poll_addr     = self.rd16(8)
+            self.checksum_addr = self.rd16(10)
+            self.write_cur     = (self.rd16(12) << 16) | self.rd16(14)
+            self.wr16(self.checksum_addr, self.crc)
+            if eeprom is not None:
+                for i in range(0x40):
+                    self.wr16(self.eeprom_addr + 2 * i, eeprom[i])
+            return
+
+        # Any other value is a COUNT of transfers, each two parameter words.
+        for i in range(value):
+            p1 = self.rd16(self.cmd_off + 2 + 4 * i)
+            p2 = self.rd16(self.cmd_off + 4 + 4 * i)
+            self.transfer(tabnum=(p1 >> 8) & 0xff,
+                          unk=p1 & 0xff,
+                          writeback=p2)
+
+    def transfer(self, tabnum, unk, writeback):
+        hdr, data = self.c3.decompress(tabnum)
+        if data is None:
+            # A zero-length table is a control operation, not a transfer. Mode
+            # 06 resets the write pointer; MAME hardcodes 0x202000 and says so,
+            # and brapboys pulling table 1a to 202000 twice is that showing up.
+            if self.c3.last_mode == 0x06:
+                self.write_cur = 0x202000
+            return 0
+
+        addr = self.write_cur
+        for i, b in enumerate(data):
+            off = (addr + i) & 0xffff
+            self.ram[off] = b
+        self.placements.append((tabnum, addr, len(data)))
+
+        # The header goes back to the address the command named, and the
+        # 32-bit data pointer to that address displaced by a SIGNED unk.
+        self.ram[writeback & 0xffff] = hdr[0]
+        self.ram[(writeback + 1) & 0xffff] = hdr[1]
+        disp = unk - 256 if unk > 127 else unk
+        w = (writeback + disp) & 0xffff
+        self.wr16(w, (addr >> 16) & 0xffff)
+        self.wr16((w + 2) & 0xffff, addr & 0xffff)
+
+        # length here is the TABLE length, header included -- two more than the
+        # bytes written. Getting that wrong shifts every later table.
+        self.write_cur += (len(data) + 2 + 3) & ~1
+        return len(data)
+
+
+# The command streams MAME logged, with the write base its first table landed
+# on. Both are observations, not guesses: the commands come from the driver's
+# own "MCU executed command" log and the base from the first captured run.
+SELFTEST = {
+    "shogwarr": dict(
+        params=dict(dsw=0x0000, eeprom=0x0100, cmdbase=0x030a, poll=0x0000,
+                    checksum=0x0200, write=0x00207fe0),
+        commands=[(1, [0x19]), (3, [0x80, 0x41, 0x10]), (2, [0x11, 0x11])],
+        expect=[(0x19, 0x207fe0, 216), (0x80, 0x2080bc, 686),
+                (0x41, 0x20836e, 4102), (0x10, 0x209378, 1328),
+                (0x11, 0x2098ac, 1010)],
+    ),
+}
+
+
+def selftest(c3, rundir, romname):
+    setname = romname.split("-")[0]
+    spec = SELFTEST.get(setname)
+    if not spec:
+        # No plausible default: a set with no recorded stream cannot be
+        # checked, and saying so beats inventing one that passes.
+        print(f"no recorded command stream for {setname}")
+        return 1
+
+    p = spec["params"]
+    seq = Sequencer(c3)
+    seq.wr16(2, p["dsw"]);      seq.wr16(4, p["eeprom"])
+    seq.wr16(6, p["cmdbase"]);  seq.wr16(8, p["poll"])
+    seq.wr16(10, p["checksum"])
+    seq.wr16(12, (p["write"] >> 16) & 0xffff)
+    seq.wr16(14, p["write"] & 0xffff)
+    seq.command(0xff)
+
+    for count, tables in spec["commands"]:
+        for i, t in enumerate(tables):
+            seq.wr16(seq.cmd_off + 2 + 4 * i, t << 8)
+            seq.wr16(seq.cmd_off + 4 + 4 * i, 0x0400 + 2 * i)
+        seq.command(count)
+
+    fails = 0
+    for i, (t, a, l) in enumerate(spec["expect"]):
+        if i >= len(seq.placements):
+            print(f"  table {t:02x}: never placed"); fails += 1; continue
+        gt, ga, gl = seq.placements[i]
+        if (gt, ga, gl) != (t, a, l):
+            print(f"  table {gt:02x} at {ga:06x} len {gl} — "
+                  f"expected {t:02x} at {a:06x} len {l}")
+            fails += 1
+        else:
+            print(f"  table {gt:02x}  {ga:06x}  {gl:5d} bytes  ok")
+
+    # The addresses agreeing is not the same as the BYTES agreeing.
+    #
+    # Compare ONLY the runs this stream actually replayed. A longer capture
+    # holds runs from commands the recorded stream does not cover, and scoring
+    # those as failures makes the length of the MAME run decide whether the
+    # model passes -- a test that fails for a reason unrelated to the thing
+    # under test. They are reported as uncovered instead, which is a gap in
+    # the recorded stream and worth seeing.
+    placed = {a for _, a, _ in seq.placements}
+    uncovered = []
+    for f in sorted(rundir.glob(f"{setname}-run*.bin")):
+        base = int(f.name.split("-")[-1].split(".")[0], 16)
+        want = f.read_bytes()
+        if base not in placed:
+            uncovered.append((base, len(want)))
+            continue
+        got = bytes(seq.ram[base - 0x200000:base - 0x200000 + len(want)])
+        if got != want:
+            print(f"  RAM at {base:06x} differs from {f.name}")
+            fails += 1
+
+    if uncovered:
+        print(f"  {len(uncovered)} captured run(s) outside the recorded "
+              f"command stream, not checked:")
+        for base, n in uncovered:
+            print(f"    {base:06x}  {n} bytes")
+
+    print(f"calc3 selftest: {'PASS' if not fails else str(fails) + ' FAILS'}")
+    return 1 if fails else 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("rom")
     ap.add_argument("--table", type=int, default=None)
     ap.add_argument("--find-hex", default=None,
                     help="byte pattern to locate across every table")
+    ap.add_argument("--selftest", metavar="RUNDIR", default=None,
+                    help="replay the captured command stream and check every "
+                         "table lands where MAME put it, byte for byte")
     args = ap.parse_args()
 
     rom = Path(args.rom).read_bytes()
@@ -229,6 +407,9 @@ def main():
                 hits += 1
         print(f"{hits} table(s) contain the pattern")
         return
+
+    if args.selftest:
+        sys.exit(selftest(c3, Path(args.selftest), Path(args.rom).name))
 
     ok = blank = bad = 0
     for t in range(ntab + 1):

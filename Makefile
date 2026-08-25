@@ -419,6 +419,33 @@ frame: regions dump
 	  --Mdir build/obj_frame -o frame $(RTL) $(SIM_SV) sim/video/tb_kaneko_frame.cpp; exit 1; }
 	@./build/obj_frame/frame $(DUMP_DIR) $(ROM_DIR) $(SET)
 
+# --------------------------------------------------------------- CALC3 model
+# Checks tools/calc3_ref.py against MAME rather than against itself: capture
+# what MAME's CALC3 writes into MCU RAM, then replay the same command stream
+# through the model and diff the bytes AND the addresses.
+#
+# Not part of `make test`, for the same reason `frame` is not: it needs MAME
+# and a romset, neither of which is in the repository. CALC3_SET picks the
+# game; only sets with a recorded command stream can be checked, and the model
+# says so rather than inventing one that passes.
+CALC3_SET ?= shogwarr
+CALC3_DIR := build/mamerun/build/calc3
+
+.PHONY: calc3
+calc3:
+	@mkdir -p build/mamerun
+	@rm -f $(CALC3_DIR)/$(CALC3_SET)-run*.bin
+	@cd build/mamerun && mame -rompath $(ROMPATH) $(CALC3_SET) \
+	  -autoboot_script ../../tools/mame_calc3_writes.lua \
+	  -skip_gameinfo -autoboot_delay 0 -seconds_to_run 25 \
+	  -video none -sound none >/dev/null 2>&1
+	@cd build/mamerun && mame -rompath $(ROMPATH) $(CALC3_SET) \
+	  -autoboot_script ../../tools/mame_calc3_trace.lua \
+	  -skip_gameinfo -autoboot_delay 0 -seconds_to_run 8 \
+	  -video none -sound none >/dev/null 2>&1
+	@tools/calc3_ref.py $(CALC3_DIR)/$(CALC3_SET)-calc3rom.bin \
+	  --selftest $(CALC3_DIR)
+
 # ------------------------------------------------------------ multi-game gate
 # Hard rule 9: a change to shared video code must be checked against every
 # configured game, not just the one being worked on. Games differ in chip

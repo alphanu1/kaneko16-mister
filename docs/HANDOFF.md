@@ -199,9 +199,35 @@ why a stub cannot fake it. B.Rap Boys pulls table 1a twice to 202000 both
 times, so the mode 06 write-pointer reset MAME hardcodes for that game is
 real and observable rather than a guess.
 
-Still to write: the command sequencer around it (`mcu_run` — the four status
-bits, the 0xff init with its seven parameters, the ROM checksum, the 64 EEPROM
-words) and then the RTL, with `calc3_ref.py` as the golden model.
+**The command sequencer is written and checked too.** `Sequencer` in the same
+file does `mcu_run`: the 0xff init reading its seven parameters, the ROM
+checksum and EEPROM copy, then transfer commands, each decompressing a table to
+a rolling write pointer and writing the header and a 32-bit data pointer back
+to the address the command names.
+
+`make calc3` is the check. It captures what MAME writes, replays the same
+command stream through the model, and diffs both the ADDRESSES and the BYTES:
+
+    table 19  207fe0    216 bytes  ok
+    table 80  2080bc    686 bytes  ok
+    table 41  20836e   4102 bytes  ok
+    table 10  209378   1328 bytes  ok
+    table 11  2098ac   1010 bytes  ok
+
+The addresses are the part that confirms the pointer arithmetic — each is the
+previous plus `(length + 3) & ~1` where length counts the two header bytes.
+Getting that wrong shifts every later table, which is why the test checks
+placement and not only content. It fails when broken: changing the `+3` to `+4`
+gives 8 failures and exit 1.
+
+It also reports what it did NOT check. A 25-second capture holds four runs from
+commands the recorded stream does not cover, and they are listed rather than
+scored — otherwise the length of the MAME run decides whether the model passes.
+Those four start at 202000, which is the mode 06 write-pointer reset: MAME's
+comment calls that "reasonable for brapboys, not sure about shogwarr", and the
+capture shows shogwarr using it as well.
+
+Next is the RTL, with `calc3_ref.py` as the golden model.
 
 A diff rather than a write tap deliberately — a tap sees every access through
 the space and cannot say who made it, so the 68000's own use of that RAM would
