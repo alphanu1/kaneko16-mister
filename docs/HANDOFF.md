@@ -154,6 +154,27 @@ throughout: lint, nports-check and test.
 and it is what makes the games run at all — everything above is inert without
 it.
 
+**Its oracle exists, though, and that comes first.** `tools/mame_calc3_trace.lua`
+records what MAME's CALC3 puts into MCU RAM: a per-frame diff of the 64 KB at
+200000-20ffff, plus the final image and the `calc3_rom` the decompressor reads,
+so the RTL is fed exactly the bytes MAME was fed. On `shogwarr`, 8 seconds is
+475 frames and 134,554 changed words; the init burst lands at frame 188.
+
+A diff rather than a write tap deliberately — a tap sees every access through
+the space and cannot say who made it, so the 68000's own use of that RAM would
+be indistinguishable from the MCU's. The MCU writes in bursts from a timer
+callback between frames, which a once-a-frame sample captures whole.
+
+Read `kaneko_calc3.cpp` alongside it. `mcu_run` (1591) waits on all four
+command bits, then reads a command word: `0xff` is init — seven parameters out
+of MCU RAM, then the ROM checksum and 64 EEPROM words written back — and any
+other value is a count of table transfers. Each transfer runs
+`decompress_table` (1227), a byte-serial walk of a linked list of blocks with
+per-block mode, shift, subtract type, alternate swaps and an optional inline
+key table. It is sequential and runs once per command rather than per pixel,
+so it suits a slow state machine; it is also ~300 lines of C with many modes,
+and every one of them has to be diffed against this trace.
+
 `mcu_run` waits on all four command bits, then reads a command word from the
 shared 64 KB RAM. `0xff` is init: eight parameters read out, a ROM checksum
 written back, 64 words of EEPROM copied in. Every other command drives a
