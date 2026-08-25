@@ -35,8 +35,13 @@ module kaneko_calc3_table #(
     input  wire            rom_valid,
 
     // Key ROM, one cycle.
-    output logic [7:0]     key_sel,
-    output logic [5:0]     key_idx,
+    // COMBINATIONAL, so the key ROM -- which registers its output -- has the
+    // address a cycle before S_KEYWAIT looks at the answer. Driving these from
+    // registers set in S_DATA put the address and the read on the same edge,
+    // so S_KEYWAIT read the byte for the PREVIOUS index. Every keyed table
+    // came out shifted by one key byte.
+    output wire  [7:0]     key_sel,
+    output wire  [5:0]     key_idx,
     input  wire [7:0]      key_data,
     input  wire            key_absent,
 
@@ -47,9 +52,22 @@ module kaneko_calc3_table #(
     output logic [7:0]     mode,          // for the zero-length control cases
     output logic [15:0]    length,        // the block's length, header included
 
-    output logic [7:0]     out_byte,
-    output logic           out_valid,     // a table byte
-    output logic           hdr_valid      // one of the two header bytes
+    // The consumer writes each byte to memory at a latency it does not
+    // control, so it must be able to hold this off. Without that the core
+    // streams on regardless: bytes are dropped, and a `done` that pulses while
+    // the consumer is mid-write is missed and the transfer never ends.
+    // A single-cycle valid/ready handshake. `out_valid` is COMBINATIONAL from
+    // the state, and the byte is taken on the one edge where both are high.
+    //
+    // A registered pulse with a level ready is not enough and was wrong here:
+    // ready stays high through the cycle in which the consumer is still
+    // deciding to take the previous byte, so the core emits the next one into
+    // a consumer that has already moved on, and that byte is dropped. It
+    // showed up as a table short by a byte or two near its end.
+    input  wire            out_ready,
+    output wire  [7:0]     out_byte,
+    output wire            out_valid,     // a table byte
+    output wire            hdr_valid      // one of the two header bytes
 );
 
   // ------------------------------------------------------------------ walk
@@ -82,6 +100,7 @@ module kaneko_calc3_table #(
   );
 
   // --------------------------------------------------------------- decoder
+  wire  [7:0] dec_byte;
   logic [7:0] d_dat, d_inline, d_key, d_iidx;
   logic       d_half, d_odd;
 
@@ -90,7 +109,7 @@ module kaneko_calc3_table #(
       .shift(w_shift), .subtracttype(w_sub), .alternateswaps(w_alt),
       .inline_size(w_isize), .inline_byte(d_inline),
       .inline_idx(d_iidx), .inline_half(d_half),
-      .key_byte(d_key), .dat_out(out_byte)
+      .key_byte(d_key), .dat_out(dec_byte)
   );
 
   // ------------------------------------------------------------------ loop
@@ -107,6 +126,14 @@ module kaneko_calc3_table #(
 
   wire have_inline = (w_isize != 8'd0);
 
+  // Combinational, so the consumer sees the byte and its valid in the same
+  // cycle it asserts ready, and both sides advance on that one edge.
+  assign key_sel   = w_key;
+  assign key_idx   = i[5:0];
+  assign out_byte  = dec_byte;
+  assign out_valid = (state == S_EMIT) && (i >= 16'd2);
+  assign hdr_valid = (state == S_EMIT) && (i <  16'd2);
+
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       state       <= S_IDLE;
@@ -116,14 +143,10 @@ module kaneko_calc3_table #(
       done        <= 1'b0;
       bad_table   <= 1'b0;
       key_missing <= 1'b0;
-      out_valid   <= 1'b0;
-      hdr_valid   <= 1'b0;
     end else begin
       w_start   <= 1'b0;
       l_rom_rd  <= 1'b0;
       done      <= 1'b0;
-      out_valid <= 1'b0;
-      hdr_valid <= 1'b0;
 
       case (state)
         S_IDLE: if (start) begin
@@ -164,9 +187,7 @@ module kaneko_calc3_table #(
             d_half   <= half;
             state    <= S_AUX;
           end else begin
-            key_sel <= w_key;
-            key_idx <= i[5:0];
-            state   <= S_KEYWAIT;
+            state <= S_KEYWAIT;
           end
         end
 
@@ -191,10 +212,9 @@ module kaneko_calc3_table #(
 
         // dat_out is combinational from the registers set above, so it is
         // valid in this state.
-        S_EMIT: begin
-          if (i < 16'd2) hdr_valid <= 1'b1;
-          else           out_valid <= 1'b1;
-
+        // Hold here until the consumer takes the byte; the valid/ready pair
+        // above says when that happened.
+        S_EMIT: if (out_ready) begin
           if (i + 16'd1 >= w_len) begin
             busy <= 1'b0; done <= 1'b1; state <= S_IDLE;
           end else begin

@@ -73,6 +73,7 @@ int main(int argc, char** argv) {
   auto tick = [&] { d->clk = 0; d->eval(); d->clk = 1; d->eval(); };
 
   d->rst_n = 0; d->start = 0; d->rom_valid = 0; d->key_data = 0; d->key_absent = 0;
+  d->out_ready = 1;      // this testbench always takes a byte immediately
   for (int i = 0; i < 4; i++) tick();
   d->rst_n = 1;
 
@@ -90,6 +91,7 @@ int main(int argc, char** argv) {
 
     std::vector<uint8_t> got_hdr, got_out;
     int pending = -1, delay = 0;
+    int key_sel_d = 0, key_idx_d = 0;
     long guard = 0;
     bool finished = false;
 
@@ -102,8 +104,12 @@ int main(int argc, char** argv) {
         d->rom_valid = 1;
         pending = -1;
       }
-      // The key ROM is registered: answer the address presented last cycle.
-      const int ks = d->key_sel, ki = d->key_idx;
+      // The key ROM REGISTERS its output, so the answer this cycle belongs to
+      // the address presented on the previous one. Modelling it as
+      // combinational -- answering from the address showing right now -- hid a
+      // real one-cycle error in the core for a whole testbench.
+      const int ks = key_sel_d, ki = key_idx_d;
+      key_sel_d = d->key_sel; key_idx_d = d->key_idx;
       d->key_absent = (keys[ks][0] == -1);
       d->key_data = (keys[ks][0] == -1) ? 0 : (uint8_t)keys[ks][ki];
 

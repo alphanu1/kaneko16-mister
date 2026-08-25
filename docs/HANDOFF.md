@@ -337,10 +337,52 @@ The C reference is now one copy in `sim/mcu/calc3_model.h`, shared by both
 testbenches. It was duplicated, and two transcriptions of an algorithm this
 fiddly drift — the drift would read as an RTL bug.
 
-Still to write: the sequencer proper — command dispatch watching MCU RAM, the
-0xff init, the rolling write pointer, the header writeback, and the SDRAM
-plumbing that gives all of this its ROM reads and MCU RAM writes.
-`calc3_ref.py` is its golden model and `make calc3` is the check.
+**Fifth piece: `rtl/mcu/kaneko_calc3.sv`**, the command sequencer, and the
+device is now complete in simulation. It watches MCU RAM for a command once all
+four command registers have been written, clears the command word as the
+handshake, and runs either the `0xff` init — seven parameters, the ROM
+checksum, 64 words of EEPROM — or a run of table transfers, each writing its
+bytes at a rolling pointer and its header and 32-bit address back where the
+command says. The DSW goes in inverted at the top of every run, as MAME does.
+
+`tb_kaneko_calc3` drives it exactly as the 68000 does and compares the **whole
+64 KB** afterwards: 82 checks, 0 fails, 40 inits, 208 transfers, 3 pointer
+resets. Comparing the whole image matters — checking only the bytes expected to
+change would pass a device that also wrote somewhere it should not, and this is
+RAM the 68000 uses for everything else.
+
+**Three real faults, all found by that test:**
+
+- **Two branches assigned `ram_addr` in the same cycle**, so the second won and
+  the data pointer's low half was written over the *next* command's parameter
+  block. It also raised `ram_rd` and `ram_wr` together. The corruption looked
+  like the device fetching the wrong table, because by then it was.
+- **The key ROM was read one cycle too early.** It registers its output, but
+  the address was registered too, so the read landed on the same edge as the
+  address and returned the byte for the previous index — every keyed table
+  shifted by one key byte. The table's own fuzz had been *modelling the key ROM
+  as combinational*, so it passed throughout. It now models a registered ROM,
+  and still passes with the fix.
+- **A refused transfer still wrote back.** When a block names a key that does
+  not exist the device correctly emits nothing, but the sequencer stored a
+  header left over from the previous table and advanced the write pointer by
+  four — so every later table landed four bytes further along.
+
+The byte handover is a single-cycle valid/ready handshake. A registered pulse
+against a level ready was not enough: ready stays high through the cycle the
+consumer is still deciding to take the previous byte, so the next one was
+emitted into a consumer that had moved on and was dropped, leaving tables short
+near their end.
+
+**A missing key is tested directly, not fuzzed.** MAME calls `fatalerror()`
+there and stops the machine, so no real data ROM contains one — fuzzing it only
+compares two arbitrary choices. The directed test states the expectation: raise
+`key_missing`, write nothing, leave the pointer alone. The only writes it
+tolerates are the command-word handshake and the DSW.
+
+Still to do: wire the device into `Kaneko16.sv` — it needs SDRAM for both its
+data ROM reads and its MCU RAM accesses, which the 68000 also reaches on port
+10, so that sharing has to be arbitrated. Nothing here has run on hardware.
 
 A diff rather than a write tap deliberately — a tap sees every access through
 the space and cannot say who made it, so the 68000's own use of that RAM would

@@ -13,6 +13,7 @@
 #pragma once
 #include <cstdint>
 #include <vector>
+#include <utility>
 
 namespace calc3 {
 
@@ -130,5 +131,83 @@ inline bool decode(const std::vector<uint8_t>& rom, int tabnum,
   }
   return true;
 }
+
+// The command sequencer, mirroring tools/calc3_ref.py's Sequencer -- which is
+// the copy checked against MAME's real output by `make calc3`. Operates on a
+// 64 KB RAM image so the RTL can be diffed against it directly.
+struct Sequencer {
+  std::vector<uint8_t> ram = std::vector<uint8_t>(0x10000, 0);
+  const std::vector<uint8_t>* rom = nullptr;
+  const std::vector<std::vector<int>>* keys = nullptr;
+  uint16_t crc = 0;
+  int cmd_off = 0;
+  uint32_t write_cur = 0;
+  int dsw_addr = 0, eep_base = 0, poll_addr = 0, csum_addr = 0;
+  bool dsw_valid = false;
+  bool key_missing = false;
+  std::vector<std::pair<int,int>> placements;   // (table, address)
+
+  uint16_t rd16(int off) const {
+    return (uint16_t)((ram[off & 0xffff] << 8) | ram[(off + 1) & 0xffff]);
+  }
+  void wr16(int off, uint16_t v) {
+    ram[off & 0xffff] = (uint8_t)(v >> 8);
+    ram[(off + 1) & 0xffff] = (uint8_t)v;
+  }
+
+  // The DSW goes in inverted, at the top of every run, once init has named an
+  // address for it.
+  void run_dsw(uint8_t dsw) {
+    if (dsw_valid) ram[dsw_addr & 0xffff] = (uint8_t)~dsw;
+  }
+
+  void command(uint16_t value, const uint16_t* eeprom) {
+    if (value == 0) return;
+    wr16(cmd_off, 0);                       // handshake first
+
+    if (value == 0xff) {
+      dsw_addr  = rd16(2);  dsw_valid = true;
+      eep_base  = rd16(4);
+      cmd_off   = rd16(6);
+      poll_addr = rd16(8);
+      csum_addr = rd16(10);
+      write_cur = ((uint32_t)rd16(12) << 16) | rd16(14);
+      wr16(csum_addr, crc);
+      if (eeprom)
+        for (int i = 0; i < 0x40; i++) wr16(eep_base + 2 * i, eeprom[i]);
+      return;
+    }
+
+    for (int i = 0; i < (int)value; i++) {
+      const uint16_t p1 = rd16(cmd_off + 2 + 4 * i);
+      const uint16_t p2 = rd16(cmd_off + 4 + 4 * i);
+      transfer((p1 >> 8) & 0xff, (int8_t)(p1 & 0xff), p2);
+    }
+  }
+
+  void transfer(int tabnum, int disp, uint16_t writeback) {
+    Block b{};
+    std::vector<uint8_t> hdr, out;
+    if (!decode(*rom, tabnum, *keys, hdr, out, b)) { key_missing = true; return; }
+
+    if (b.length == 0) {
+      // A control operation. Mode 6 resets the write pointer.
+      if (b.mode == 0x06) write_cur = 0x00202000;
+      return;
+    }
+
+    for (size_t i = 0; i < out.size(); i++)
+      ram[(write_cur + i) & 0xffff] = out[i];
+    placements.push_back({tabnum, (int)write_cur});
+
+    ram[writeback & 0xffff] = hdr[0];
+    ram[(writeback + 1) & 0xffff] = hdr[1];
+    const int w = (writeback + disp) & 0xffff;
+    wr16(w, (uint16_t)(write_cur >> 16));
+    wr16((w + 2) & 0xffff, (uint16_t)write_cur);
+
+    write_cur += (uint32_t)((out.size() + 2 + 3) & ~1u);
+  }
+};
 
 }  // namespace calc3
