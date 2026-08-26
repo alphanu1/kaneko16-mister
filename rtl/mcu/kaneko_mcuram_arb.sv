@@ -61,6 +61,23 @@ module kaneko_mcuram_arb #(
   logic [MW-1:0]     grant;
   logic [MW-1:0]     last;        // who went last, for the rotation
 
+  // REQUESTS ARE LATCHED, because not every master holds one.
+  //
+  // kaneko_bus holds mcuram_req until its acknowledge, and kaneko_tilerom
+  // holds sdr_req until its own -- but kaneko_calc3 clears ram_rd and ram_wr
+  // at the top of every cycle, so its requests are ONE-CYCLE PULSES. An
+  // arbiter that only looks when it is idle drops any pulse that arrives while
+  // it is serving somebody else, and the master then waits forever for data
+  // that will never come. Both games hang on exactly that, and neither
+  // testbench could see it: each modelled a memory that was always free, so a
+  // pulse was always caught the moment it appeared.
+  //
+  // Setting on the request and clearing on the acknowledge serves both styles:
+  // a level that is still high when its access completes simply raises the
+  // pending bit again, which is a second access and is what a master holding
+  // its request through an acknowledge is asking for.
+  logic [NM-1:0] pend;
+
   // The next requester at or after `start`, searched in rotation order so no
   // master can be passed over twice while it is asking.
   function automatic [MW-1:0] pick(input [MW-1:0] from, input [NM-1:0] asking);
@@ -78,7 +95,7 @@ module kaneko_mcuram_arb #(
   endfunction
 
   wire [MW-1:0] next_start = MW'((int'(last) + 1) % NM);
-  wire          any_req    = |m_req;
+  wire          any_req    = |pend;
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -87,18 +104,25 @@ module kaneko_mcuram_arb #(
       m_ack <= '0;
       last  <= '0;
       grant <= '0;
+      pend  <= '0;
     end else begin
       m_ack <= '0;                     // single-cycle pulses
 
+      // Catch every request the moment it appears, whatever else is running.
+      pend <= pend | m_req;
+
       if (!busy) begin
         if (any_req) begin
-          grant  <= pick(next_start, m_req);
+          grant  <= pick(next_start, pend);
           s_req  <= 1'b1;
-          s_addr <= m_addr[pick(next_start, m_req)];
-          s_we   <= m_we  [pick(next_start, m_req)];
-          s_din  <= m_din [pick(next_start, m_req)];
-          s_be   <= m_be  [pick(next_start, m_req)];
+          s_addr <= m_addr[pick(next_start, pend)];
+          s_we   <= m_we  [pick(next_start, pend)];
+          s_din  <= m_din [pick(next_start, pend)];
+          s_be   <= m_be  [pick(next_start, pend)];
           busy   <= 1'b1;
+          // Taken, so it is no longer pending -- unless it arrives again this
+          // very cycle, which the OR above preserves.
+          pend   <= (pend | m_req) & ~(NM'(1) << pick(next_start, pend));
         end
       end else if (s_ack) begin
         s_req         <= 1'b0;

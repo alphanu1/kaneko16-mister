@@ -15,6 +15,13 @@
 //      requiring an even split.
 //   3. Only one access is ever in flight, which is what makes ordering on the
 //      shared RAM structural rather than hoped for.
+//   4. A master that PULSES its request for one cycle is served. kaneko_bus
+//      and kaneko_tilerom hold theirs until the acknowledge, but kaneko_calc3
+//      clears ram_rd and ram_wr at the top of every cycle, so its requests are
+//      one cycle wide. An arbiter that only looks when idle drops any pulse
+//      that lands while it is busy, and the master then waits forever. Master 1
+//      pulses here for exactly that reason -- when every master held its
+//      request, this testbench passed while both games hung on hardware.
 //
 // Each master uses its own address range. Not to dodge a hard case: a shared
 // address has no single right answer, since either master's write may
@@ -50,7 +57,7 @@ int main(int argc, char** argv) {
   d->rst_n = 1;
 
   struct Pend { bool busy = false; uint32_t addr = 0; bool we = false;
-                uint16_t din = 0; uint16_t want = 0; };
+                uint16_t din = 0; uint16_t want = 0; bool raised = false; };
   Pend p[NM];
 
   // Verilator packs the flattened arrays; set each master's slice by index.
@@ -81,6 +88,10 @@ int main(int argc, char** argv) {
     }
   };
 
+  // Master 1 pulses, as the CALC3 does; the others hold, as their real
+  // counterparts do.
+  auto pulses = [](int i) { return i == 1; };
+
   auto issue = [&](int i) {
     p[i].busy = true;
     p[i].addr = (uint32_t)(i * 32 + rng() % 32);   // one range per master
@@ -97,6 +108,11 @@ int main(int argc, char** argv) {
 
   for (long cyc = 0; cyc < 200000; cyc++) {
     for (int i = 0; i < NM; i++) if (!p[i].busy) issue(i);
+    // Drop the pulsing master's request one cycle after it was raised. If the
+    // arbiter has not latched it by then it is gone, which is the bug.
+    for (int i = 0; i < NM; i++)
+      if (pulses(i) && p[i].busy && p[i].raised) clear_req(i);
+    for (int i = 0; i < NM; i++) if (p[i].busy) p[i].raised = true;
 
     long inflight = 0;
     for (int i = 0; i < NM; i++) if (p[i].busy) inflight++;
@@ -152,6 +168,7 @@ int main(int argc, char** argv) {
         }
       }
       p[i].busy = false;
+      p[i].raised = false;
       clear_req(i);
     }
   }
