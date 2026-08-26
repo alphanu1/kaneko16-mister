@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Kaneko 16-bit arcade core for MiSTer FPGA — Copyright (C) 2026 alphanu1
 //
-// The OKI M6295 exactly as Kaneko16.sv wires it: jt6295 fed from SDRAM
+// The OKI M6295 exactly as KanekoCALC3.sv wires it: jt6295 fed from SDRAM
 // through kaneko_tilerom, with the bank arithmetic in between. jt6295 itself
 // is jotego's and is not under test; the integration around it is ours and
 // was not covered by anything until the core reached hardware with no sound.
@@ -26,7 +26,7 @@ module kaneko_oki_harness #(
     input  wire [7:0]  oki_din,
     output wire [7:0]  oki_dout,
 
-    input  wire        cen,           // 2 MHz enable from Kaneko16.sv
+    input  wire        cen,           // 2 MHz enable from KanekoCALC3.sv
     input  wire [7:0]  ym0_iob_out,   // bank select, YM2149 chip 0 port B
 
     output wire signed [13:0] oki_snd,
@@ -48,7 +48,7 @@ module kaneko_oki_harness #(
 );
     localparam [SDR_AW:1] OKI_BASE = SDR_AW'(24'h200000 >> 1);
 
-    // The same module Kaneko16.sv instantiates, so the bank map under test is
+    // The same module KanekoCALC3.sv instantiates, so the bank map under test is
     // the one that ships rather than a restatement of it.
     // max_bank is an INPUT now, not a parameter: it is (region - 0x20000) /
     // 0x20000 and differs per game — 7 for Explosive Breaker, 3 for Wing

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Kaneko 16-bit arcade core for MiSTer FPGA — Copyright (C) 2026 alphanu1
 #
-# Bootstrap upstream dependencies for the Kaneko16 core.
+# Bootstrap upstream dependencies for the KanekoCALC3 core.
 #
 #   tools/bootstrap.sh              read-only clones into third_party/
 #   tools/bootstrap.sh --fork       fork to your GitHub account first (needs gh)

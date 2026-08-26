@@ -40,7 +40,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # from your point of view -- check it before running this against a device.
 MISTER="${MISTER:-192.168.1.105}"
 MUSER="${MUSER:-root}"
-RBF="$ROOT/build/quartus/Kaneko16.rbf"
+RBF="$ROOT/build/quartus/KanekoCALC3.rbf"
 CORE_DIR="/media/fat/_Arcade/cores"
 MRA_DIR="/media/fat/_Arcade"
 
@@ -86,15 +86,15 @@ ssh "${SSHOPTS[@]}" "$MUSER@$MISTER" true \
   || die "cannot reach $MISTER. Is it powered on and on the network?"
 
 say "== core"
-scp "${SSHOPTS[@]}" -q "$RBF" "$MUSER@$MISTER:$CORE_DIR/Kaneko16.rbf"
+scp "${SSHOPTS[@]}" -q "$RBF" "$MUSER@$MISTER:$CORE_DIR/KanekoCALC3.rbf"
 
 # Verify rather than trust. A short or interrupted copy leaves a file that is
 # present, plausible and wrong, and the core then fails on hardware in a way
 # that looks like an RTL bug.
 want="$(md5sum "$RBF" | cut -d' ' -f1)"
-got="$(ssh "${SSHOPTS[@]}" "$MUSER@$MISTER" "md5sum $CORE_DIR/Kaneko16.rbf" | cut -d' ' -f1)"
+got="$(ssh "${SSHOPTS[@]}" "$MUSER@$MISTER" "md5sum $CORE_DIR/KanekoCALC3.rbf" | cut -d' ' -f1)"
 [ "$want" = "$got" ] || die "checksum mismatch: local $want, remote $got"
-echo "  Kaneko16.rbf  $want  ok"
+echo "  KanekoCALC3.rbf  $want  ok"
 
 if [ "$CORE_ONLY" = 0 ]; then
   shopt -s nullglob

@@ -425,7 +425,7 @@ between masters — a convincing-looking lie, already on record against
 
 ### It is wired in
 
-`Kaneko16.sv` now carries the device, its ROM feeder and the arbiter. The parts
+`KanekoCALC3.sv` now carries the device, its ROM feeder and the arbiter. The parts
 that needed a decision rather than a connection:
 
 **The command registers.** `kaneko_bus` decodes 280000, 290000, 2b0000 and

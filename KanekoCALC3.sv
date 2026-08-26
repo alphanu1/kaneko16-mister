@@ -74,7 +74,7 @@ assign VIDEO_ARY = video_rotated ? arx_base : ary_base;
 
 `include "build_id.v"
 localparam CONF_STR = {
-	"Kaneko16;;",
+	"KanekoCALC3;;",
 	"-;",
 	"O[8],Aspect ratio,4:3,16:9;",
 	"O[5:4],SDRAM capture,CL+4,CL+5,CL+3,CL+2;",
@@ -487,7 +487,7 @@ wire [63:0]       p5_dout = p_dout_bus[5];
 assign p67_ack  = {p_ack_bus[7],  p_ack_bus[6]};
 assign p67_dout = {p_dout_bus[7], p_dout_bus[6]};
 // Port 9, the CALC3 board's second OKI. These were used by u_oki2rom and never
-// declared; Quartus caught it as an implicit net because Kaneko16.sv sets
+// declared; Quartus caught it as an implicit net because KanekoCALC3.sv sets
 // `default_nettype none, which is the guard that makes the top level safe to
 // edit at all given it is outside the lint set.
 wire              p9_ack  = p_ack_bus[9];

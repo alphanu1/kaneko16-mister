@@ -201,7 +201,7 @@ SETS = {
 # Game id, handed to the core as MRA <rom index="1">. The core has one
 # bitstream for every game and selects its memory-map pages and video
 # constants from this. Adding a game means adding it here AND to the table in
-# Kaneko16.sv; the two are checked against each other by nothing, so they are
+# KanekoCALC3.sv; the two are checked against each other by nothing, so they are
 # listed adjacently in both files with the same order.
 GAME_ID = {
     "explbrkr": 0,
@@ -604,7 +604,7 @@ def build_mra(setname, rompath, outdir):
     # The TITLE, not the set id — this is what the MiSTer arcade menu shows.
     ET.SubElement(root, "name").text = info["name"]
     ET.SubElement(root, "setname").text = setname
-    ET.SubElement(root, "rbf").text = "Kaneko16"
+    ET.SubElement(root, "rbf").text = "KanekoCALC3"
     if info["year"]:
         ET.SubElement(root, "year").text = info["year"]
     if info["manufacturer"]:

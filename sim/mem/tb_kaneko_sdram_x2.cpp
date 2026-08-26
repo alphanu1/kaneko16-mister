@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
     // DEFAULT 3, not 0. Against sdram_model at 96 MHz only 3 (CL+5) reads
     // correct data -- 0, 1 and 2 fail every check, so a default of 0 meant
     // this harness could never pass and was left out of the gate instead.
-    // The BOARD wants 2; that divergence is real, documented in Kaneko16.sv,
+    // The BOARD wants 2; that divergence is real, documented in KanekoCALC3.sv,
     // and is the reason the capture depth is an OSD option at all. Sweep
     // with RDLAT=n.
     const int sel = getenv("RDLAT") ? atoi(getenv("RDLAT")) : 3;

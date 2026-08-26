@@ -6835,3 +6835,29 @@ of that claim were wrong — the other testbench did not instantiate the module,
 and the signals were not even connected. Check that the named test instantiates
 the thing it is said to cover; the citation costs nothing to write and nothing
 to leave stale.
+
+## The top level is `KanekoCALC3.sv` on this branch, 2026-08-26
+
+The Tier 2 core was renamed from `Kaneko16` to `KanekoCALC3` — project,
+bitstream, OSD title and the `<rbf>` tag its MRAs name.
+
+**So that it does not replace the Tier 1 core on a board.** This build cannot
+run the Tier 1 games at all: Tier 2 stripped VIEW2 to one chip and removed the
+Z80 and the YM chips, because that is what bought the block memory the CALC3
+needed. Deploying it as `Kaneko16.rbf` would have overwritten a working core
+with one that cannot run any of the four games that core plays, and the only
+way back is a rebuild from `main`.
+
+The two names cannot shadow each other. MiSTer resolves `<rbf>Kaneko16</rbf>`
+by keeping the lexicographically greatest file whose name begins `Kaneko16`
+followed by `.` or `_`; `KanekoCALC3.rbf` does not begin with `Kaneko16`, so
+neither core can win the other's load. The shadowing rule still applies within
+each name: never park a fallback as `KanekoCALC3_anything.rbf` in `cores/`.
+
+**The incident records above keep their original filenames on purpose.** They
+describe things that happened to a file called `Kaneko16.sv`, and rewriting the
+name in a record of what happened makes the record slightly false. Instructions
+that apply today were updated; history was not.
+
+Two names that are NOT the core and did not change: `/home/ben/roms/Kaneko16`,
+the ROM directory on this machine, and `kaneko16.cpp`, MAME's driver.

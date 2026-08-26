@@ -10,7 +10,7 @@ GND and writes a warning. Every window then decoded at page 0x00 — which is
 where the ROM lives — and the core shipped that way for eleven commits. One
 game worked, another was black, and the difference looked like an RTL bug.
 
-The warning was in build/quartus/Kaneko16.map.rpt on every single build:
+The warning was in build/quartus/KanekoCALC3.map.rpt on every single build:
 
   ; pg_wram ; Input ; Warning ; Declared by entity but not connected by
   ;                             instance ... the port will be connected to GND

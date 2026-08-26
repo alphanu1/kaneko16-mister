@@ -4,22 +4,22 @@
 #
 # Copy the core OFF a MiSTer, and report what is actually there.
 #
-#   tools/fetch_core.sh              -> build/fromboard/Kaneko16.rbf
+#   tools/fetch_core.sh              -> build/fromboard/KanekoCALC3.rbf
 #   MISTER=192.168.1.42 tools/fetch_core.sh
 #
 # WHY THIS EXISTS
 #
 # Nothing enters releases/ until a person has played THAT build, and the build
 # a person has played lives on their SD card -- not necessarily anywhere else.
-# build/quartus/Kaneko16.rbf is overwritten by the next `make quartus`, and on
+# build/quartus/KanekoCALC3.rbf is overwritten by the next `make quartus`, and on
 # 2026-08-24 the bitstream running on the board had no copy in the repository
 # and no recorded md5, so the one build known to work could not be released.
 # This is how that build gets recovered.
 #
-# It also lists everything in cores/ matching Kaneko16, because MiSTer resolves
-# <rbf>Kaneko16</rbf> by keeping the LEXICOGRAPHICALLY GREATEST name beginning
-# Kaneko16 followed by '.' or '_', and '_' (0x5F) beats '.' (0x2E). So
-# Kaneko16_GOOD.rbf silently wins over Kaneko16.rbf -- which once cost twelve
+# It also lists everything in cores/ matching KanekoCALC3, because MiSTer resolves
+# <rbf>KanekoCALC3</rbf> by keeping the LEXICOGRAPHICALLY GREATEST name beginning
+# KanekoCALC3 followed by '.' or '_', and '_' (0x5F) beats '.' (0x2E). So
+# KanekoCALC3_GOOD.rbf silently wins over KanekoCALC3.rbf -- which once cost twelve
 # hours of measuring a bitstream nobody meant to be running. If this prints
 # more than one file, the one the FPGA loads is the last one listed.
 #
@@ -59,20 +59,20 @@ say "== $MUSER@$MISTER"
 ssh "${SSHOPTS[@]}" "$MUSER@$MISTER" true \
   || die "cannot reach $MISTER. Is it powered on and on the network?"
 
-say "== every core matching Kaneko16 (the LAST is the one that loads)"
+say "== every core matching KanekoCALC3 (the LAST is the one that loads)"
 ssh "${SSHOPTS[@]}" "$MUSER@$MISTER" \
-  "ls -1 $CORE_DIR | grep -i '^Kaneko16' | sort" || true
+  "ls -1 $CORE_DIR | grep -i '^KanekoCALC3' | sort" || true
 echo
 ssh "${SSHOPTS[@]}" "$MUSER@$MISTER" \
-  "md5sum $CORE_DIR/Kaneko16*.rbf 2>/dev/null" || true
+  "md5sum $CORE_DIR/KanekoCALC3*.rbf 2>/dev/null" || true
 
-say "== copying $CORE_DIR/Kaneko16.rbf"
-scp "${SSHOPTS[@]}" -q "$MUSER@$MISTER:$CORE_DIR/Kaneko16.rbf" "$OUT/Kaneko16.rbf"
+say "== copying $CORE_DIR/KanekoCALC3.rbf"
+scp "${SSHOPTS[@]}" -q "$MUSER@$MISTER:$CORE_DIR/KanekoCALC3.rbf" "$OUT/KanekoCALC3.rbf"
 
 # Verify rather than trust: a short copy leaves a file that is present,
 # plausible and wrong.
-want="$(ssh "${SSHOPTS[@]}" "$MUSER@$MISTER" "md5sum $CORE_DIR/Kaneko16.rbf" | cut -d' ' -f1)"
-got="$(md5sum "$OUT/Kaneko16.rbf" | cut -d' ' -f1)"
+want="$(ssh "${SSHOPTS[@]}" "$MUSER@$MISTER" "md5sum $CORE_DIR/KanekoCALC3.rbf" | cut -d' ' -f1)"
+got="$(md5sum "$OUT/KanekoCALC3.rbf" | cut -d' ' -f1)"
 [ "$want" = "$got" ] || die "checksum mismatch: remote $want, local $got"
 say "== MRAs on the card, against releases/"
 # The MRA and the RBF are a pair whenever the SDRAM layout is involved: an
@@ -108,5 +108,5 @@ for f in "$ROOT"/releases/*.mra; do
 done
 
 say "== ok"
-echo "  $OUT/Kaneko16.rbf  $got"
-echo "  $(stat -c%s "$OUT/Kaneko16.rbf") bytes"
+echo "  $OUT/KanekoCALC3.rbf  $got"
+echo "  $(stat -c%s "$OUT/KanekoCALC3.rbf") bytes"

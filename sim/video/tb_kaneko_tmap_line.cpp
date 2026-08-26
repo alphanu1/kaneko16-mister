@@ -91,7 +91,7 @@ void feed() {
     // THE TILE ROM ANSWERS WITHIN THE CYCLE, THE VRAM DOES NOT.
     //
     //   kaneko_tilerom  `assign req_data = hit0 ? line0[...] : line1[...]`
-    //                   wired straight here in Kaneko16.sv, no register
+    //                   wired straight here in KanekoCALC3.sv, no register
     //   kaneko_vmem     `va_h <= ta_hi[vr_t]`, so genuinely a cycle late
     //
     // Both were answered from the previous cycle's address, which agreed with

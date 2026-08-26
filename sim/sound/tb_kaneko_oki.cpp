@@ -31,7 +31,7 @@ long cen_div = 0;
 
 void tick(int n = 1) {
     for (int i = 0; i < n; i++) {
-        // 2 MHz enable against a 48 MHz clock, as Kaneko16.sv generates it.
+        // 2 MHz enable against a 48 MHz clock, as KanekoCALC3.sv generates it.
         dut->cen = (cen_div == 0);
         cen_div  = (cen_div + 1) % 24;
         dut->clk = 0; dut->eval();

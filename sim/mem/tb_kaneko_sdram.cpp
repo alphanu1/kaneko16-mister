@@ -35,11 +35,11 @@
 #include <random>
 #include <vector>
 
-// MUST MATCH Kaneko16.sv's NPORTS. It did not: the core ran six ports and this
+// MUST MATCH KanekoCALC3.sv's NPORTS. It did not: the core ran six ports and this
 // tested five, so the OKI's port was the one port never arbitrated in a test —
 // and it was also the one port blen() forgot, which is how a single-word burst
 // reached hardware and made the sound path silent.
-// // Ten, matching Kaneko16.sv. The tenth port is the CALC3 board's second OKI.
+// // Ten, matching KanekoCALC3.sv. The tenth port is the CALC3 board's second OKI.
 static const int NP = 11;
 
 // The write port's index, DERIVED. This was a hardcoded 9 in six places; when

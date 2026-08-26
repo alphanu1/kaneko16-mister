@@ -44,7 +44,7 @@ module kaneko_sdram_harness #(
   // p10 is the CALC3 MCU RAM, the eleventh master. Unlike every other port it
   // both reads and writes, which is why it carries its own we/din/be rather
   // than sharing p0's. It is the ONLY writer among the masters, matching
-  // Kaneko16.sv, where s_we is zero for ports 0..9.
+  // KanekoCALC3.sv, where s_we is zero for ports 0..9.
   input  logic        p0_req, p1_req, p2_req, p3_req, p4_req, p5_req, p6_req, p7_req, p8_req, p9_req, p10_req,
   input  logic        p10_we,
   input  logic [15:0] p10_din,
@@ -74,7 +74,7 @@ module kaneko_sdram_harness #(
   output logic [23:0] mon_total
 );
 
-  //   // TEN, matching Kaneko16.sv. The tenth was added here first to measure the
+  //   // TEN, matching KanekoCALC3.sv. The tenth was added here first to measure the
   // sprite bitmap as a candidate master; the core has since caught up by
   // giving that port to the CALC3 board's second OKI, so the ahead-by-one
   // exemption is gone and nports-check demands an exact match again.
@@ -142,7 +142,7 @@ module kaneko_sdram_harness #(
     // bitmap being measured. A scanout read has a per-line deadline and
     // cannot be a slack master.
     //
-    // Kaneko16.sv uses 9'b1_0011_1111: tile feeders, 68000, OKI and the Z80
+    // KanekoCALC3.sv uses 9'b1_0011_1111: tile feeders, 68000, OKI and the Z80
     // urgent, the two sprite ROM ports slack because they have a whole frame.
     // Port 9 joins the urgent set for the same reason the tile feeders are in
     // it -- it must finish before the line it feeds is displayed.

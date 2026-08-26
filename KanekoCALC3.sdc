@@ -22,10 +22,10 @@
 set core_clks [get_clocks -nowarn {*|pll|pll_inst|altera_pll_i|*[*].*|divclk}]
 if {[llength $core_clks] == 0} {
     post_message -type error \
-      "Kaneko16.sdc: no core PLL clocks matched *|pll|pll_inst|altera_pll_i|*. \
+      "KanekoCALC3.sdc: no core PLL clocks matched *|pll|pll_inst|altera_pll_i|*. \
        The PLL hierarchy does not match sys_top.sdc, so its clock groups are a \
        silent no-op and this build is NOT timed. See rtl/pll/pll.v."
-    post_message -type error "Kaneko16.sdc: refusing to constrain a design that is not timed."
+    post_message -type error "KanekoCALC3.sdc: refusing to constrain a design that is not timed."
 }
 
 # THERE IS DELIBERATELY NO set_clock_groups FOR THE CORE PLL OUTPUTS.
@@ -35,7 +35,7 @@ if {[llength $core_clks] == 0} {
 # SDRAM, 32 MHz video, 25 MHz i960 ... nothing crosses between them". Both
 # halves were false here, and Quartus said so on every build:
 #
-#   Warning (332049): Ignored set_clock_groups at Kaneko16.sdc(36): Argument
+#   Warning (332049): Ignored set_clock_groups at KanekoCALC3.sdc(36): Argument
 #   -group with value [get_clocks {*|...|general[1].*|divclk}] contains zero
 #   elements
 #
@@ -58,7 +58,7 @@ set sdram_clk [get_clocks -nowarn {*|pll|pll_inst|altera_pll_i|general[0].*|divc
 set core_clk  [get_clocks -nowarn {*|pll|pll_inst|altera_pll_i|general[1].*|divclk}]
 if {[llength $sdram_clk] == 0 || [llength $core_clk] == 0} {
     post_message -type error \
-      "Kaneko16.sdc: expected TWO core PLL output counters, general[0] (96 MHz\
+      "KanekoCALC3.sdc: expected TWO core PLL output counters, general[0] (96 MHz\
        SDRAM) and general[1] (48 MHz core), and did not find both. Outputs with\
        identical frequency and phase share one counter -- see rtl/pll/pll.v."
 }

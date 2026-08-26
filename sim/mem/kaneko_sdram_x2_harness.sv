@@ -14,7 +14,7 @@
 
 module kaneko_sdram_x2_harness #(
     parameter int unsigned COL_BITS = 9,
-    // Ten, matching Kaneko16.sv. The tenth is the CALC3 board's second OKI.
+    // Ten, matching KanekoCALC3.sv. The tenth is the CALC3 board's second OKI.
     parameter int unsigned NP       = 11
 ) (
     input  logic clk,              // FAST: the controller clock

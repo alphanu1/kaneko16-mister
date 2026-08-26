@@ -131,7 +131,7 @@ quartus-check:
 # instead, before any of that.
 .PHONY: qsf-check
 # ------------------------------------------------------- port-count check
-# Kaneko16.sv's NPORTS and the harnesses' NP were independent constants that
+# KanekoCALC3.sv's NPORTS and the harnesses' NP were independent constants that
 # happened to match until a sixth port was added for the OKI. The SDRAM
 # harness kept testing five, so the OKI's port was never arbitrated in a test —
 # and it was also the port kaneko_sdram's per-port burst list forgot, which
@@ -147,8 +147,8 @@ quartus-check:
 # that names the thing it checks has to actually match the spelling used.
 .PHONY: nports-check
 nports-check:
-	@core=$$(sed -n 's/^localparam int unsigned NPORTS *= *\([0-9]*\);.*/\1/p' Kaneko16.sv); \
-	[ -n "$$core" ] || { echo "nports: could not read NPORTS from Kaneko16.sv"; exit 1; }; \
+	@core=$$(sed -n 's/^localparam int unsigned NPORTS *= *\([0-9]*\);.*/\1/p' KanekoCALC3.sv); \
+	[ -n "$$core" ] || { echo "nports: could not read NPORTS from KanekoCALC3.sv"; exit 1; }; \
 	bad=""; \
 	for f in $$(grep -rlE '\bNP(ORTS)? *= *[0-9]' sim/ 2>/dev/null); do \
 	  n=$$(sed -nE 's/.*\bNP(ORTS)? *= *([0-9]+).*/\2/p' "$$f" | head -1); \
@@ -157,17 +157,17 @@ nports-check:
 	  else \
 	    [ "$$n" = "$$core" ] || bad="$$bad $$f:$$n"; fi; done; \
 	if [ -n "$$bad" ]; then \
-	  echo "nports: Kaneko16.sv has NPORTS=$$core, but:"; \
+	  echo "nports: KanekoCALC3.sv has NPORTS=$$core, but:"; \
 	  for b in $$bad; do echo "        $${b%%:*} has NP=$${b##*:}"; done; \
 	  echo "        a port the harness does not drive is a port nothing tests."; \
 	  exit 1; fi
-	@echo "nports: NPORTS=$$(sed -n 's/^localparam int unsigned NPORTS *= *\([0-9]*\);.*/\1/p' Kaneko16.sv) everywhere (NPORTS-AHEAD-BY-ONE files: +1)"
+	@echo "nports: NPORTS=$$(sed -n 's/^localparam int unsigned NPORTS *= *\([0-9]*\);.*/\1/p' KanekoCALC3.sv) everywhere (NPORTS-AHEAD-BY-ONE files: +1)"
 
 qsf-check:
 	@miss=""; for f in $(RTL); do \
-	  grep -qF "$$f" Kaneko16.qsf || miss="$$miss $$f"; done; \
+	  grep -qF "$$f" KanekoCALC3.qsf || miss="$$miss $$f"; done; \
 	if [ -n "$$miss" ]; then \
-	  echo "quartus: these RTL files are not in Kaneko16.qsf:"; \
+	  echo "quartus: these RTL files are not in KanekoCALC3.qsf:"; \
 	  for f in $$miss; do echo "         $$f"; done; \
 	  echo "         add a SYSTEMVERILOG_FILE line for each."; exit 1; fi
 	@echo "qsf: all $(words $(RTL)) RTL file(s) in the project"
@@ -179,20 +179,20 @@ quartus: qsf-check nports-check lint test quartus-check
 	@[ -L db ] || { rm -rf db; ln -s build/db db; }
 	@[ -L incremental_db ] || { rm -rf incremental_db; ln -s build/incremental_db incremental_db; }
 	@# The four tools are run individually with --write_settings_files=off.
-	@# `quartus_sh --flow compile` REWRITES Kaneko16.qsf, which silently reset
+	@# `quartus_sh --flow compile` REWRITES KanekoCALC3.qsf, which silently reset
 	@# PROJECT_OUTPUT_DIRECTORY back to output_files and put every report in the
 	@# project root again — a build that obeys rule 10 once and then stops.
 	@set -e; for t in quartus_map quartus_fit quartus_asm; do \
 	  echo "== $$t"; \
 	  $(QUARTUS_BIN)/$$t --read_settings_files=on --write_settings_files=off \
-	    Kaneko16 -c Kaneko16 > build/$$t.log 2>&1 || { tail -20 build/$$t.log; exit 1; }; \
+	    KanekoCALC3 -c KanekoCALC3 > build/$$t.log 2>&1 || { tail -20 build/$$t.log; exit 1; }; \
 	  if [ "$$t" = quartus_map ]; then \
-	    tools/check_ports.py build/quartus/Kaneko16.map.rpt || exit 1; \
+	    tools/check_ports.py build/quartus/KanekoCALC3.map.rpt || exit 1; \
 	  fi; \
 	done
 	@# quartus_sta takes neither settings flag — it is a different front end.
 	@echo "== quartus_sta"
-	@$(QUARTUS_BIN)/quartus_sta Kaneko16 -c Kaneko16 > build/quartus_sta.log 2>&1 \
+	@$(QUARTUS_BIN)/quartus_sta KanekoCALC3 -c KanekoCALC3 > build/quartus_sta.log 2>&1 \
 	  || { tail -20 build/quartus_sta.log; exit 1; }
 	@# NEGATIVE SLACK MUST FAIL THE BUILD.
 	@# Quartus emits a perfectly good .rbf for a design that misses setup: the
@@ -211,8 +211,8 @@ quartus: qsf-check nports-check lint test quartus-check
 	    echo "         the .rbf is NOT usable; see build/quartus_sta.log"; \
 	    exit 1;; esac; \
 	  echo "quartus: timing closed, worst-case setup slack $$slack ns"
-	@echo "quartus: build/quartus/Kaneko16.rbf"
-	@grep -E "Logic utilization|Total block memory bits" build/quartus/Kaneko16.fit.summary || true
+	@echo "quartus: build/quartus/KanekoCALC3.rbf"
+	@grep -E "Logic utilization|Total block memory bits" build/quartus/KanekoCALC3.fit.summary || true
 
 
 # ------------------------------------------------------------------- lint
@@ -312,7 +312,7 @@ eetest:
 # --------------------------------------------------------------- release
 # The layout MiSTer expects, and what a tester copies to the SD card:
 #
-#   releases/Kaneko16_YYYYMMDD.rbf        the bitstream, dated
+#   releases/KanekoCALC3_YYYYMMDD.rbf        the bitstream, dated
 #   releases/<Game> (Region).mra          one primary MRA per game
 #   (no _alternatives/ at present — every supported set ships at the top level)
 #
@@ -323,7 +323,7 @@ eetest:
 #
 # `release` DOES NOT COPY THE BITSTREAM, and it used to.
 #
-# It ran `cp build/quartus/Kaneko16.rbf releases/...` unconditionally, so any
+# It ran `cp build/quartus/KanekoCALC3.rbf releases/...` unconditionally, so any
 # run of it silently promoted whatever had last been built -- verified or not
 # -- over the one somebody had actually played. That is exactly the failure
 # the releases/ rule exists to prevent, and it fired the first time this
@@ -345,14 +345,14 @@ release:
 
 .PHONY: release-rbf
 release-rbf:
-	@test -f build/quartus/Kaneko16.rbf || { \
+	@test -f build/quartus/KanekoCALC3.rbf || { \
 	  echo 'release-rbf: no bitstream — run make quartus first'; exit 1; }
-	@echo 'Promoting build/quartus/Kaneko16.rbf into releases/.'
-	@echo "md5: $$(md5sum build/quartus/Kaneko16.rbf | cut -d' ' -f1)"
+	@echo 'Promoting build/quartus/KanekoCALC3.rbf into releases/.'
+	@echo "md5: $$(md5sum build/quartus/KanekoCALC3.rbf | cut -d' ' -f1)"
 	@echo 'Only do this once a PERSON has played every supported game on THIS'
 	@echo 'build. One that lints, gates and closes timing is only a candidate.'
-	@d=$$(date +%Y%m%d); cp build/quartus/Kaneko16.rbf releases/Kaneko16_$$d.rbf; \
-	  echo "  releases/Kaneko16_$$d.rbf"
+	@d=$$(date +%Y%m%d); cp build/quartus/KanekoCALC3.rbf releases/KanekoCALC3_$$d.rbf; \
+	  echo "  releases/KanekoCALC3_$$d.rbf"
 	@echo '  then: git add releases/ && git ls-files releases/  <- CHECK TRACKED'
 
 # ---------------------------------------------------------------- deploy

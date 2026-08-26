@@ -205,7 +205,7 @@ module kaneko_cpumem_harness #(
     );
 
     // ---------------------------------------------------------------- CPU
-    // Copied from Kaneko16.sv, not paraphrased. A harness that divides the
+    // Copied from KanekoCALC3.sv, not paraphrased. A harness that divides the
     // clock differently to the core is testing a CPU the core does not have.
     reg [1:0] cpu_phase;
     always @(posedge clk) cpu_phase <= cpu_phase + 2'd1;
@@ -552,7 +552,7 @@ module kaneko_cpumem_harness #(
     );
 
     // ------------------------------------------------------------- OKI
-    // Identical wiring to Kaneko16.sv. ym0_iob_out is the bank register; the
+    // Identical wiring to KanekoCALC3.sv. ym0_iob_out is the bank register; the
     // YM2149s are not instantiated here, so it is held at the reset value the
     // chip would present until the game writes one.
     wire       oki_we;
