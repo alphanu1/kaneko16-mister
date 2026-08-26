@@ -35,6 +35,14 @@ module kaneko_cpumem_harness #(
 
     // Set to stop the video port requesting, to test the CPU uncontended.
     input  wire        video_idle,
+    // The boot RAM self-test, so a run can have it on or off.
+    input  wire        selftest_en,
+    output wire        selftest_done,
+    output wire        selftest_pass,
+    output wire [3:0]  selftest_stage,
+    output wire [15:0] selftest_got,
+    output wire [15:0] selftest_want,
+    output wire [3:0]  dbg_com_w,
 
     // OKI sound telemetry, the four links the hardware overlay counts.
     output logic [31:0] oki_wr_cnt,
@@ -169,11 +177,17 @@ module kaneko_cpumem_harness #(
         // Port 8 is the Z80's program fetch. This harness has no Z80, so it is
         // tied off -- but it must still BE here: kaneko_sdram takes NP ports and
         // a short bundle would silently shift every port down by one.
-        .p_req  ({1'b0, p67_req, p5_req, 3'b0, p1_req, p0_req}),
-        .p_addr ({{SDR_AW{1'b0}}, p67_addr, p5_addr, {3{{SDR_AW{1'b0}}}}, p1_addr, p0_addr}),
-        .p_din  ({8{16'd0}}),
-        .p_be   ({8{2'b11}}),
-        .p_we   (8'b0),
+        // BUILT PER PORT, not as a bundle. These were nine- and eight-entry
+        // concatenations against an eleven-port controller: they zero-extended
+        // in silence, which is the same shape as the five-bit p_we that once
+        // drove a nine-bit signal here. Port 10 in particular was tied off, so
+        // the MCU's RAM could never have been reached from this harness even
+        // once it was connected.
+        .p_req  (h_req),
+        .p_addr (h_addr),
+        .p_din  (h_din),
+        .p_be   (h_be),
+        .p_we   (h_we),
         .p_ack  (p_ack_bus),
         .p_dout (p_dout_bus),
         .dbg_req(), .dbg_grant()
@@ -339,7 +353,21 @@ module kaneko_cpumem_harness #(
     // area of zero height and a vblank_rise that never fires — the harness
     // then disagrees with hardware about the one thing being debugged.
     wire [9:0] CFG_H_VIS, CFG_V_VIS, CFG_V_START, CFG_HSYNC;
+    wire [SDR_AW:1] CFG_BASE_MCURAM;
     wire [8:0] CFG_H_START;
+
+    // THIS INSTANTIATION HAD DRIFTED, and nothing caught it: `make boot` is
+    // not part of `make test`, so it went on referring to ports the game table
+    // no longer has -- hit_we, mcu_we, oki2_we and friends, which belong to
+    // kaneko_bus -- and to calc3_io twice. It has been unbuildable since the
+    // MCU's RAM moved to SDRAM, and the only reason that was not noticed is
+    // that nothing runs it. Same shape as the x2 harness that sat orphaned.
+    assign selftest_done  = rt_done;
+    assign selftest_pass   = rt_pass;
+    assign selftest_stage  = rt_fail_stage;
+    assign selftest_got    = rt_fail_got;
+    assign selftest_want   = rt_fail_want;
+    assign dbg_com_w       = cpu_com_w;
 
     kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg (
         .clk(clk), .rst(rst),
@@ -349,29 +377,26 @@ module kaneko_cpumem_harness #(
         .pg_spr(PG_SPR), .pg_pal(PG_PAL), .pg_wdog(PG_WDOG),
         .pg_snd(PG_SND), .pg_in(PG_IN),
         .rom_1mb(ROM_1MB), .blazeon_io(BLAZEON_IO),
-        // The CALC3 board's decode. Driven from the game table like every
-        // other per-board fact, not tied off: an omitted input reads as GND
-        // and the board would silently answer at no address.
         .calc3_io(CFG_CALC3_IO),
-        .oki2_we(), .okibk_we(), .oki2_dout(8'h00),
-        // The hit calculator and MCU RAM are not modelled here: this harness
-        // exists to compare the 68000's bus trace against MAME during boot,
-        // and neither is touched before the game runs. Outputs left open,
-        // inputs driven to a defined value rather than omitted.
-        .hit_we(), .hit_addr(), .hit_dout(16'h0000),
-        .mcu_we(), .mcu_addr(), .mcu_dout(16'h0000),
         .base_trom0(), .base_trom1(), .base_spr(),
         .base_oki(CFG_OKI_BASE), .oki_max_bank(CFG_OKI_MAX_BANK),
-        .calc3_io(CFG_CALC3_IO), .base_oki2(), .oki2_max_bank(),
-        // Needed to build the input words, which are per GAME and not per
-        // board -- see the in_p1/in_system comment below.
+        .base_oki2(), .oki2_max_bank(),
+        .base_z80(), .has_z80(), .oki_on_z80(), .oki_cen_half(),
+        // The MCU's RAM and its data ROM: real bases, because this harness now
+        // runs that RAM through the arbiter and the SDRAM, which is the whole
+        // reason it exists again.
+        .base_mcuram(CFG_BASE_MCURAM), .base_calc3rom(),
+        .hit_type2(),
+        .irq_lvl_a(), .irq_lvl_b(), .irq_lvl_c(),
         .game_id(CFG_GAME_ID),
         .v2_dx(), .v2_dy(), .view2_2_pri(), .spr_pri_f(),
         .two_chips(), .spr_count(), .spr_xoffs(), .visarea_min_y(),
-        .wide_screen(),
+        .wide_screen(), .spr_elements(), .tile_colbase(),
+        .rot_en(), .rot_ccw(), .fliptype(),
+        .inputs_blazeon(), .in_unk_val(),
+        .id_force(2'd0), .id_force_en(1'b0),
         .h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
-        .v_start(CFG_V_START), .h_sync_start(CFG_HSYNC),
-        .inputs_blazeon(INPUTS_BLAZEON), .base_z80(), .has_z80()
+        .v_start(CFG_V_START), .h_sync_start(CFG_HSYNC), .h_start(CFG_H_START)
     );
 
     // THE REGISTER BANKS, WHICH THIS HARNESS DID NOT HAVE.
@@ -428,6 +453,90 @@ module kaneko_cpumem_harness #(
         .rd_addr(h_reg_addr), .rd_q(h_sprreg_q), .regs_flat()
     );
 
+    // ------------------------------------------------ MCU RAM, the real path
+    //
+    // The 68000 reaches it through the arbiter, the controller and the device
+    // model, exactly as the core does. It was not connected here at all, so
+    // mcuram_ack was tied to zero and the first access to that memory would
+    // have hung the CPU for ever -- which is the symptom the board shows, and
+    // is why this harness had to be able to run it before anything else.
+    wire            cpu_mcu_req, cpu_mcu_we, cpu_mcu_ack;
+    wire [SDR_AW:1] cpu_mcu_addr;
+    wire [15:0]     cpu_mcu_din;
+    wire [1:0]      cpu_mcu_be;
+    wire [63:0]     cpu_mcu_dout;
+    wire [3:0]      cpu_com_w;
+
+    // The boot self-test, as the core wires it -- gated, so a run can have it
+    // on or off and the difference is measurable here rather than on a board.
+    wire            rt_req, rt_we, rt_running, rt_done, rt_pass;
+    wire [SDR_AW:1] rt_addr;
+    wire [15:0]     rt_din, rt_fail_got, rt_fail_want;
+    wire [1:0]      rt_be;
+    wire [3:0]      rt_fail_stage;
+
+    kaneko_ramtest #(.SDR_AW(SDR_AW), .WORDS(16)) u_ramtest (
+        .clk(clk), .rst(rst),
+        .enable(rom_loaded && selftest_en), .base_mcuram(CFG_BASE_MCURAM),
+        .req(rt_req), .addr(rt_addr), .we(rt_we), .din(rt_din), .be(rt_be),
+        .ack(arb_ack[3]), .dout(arb_dout),
+        .running(rt_running), .done(rt_done), .pass(rt_pass),
+        .fail_stage(rt_fail_stage), .fail_got(rt_fail_got),
+        .fail_want(rt_fail_want)
+    );
+
+    wire [3:0]            arb_req  = {rt_req, 1'b0, 1'b0, cpu_mcu_req};
+    wire [3:0][SDR_AW:1]  arb_addr = {rt_addr, {SDR_AW{1'b0}}, {SDR_AW{1'b0}}, cpu_mcu_addr};
+    wire [3:0]            arb_we   = {rt_we, 1'b0, 1'b0, cpu_mcu_we};
+    wire [3:0][15:0]      arb_din  = {rt_din, 16'd0, 16'd0, cpu_mcu_din};
+    wire [3:0][1:0]       arb_be   = {rt_be, 2'b11, 2'b11, cpu_mcu_be};
+    wire [3:0]            arb_ack;
+    wire [63:0]           arb_dout;
+
+    assign cpu_mcu_ack  = arb_ack[0];
+    assign cpu_mcu_dout = arb_dout;
+
+    wire            p10_req, p10_we;
+    wire [SDR_AW:1] p10_addr;
+    wire [15:0]     p10_din;
+    wire [1:0]      p10_be;
+
+    kaneko_mcuram_arb #(.SDR_AW(SDR_AW), .NM(4)) u_mcu_arb (
+        .clk(clk), .rst_n(~rst),
+        .m_req(arb_req), .m_addr(arb_addr), .m_we(arb_we),
+        .m_din(arb_din), .m_be(arb_be),
+        .m_ack(arb_ack), .m_dout(arb_dout),
+        .s_req(p10_req), .s_addr(p10_addr), .s_we(p10_we),
+        .s_din(p10_din), .s_be(p10_be),
+        .s_ack(p_ack_bus[10]), .s_dout(p_dout_bus[10])
+    );
+
+    // One entry per port, so a short bundle cannot shift them.
+    wire [NPORTS-1:0]           h_req, h_we;
+    wire [NPORTS-1:0][SDR_AW:1] h_addr;
+    wire [NPORTS-1:0][15:0]     h_din;
+    wire [NPORTS-1:0][1:0]      h_be;
+    genvar hp;
+    generate
+      for (hp = 0; hp < NPORTS; hp = hp + 1) begin : g_hp
+        assign h_req[hp]  = (hp == 0)  ? p0_req
+                          : (hp == 1)  ? p1_req
+                          : (hp == 5)  ? p5_req
+                          : (hp == 6)  ? p67_req[0]
+                          : (hp == 7)  ? p67_req[1]
+                          : (hp == 10) ? p10_req : 1'b0;
+        assign h_addr[hp] = (hp == 0)  ? p0_addr
+                          : (hp == 1)  ? p1_addr
+                          : (hp == 5)  ? p5_addr
+                          : (hp == 6)  ? p67_addr[0]
+                          : (hp == 7)  ? p67_addr[1]
+                          : (hp == 10) ? p10_addr : {SDR_AW{1'b0}};
+        assign h_we[hp]   = (hp == 10) ? p10_we  : 1'b0;
+        assign h_din[hp]  = (hp == 10) ? p10_din : 16'd0;
+        assign h_be[hp]   = (hp == 10) ? p10_be  : 2'b11;
+      end
+    endgenerate
+
     kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
     (
         .clk(clk), .rst(cpu_rst),
@@ -436,6 +545,11 @@ module kaneko_cpumem_harness #(
 
         .rom_req(p1_req), .rom_addr(p1_addr),
         .rom_ack(p_ack_bus[1]), .rom_dout(p_dout_bus[1]),
+        .mcuram_req(cpu_mcu_req), .mcuram_addr(cpu_mcu_addr),
+        .mcuram_we(cpu_mcu_we), .mcuram_din(cpu_mcu_din),
+        .mcuram_be(cpu_mcu_be), .mcuram_ack(cpu_mcu_ack),
+        .mcuram_dout(cpu_mcu_dout), .base_mcuram(CFG_BASE_MCURAM),
+        .com_w(cpu_com_w),
 
         .vram0_we(vram0_we), .vram1_we(vram1_we),
         .spr_we(spr_we), .pal_we(pal_we),
