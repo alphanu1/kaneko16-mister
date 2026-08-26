@@ -42,6 +42,10 @@ module kaneko_calc3_harness #(
     output logic        busy,
     output logic        crc_ready,
     output logic        key_missing,
+    output logic [7:0]  dbg_cmds,
+    output logic [15:0] dbg_cmd,
+    output logic [3:0]  dbg_status,
+    output logic [15:0] dbg_crc,
 
     // Taps for the testbench: the decoded byte stream as it is handed over.
     // Comparing final RAM alone cannot say whether a wrong byte came from the
@@ -78,7 +82,9 @@ module kaneko_calc3_harness #(
       .ram_addr(ram_addr), .ram_rd(ram_rd), .ram_wr(ram_wr), .ram_be(ram_be),
       .ram_wdata(ram_wdata), .ram_rdata(ram_rdata), .ram_valid(ram_valid),
       .eep_addr(eep_addr), .eep_data(eep_data), .eep_rd(eep_rd),
-      .busy(busy), .crc_ready(crc_ready), .key_missing(key_missing)
+      .busy(busy), .crc_ready(crc_ready), .key_missing(key_missing),
+      .dbg_cmds(dbg_cmds), .dbg_cmd(dbg_cmd),
+      .dbg_status(dbg_status), .dbg_crc(dbg_crc)
   );
 
 endmodule

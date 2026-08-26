@@ -69,11 +69,22 @@ module kaneko_calc3 #(
 
     output logic        busy,
     output logic        crc_ready,
-    output logic        key_missing        // sticky: a block named a missing key
+    output logic        key_missing,       // sticky: a block named a missing key
+
+    // Probes for the debug overlay. This device cannot be watched any other
+    // way on hardware: everything it does happens in SDRAM the CPU also uses,
+    // so a memory dump cannot say who wrote what.
+    output logic [7:0]  dbg_cmds,          // commands executed, sticky count
+    output logic [15:0] dbg_cmd,           // the last command word read
+    output logic [3:0]  dbg_status,        // the four command-register bits
+    output logic [15:0] dbg_crc            // the data ROM checksum
 );
 
   // Only the two EEPROM-copy states touch that port.
   assign eep_rd = (state == S_INIT_EEP) || (state == S_INIT_EEP_W);
+
+  assign dbg_status = status;
+  assign dbg_crc    = crc;
 
   // ------------------------------------------------------------ status bits
   logic [3:0] status;
@@ -181,6 +192,8 @@ module kaneko_calc3 #(
       crc_ptr     <= '0;
       crc_ready   <= 1'b0;
       cmd_off     <= 16'd0;
+      dbg_cmds    <= 8'd0;
+      dbg_cmd     <= 16'd0;
       dsw_valid   <= 1'b0;
       t_bad_seen  <= 1'b0;
       key_missing <= 1'b0;
@@ -250,7 +263,9 @@ module kaneko_calc3 #(
         end
 
         S_CMD_RD: if (ram_valid) begin
-          cmd <= ram_rdata;
+          cmd     <= ram_rdata;
+          dbg_cmd <= ram_rdata;
+          if (ram_rdata != 16'd0) dbg_cmds <= dbg_cmds + 8'd1;
           if (ram_rdata == 16'd0) begin
             busy  <= 1'b0;
             state <= S_IDLE;

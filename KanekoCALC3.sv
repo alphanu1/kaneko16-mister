@@ -1090,6 +1090,10 @@ wire [15:0] c3_ram_wdata;
 wire [5:0]  c3_eep_addr;
 wire        c3_eep_rd;
 wire        c3_busy, c3_crc_ready, c3_key_missing;
+wire [7:0]  c3_dbg_cmds;
+wire [15:0] c3_dbg_cmd;
+wire [3:0]  c3_dbg_status;
+wire [15:0] c3_dbg_crc;
 
 kaneko_calc3 #(.AW(17), .ROM_BYTES(32'h20000)) u_calc3
 (
@@ -1114,8 +1118,23 @@ kaneko_calc3 #(.AW(17), .ROM_BYTES(32'h20000)) u_calc3
 
 	.eep_addr(c3_eep_addr), .eep_data(bk_q), .eep_rd(c3_eep_rd),
 
-	.busy(c3_busy), .crc_ready(c3_crc_ready), .key_missing(c3_key_missing)
+	.busy(c3_busy), .crc_ready(c3_crc_ready), .key_missing(c3_key_missing),
+	.dbg_cmds(c3_dbg_cmds), .dbg_cmd(c3_dbg_cmd),
+	.dbg_status(c3_dbg_status), .dbg_crc(c3_dbg_crc)
 );
+
+// Counted here rather than in the device: what matters is whether its accesses
+// are REACHING the memory, which is the arbiter's side of the boundary.
+reg [15:0] c3_ram_acc, c3_ram_acc_l, c3_rom_acc, c3_rom_acc_l;
+always @(posedge clk_sys) begin
+	if (vbl_rise) begin
+		c3_ram_acc_l <= c3_ram_acc; c3_ram_acc <= 16'd0;
+		c3_rom_acc_l <= c3_rom_acc; c3_rom_acc <= 16'd0;
+	end else begin
+		if (arb_ack[1]) c3_ram_acc <= c3_ram_acc + 16'd1;
+		if (arb_ack[2]) c3_rom_acc <= c3_rom_acc + 16'd1;
+	end
+end
 
 // The data ROM through the same byte feeder the OKI uses: an eight-byte cache
 // in front of one requester. The cache is not a nicety here -- the checksum
@@ -2423,12 +2442,35 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 //          waiting for something that never comes
 // The scratch block, pointed at the Z80 sound ports for Wing Force. The 68000
 // probe it carried is no longer needed: Magical Crystals boots.
-// The scratch block, pointed at SDRAM occupancy for the sprite-bitmap move.
-// All four are fast clocks out of the 768 a scanline lasts.
-wire [15:0] oki_row_val = (screen_y < 9'd46) ? occ_any_l
-                        : (screen_y < 9'd52) ? occ_tile_l
-                        : (screen_y < 9'd58) ? occ_spr_l
-                                             : occ_peak_l;
+// THE SCRATCH BLOCK, POINTED AT THE CALC3 MCU.
+//
+// This device cannot be watched any other way on hardware. Everything it does
+// happens in SDRAM the 68000 also uses, so a memory dump cannot say who wrote
+// what, and both games sit waiting on it -- a black screen looks identical
+// whether the MCU is dead, stalled, or answering with the wrong thing.
+//
+// Read the rows top to bottom:
+//
+//   1st  status and progress. Bit 15 crc_ready -- the checksum scan finished,
+//        which proves the arbiter and the SDRAM READ path work end to end.
+//        Bit 14 busy. Bit 13 key_missing (sticky; should stay dark).
+//        Bits 11-8 the four command-register bits, which want 1111 once the
+//        game has poked all four. Bits 7-0 commands executed, which wants to
+//        leave zero.
+//   2nd  the last command word read: 00ff is init, anything else is a
+//        transfer count.
+//   3rd  MCU RAM accesses acknowledged this frame.
+//   4th  data ROM bytes acknowledged this frame.
+//
+// A first row of 8000 with a dark second row means the scan finished and the
+// game has never written a command. All dark means the scan never finished,
+// and then the arbiter or the ROM feeder is where to look.
+wire [15:0] oki_row_val = (screen_y < 9'd46)
+                              ? {c3_crc_ready, c3_busy, c3_key_missing, 1'b0,
+                                 c3_dbg_status, c3_dbg_cmds}
+                        : (screen_y < 9'd52) ? c3_dbg_cmd
+                        : (screen_y < 9'd58) ? c3_ram_acc_l
+                                             : c3_rom_acc_l;
 wire       oki_set = oki_row_val[oki_bit];
 
 // Row 9, magenta: the RAW joystick word for pad 1, live — not a per-frame

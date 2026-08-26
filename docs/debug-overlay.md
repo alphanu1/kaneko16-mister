@@ -66,34 +66,39 @@ diagnosis. Screen `y` is given because it is the one thing that cannot drift.
 ## The tall yellow block is a scratch area
 
 It gets repurposed for whatever is under investigation. **It currently shows
-SDRAM occupancy per scanline**, for the sprite-bitmap move: the bitmap has to
-leave block RAM before Tier 3 is reachable, and whether SDRAM has room is the
-open question. Estimates say no, by a margin small enough to sit inside their
-own error, so this measures it instead.
-
-Every value is **fast clocks out of the 768 a scanline lasts**, counted in the
-96 MHz domain. Read them as a fraction of 768.
+the CALC3 MCU**, for the Tier 2 bring-up: both games sit waiting on that device,
+and a black screen looks identical whether it is dead, stalled, or answering
+with the wrong thing. It cannot be watched any other way on hardware — every
+byte it touches is in SDRAM the 68000 also uses, so a memory dump cannot say
+who wrote what.
 
 | Sub-row | y | Shows |
 |---|---|---|
-| 1st | 40-45 | **Total occupancy** — clocks with some port granted. This is the headline number. |
-| 2nd | 46-51 | The four **tile feeders**, ports 0, 2, 3, 4 |
-| 3rd | 52-57 | The two **sprite ROM** ports, 6 and 7 |
-| 4th | 58-63 | **Peak** total occupancy across the last frame, so one busy line cannot hide behind an average |
+| 1st | 40-45 | Status and progress — see the bit table below |
+| 2nd | 46-51 | The last command word read. `00ff` is init; anything else is a count of table transfers |
+| 3rd | 52-57 | MCU RAM accesses acknowledged this frame |
+| 4th | 58-63 | Data ROM bytes acknowledged this frame |
 
-Rough readings and what they mean for the move, given the bitmap needs roughly
-200 more clocks a line with write combining:
+The first sub-row, bit by bit, MSB on the left as always:
 
-| 1st sub-row | of 768 | verdict |
-|---|---|---|
-| under `0200` | under 42% | comfortable room |
-| `0200`-`0300` | 42-63% | fits, tight |
-| over `0300` | over 63% | the bitmap does not fit as designed |
+| Bit | Means |
+|---|---|
+| 15 | `crc_ready` — the checksum scan over the 128 KB data ROM finished. **This is the one that proves the arbiter and the SDRAM read path work end to end.** |
+| 14 | `busy` — a command is running |
+| 13 | `key_missing` — sticky. A block named a key that does not exist. Should stay dark |
+| 11-8 | The four command-register bits. Wants `1111` once the game has poked all four |
+| 7-0 | Commands executed. Wants to leave zero |
 
-The line boundary is a free-running divide-by-768 in the fast domain rather
-than anything sampled from the video timing. Both clocks come from one PLL at
-2:1, so 768 fast clocks is exactly a scanline and nothing needs crossing.
+Reading it:
 
-The block has previously carried the 68000's bus-address probe, the IPL
+| First row | Means |
+|---|---|
+| all dark | The checksum scan never finished — look at the arbiter or the ROM feeder, not at the MCU |
+| `8000`, second row dark | Scan finished, and the game has never written a command |
+| `8f00`+, second row `00ff` | The game asked for init and the MCU took it — the channel works |
+| bit 13 lit | A table named a missing key; the decode is wrong, not the plumbing |
+
+Previously this block carried SDRAM occupancy per scanline for the
+sprite-bitmap move, and before that the 68000's bus-address probe, the IPL
 counter, the OKI chain, the YM2151 register count and the VIEW2 scroll probe.
 Whenever it is repurposed, this table is updated in the same commit.
