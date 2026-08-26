@@ -75,19 +75,38 @@ who wrote what.
 | Sub-row | y | Shows |
 |---|---|---|
 | 1st | 40-45 | Status and progress — see the bit table below |
-| 2nd | 46-51 | The last command word read. `00ff` is init; anything else is a count of table transfers |
+| 2nd | 46-51 | **BUILD MARKER**, currently `c302`. Not a measurement — see below |
 | 3rd | 52-57 | **SDRAM port 10 REQUESTS** this frame, counted at the controller |
 | 4th | 58-63 | **SDRAM port 10 GRANTS** this frame, counted at the controller |
 
-The first sub-row, bit by bit, MSB on the left as always:
+**Read the build marker first.** Two builds in a row drew an identical block,
+and there was no way to tell a dead signal from a bitstream that never loaded —
+MiSTer keeps the running core until an MRA is loaded again. If the 2nd sub-row
+does not read `c302`, the core on the screen is not the core on the card and
+nothing else in the panel means anything. This is the visible marker the
+`Kaneko16_GOOD.rbf` incident called for and this branch had been going without.
+
+The first sub-row, bit by bit, MSB on the left as always. Bits 12 to 8 are
+**sticky**: they latch the first time the thing happens and never clear, which
+a per-frame counter cannot do — a counter that reads zero because its frame
+tick or its cross-domain read is wrong looks exactly like the event never
+happening, and that is the question being asked.
 
 | Bit | Means |
 |---|---|
 | 15 | `crc_ready` — the checksum scan over the 128 KB data ROM finished. **This is the one that proves the arbiter and the SDRAM read path work end to end.** |
 | 14 | `busy` — a command is running |
 | 13 | `key_missing` — sticky. A block named a key that does not exist. Should stay dark |
-| 11-8 | The four command-register bits. Wants `1111` once the game has poked all four |
-| 7-0 | Commands executed. Wants to leave zero |
+| 12 | the ROM feeder has asked for a line |
+| 11 | the MCU has asked for shared RAM |
+| 10 | the arbiter has asked the SDRAM port |
+| 9 | the controller has SEEN port 10 ask |
+| 8 | the controller has SERVED port 10 |
+| 7-4 | The four command-register bits. Wants `1111` once the game has poked all four |
+| 3-0 | Commands executed |
+
+Bits 12 down to 8 form a chain from the device outward, so the first dark one
+names the link that is broken.
 
 Reading it:
 

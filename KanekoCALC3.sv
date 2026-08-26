@@ -1411,6 +1411,27 @@ reg [9:0]  occ_div;
 // sees it asking and whether it ever serves it, which splits the fault cleanly:
 // requests without grants is the controller, no requests at all is everything
 // above it.
+// STICKY "has this ever happened" flags, in the core's own clock.
+//
+// Per-frame counters need the frame tick resynchronised into the SDRAM domain
+// and a cross-domain read of sixteen bits, and if either is wrong the row reads
+// zero -- which is indistinguishable from the thing never happening, and that
+// is the exact question being asked. A bit that latches once and never clears
+// cannot fail that way.
+reg ever_arb_req, ever_rom_req, ever_p10_req, ever_p10_gnt, ever_ram_req;
+always @(posedge clk_sys) begin
+	if (rst_sys) begin
+		ever_arb_req <= 1'b0; ever_rom_req <= 1'b0;
+		ever_p10_req <= 1'b0; ever_p10_gnt <= 1'b0; ever_ram_req <= 1'b0;
+	end else begin
+		if (c3_romp_req)       ever_rom_req <= 1'b1;   // the feeder asked
+		if (c3_ram_req)        ever_ram_req <= 1'b1;   // the MCU asked
+		if (p10_req)           ever_arb_req <= 1'b1;   // the arbiter asked
+		if (sdr_dbg_req[10])   ever_p10_req <= 1'b1;   // the controller saw it
+		if (sdr_dbg_grant[10]) ever_p10_gnt <= 1'b1;   // the controller served it
+	end
+end
+
 reg [15:0] p10_req_cnt, p10_req_l, p10_gnt_cnt, p10_gnt_l;
 always @(posedge clk_sdram) begin
 	if (vbl_rise_sdr) begin
@@ -2495,9 +2516,17 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 // game has never written a command. All dark means the scan never finished,
 // and then the arbiter or the ROM feeder is where to look.
 wire [15:0] oki_row_val = (screen_y < 9'd46)
-                              ? {c3_crc_ready, c3_busy, c3_key_missing, 1'b0,
-                                 c3_dbg_status, c3_dbg_cmds}
-                        : (screen_y < 9'd52) ? c3_dbg_cmd
+                              ? {c3_crc_ready, c3_busy, c3_key_missing,
+                                 ever_rom_req, ever_ram_req, ever_arb_req,
+                                 ever_p10_req, ever_p10_gnt,
+                                 c3_dbg_status, c3_dbg_cmds[3:0]}
+                        // A BUILD MARKER, not a measurement. Two builds in a
+                        // row drew an identical block, and there was no way to
+                        // tell a dead signal from a bitstream that never
+                        // loaded. This changes every build; if it does not
+                        // match what the deploy printed, nothing else in the
+                        // panel is worth reading.
+                        : (screen_y < 9'd52) ? 16'hc302
                         : (screen_y < 9'd58) ? p10_req_l
                                              : p10_gnt_l;
 wire       oki_set = oki_row_val[oki_bit];
