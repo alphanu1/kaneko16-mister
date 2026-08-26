@@ -107,9 +107,26 @@ module kaneko_ramtest #(
   wire [15:0] stage_data = pattern(stage, idx[7:0]);
   // What a correct read gives back: for a byte stage, the half just written
   // over the half the previous stage left there.
+  // The previous stages' patterns as WIRES, then indexed.
+  //
+  // Quartus 17.0 will not index the result of a function call --
+  // pattern(...)[15:8] is a syntax error there, though Verilator takes it. A
+  // construct 17.0 rejects is a construct to rewrite; reaching for the newer
+  // toolchain instead is what hard rule 7 exists to stop.
+  // Only the half each byte stage does NOT write is needed from the stage
+  // before it, so these are the halves rather than the whole words.
+  wire [15:0] prev3_full = pattern(3'd3, idx[7:0]);
+  wire [15:0] prev4_full = pattern(3'd4, idx[7:0]);
+  wire [7:0]  prev3_hi   = prev3_full[15:8];
+  wire [7:0]  prev4_lo   = prev4_full[7:0];
+  /* verilator lint_off UNUSEDSIGNAL */
+  wire [7:0]  prev3_lo_unused = prev3_full[7:0];
+  wire [7:0]  prev4_hi_unused = prev4_full[15:8];
+  /* verilator lint_on UNUSEDSIGNAL */
+
   wire [15:0] expect_w =
-      (stage == 3'd4) ? {pattern(3'd3, idx[7:0])[15:8], stage_data[7:0]}
-    : (stage == 3'd5) ? {stage_data[15:8], pattern(3'd4, idx[7:0])[7:0]}
+      (stage == 3'd4) ? {prev3_hi, stage_data[7:0]}
+    : (stage == 3'd5) ? {stage_data[15:8], prev4_lo}
                       : stage_data;
 
   always_ff @(posedge clk) begin
