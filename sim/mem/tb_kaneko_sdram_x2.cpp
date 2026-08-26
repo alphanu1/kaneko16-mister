@@ -118,12 +118,23 @@ int main(int argc, char** argv) {
     // zero and a comment sent the reader to tb_kaneko_sdram, which drives the
     // controller directly and never instantiates this adapter. The core's MCU
     // RAM writes through here, so the untested path was a live one.
+    long byte_writes = 0;
     printf("== write pass-through on port %d\n", WRP);
     for (int t = 0; t < 64; t++) {
         const uint32_t a = (uint32_t)(rng() % WORDS);
         const uint16_t v = (uint16_t)(rng() & 0xffff);
+        // BYTE writes as well as words, and this is the case that matters.
+        //
+        // Shogun Warriors verifies RAM before it does anything else: a loop at
+        // 0x02222e writes a byte, reads it back and compares, and branches away
+        // on a mismatch. MAME counts 262,378 BYTE writes into MCU RAM in the
+        // first six seconds. That RAM is in SDRAM in this core, so every one of
+        // them crosses here -- and this test only ever wrote whole words, so
+        // the path the game leans on hardest was the one path never exercised.
+        const int wmode = (int)(rng() % 3);       // 0 word, 1 low byte, 2 high
+        const uint8_t be = (wmode == 0) ? 3 : (wmode == 1) ? 1 : 2;
         set_addr(WRP, a);
-        d->pw_we = 1; d->pw_din = v; d->pw_be = 3;
+        d->pw_we = 1; d->pw_din = v; d->pw_be = be;
         d->p_req = (1u << WRP);
         long g = 0;
         while (!((d->p_ack >> WRP) & 1) && g++ < 100000) slow_tick();
@@ -133,7 +144,12 @@ int main(int argc, char** argv) {
         }
         d->p_req = 0; d->pw_we = 0;
         slow_tick();
-        ref[a] = v;
+        // A byte write leaves the other half alone, so the model has to as
+        // well or the readback compares against something that was never
+        // written.
+        if (be == 3)      ref[a] = v;
+        else if (be == 1) ref[a] = (uint16_t)((ref[a] & 0xff00) | (v & 0x00ff));
+        else              ref[a] = (uint16_t)((ref[a] & 0x00ff) | (v & 0xff00));
 
         // Read it back on a DIFFERENT port, so the check cannot be satisfied
         // by a value that never left the writing port's own registers.
@@ -145,11 +161,13 @@ int main(int argc, char** argv) {
         if (!(d->p_ack & 1)) { printf("  readback never acked\n"); fails++; break; }
         const uint16_t got = (uint16_t)((get_dout(0) >> (16 * (a & 3))) & 0xffff);
         checks++;
-        if (got != v) {
+        if (got != ref[a]) {
             if (fails < 10)
-                printf("  WRITE LOST addr %05x got %04x want %04x\n", a, got, v);
+                printf("  WRITE LOST addr %05x be %d got %04x want %04x\n",
+                       a, be, got, ref[a]);
             fails++;
         }
+        if (be != 3) byte_writes++;
         d->p_req = 0;
         slow_tick();
     }
@@ -222,6 +240,13 @@ int main(int argc, char** argv) {
                d->violations, d->v_flags);
         fails++;
     }
+
+    checks++;
+    if (!byte_writes) {
+        printf("  FAIL no BYTE writes were exercised\n");
+        fails++;
+    }
+    printf("   %ld byte writes crossed\n", byte_writes);
 
     printf("\ntb_kaneko_sdram_x2: %ld checks, %ld fails, %u violations\n",
            checks, fails, d->violations);

@@ -85,7 +85,10 @@ module kaneko_calc3_sys_harness #(
     output logic [15:0] dbg_crc,
     output logic [16:0] dbg_rom_addr,
     output logic [7:0]  dbg_rom_byte,
-    output logic        dbg_rom_valid
+    output logic        dbg_rom_valid,
+    // Straight from the device model: did it ever see one?
+    output int unsigned dbg_reads,
+    output int unsigned dbg_writes
 );
 
   logic clk_div;
@@ -255,7 +258,8 @@ module kaneko_calc3_sys_harness #(
           .clk(clk_fast), .cke(sd_cke), .cs_n(sd_cs_n), .ras_n(sd_ras_n),
           .cas_n(sd_cas_n), .we_n(sd_we_n), .ba(sd_ba), .a(sd_a),
           .dqm(sd_dqm), .dq_i(sd_dq_o), .dq_oe_i(sd_dq_oe), .dq_o(sd_dq_i),
-          .violations(), .v_flags()
+          .violations(), .v_flags(),
+          .reads_served(dbg_reads), .writes_served(dbg_writes)
       );
   end
   endgenerate

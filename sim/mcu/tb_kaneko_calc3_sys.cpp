@@ -100,6 +100,88 @@ int main(int argc, char** argv) {
 
   d->port_gate = 1;
 
+  // ---------------------------------------------- BYTE WRITES TO MCU RAM
+  //
+  // The single most load-bearing untested path in the core. Shogun Warriors
+  // verifies RAM before it does anything else: a loop at 0x02222e writes a
+  // byte, reads it back and compares, and branches away on a mismatch. MAME
+  // counts 262,378 BYTE writes into MCU RAM in the first six seconds. That RAM
+  // is in SDRAM here, on port 10, through a write path that has never run on
+  // hardware -- and if a byte does not read back, the game never leaves that
+  // loop and the screen stays black with a perfectly healthy 68000.
+  //
+  // Write through the CPU master and read back through the CPU master, so this
+  // depends on nothing but the path under test.
+  {
+    // WORD writes first. If these fail too, the fault is the write path as a
+    // whole rather than the byte enables, and the two want different fixes.
+    printf("word writes to MCU RAM through the real stack:\n");
+    long wbad = 0;
+    for (int t = 0; t < 16; t++) {
+      const uint32_t word = BASE_RAM + (rng() % 32);
+      const uint16_t val  = (uint16_t)rng();
+      d->cpu_addr = word; d->cpu_we = 1; d->cpu_din = val; d->cpu_be = 3;
+      d->cpu_req = 1;
+      long g = 0;
+      while (!d->cpu_ack && g++ < 100000) slow();
+      d->cpu_req = 0; d->cpu_we = 0;
+      slow();
+      d->cpu_addr = word; d->cpu_req = 1;
+      g = 0;
+      while (!d->cpu_ack && g++ < 100000) slow();
+      const uint16_t got = (uint16_t)((d->cpu_dout >> (16 * (word & 3))) & 0xffff);
+      d->cpu_req = 0;
+      slow();
+      checks++;
+      if (got != val) {
+        if (wbad < 4)
+          printf("  FAIL word %06x: wrote %04x read %04x\n", word, val, got);
+        wbad++; fails++;
+      }
+    }
+    printf("  %ld of 16 word writes read back wrong\n", wbad);
+    printf("  device model: %u reads, %u writes served\n",
+           d->dbg_reads, d->dbg_writes);
+
+    printf("byte writes to MCU RAM through the real stack:\n");
+    long bad = 0;
+    for (int t = 0; t < 64; t++) {
+      const uint32_t word = BASE_RAM + (rng() % 32);
+      const int      lane = (int)(rng() & 1);      // 0 = low byte, 1 = high
+      const uint8_t  val  = (uint8_t)rng();
+      const uint16_t din  = (uint16_t)(val | (val << 8));
+      // be[1] is the HIGH half, matching kaneko_bus's {~UDSn, ~LDSn}.
+      const uint8_t  be   = lane ? 2 : 1;
+
+      d->cpu_addr = word; d->cpu_we = 1; d->cpu_din = din; d->cpu_be = be;
+      d->cpu_req = 1;
+      long g = 0;
+      while (!d->cpu_ack && g++ < 100000) slow();
+      if (!d->cpu_ack) { printf("  FAIL byte write never acked\n"); fails++; break; }
+      d->cpu_req = 0; d->cpu_we = 0; d->cpu_be = 3;
+      slow();
+
+      d->cpu_addr = word; d->cpu_req = 1;
+      g = 0;
+      while (!d->cpu_ack && g++ < 100000) slow();
+      if (!d->cpu_ack) { printf("  FAIL readback never acked\n"); fails++; break; }
+      const uint16_t got16 =
+          (uint16_t)((d->cpu_dout >> (16 * (word & 3))) & 0xffff);
+      const uint8_t  got = lane ? (uint8_t)(got16 >> 8) : (uint8_t)got16;
+      d->cpu_req = 0;
+      slow();
+
+      checks++;
+      if (got != val) {
+        if (bad < 6)
+          printf("  FAIL word %06x %s byte: wrote %02x read %02x (word %04x)\n",
+                 word, lane ? "high" : "low", val, got, got16);
+        bad++; fails++;
+      }
+    }
+    printf("  %ld of 64 byte writes read back wrong\n", bad);
+  }
+
   int shown = 0;
   bool cpu_out = false;
   long cpu_done = 0, cyc = 0;
