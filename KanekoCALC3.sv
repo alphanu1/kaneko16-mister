@@ -184,6 +184,7 @@ wire [SDR_AW-1:0] BASE_Z80;
 wire [SDR_AW:1] BASE_MCURAM;
 wire [SDR_AW:1] BASE_CALC3ROM;
 wire        HIT_TYPE2;
+wire [2:0]  IRQ_LVL_A, IRQ_LVL_B, IRQ_LVL_C;
 wire        HAS_Z80;
 wire [2:0]  OKI_MAX_BANK;
 wire        OKI_ON_Z80;
@@ -253,6 +254,7 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 	.inputs_blazeon(INPUTS_BLAZEON),
 	.base_z80(BASE_Z80), .has_z80(HAS_Z80), .base_mcuram(BASE_MCURAM),
 	.base_calc3rom(BASE_CALC3ROM), .hit_type2(HIT_TYPE2),
+	.irq_lvl_a(IRQ_LVL_A), .irq_lvl_b(IRQ_LVL_B), .irq_lvl_c(IRQ_LVL_C),
 	.oki_max_bank(OKI_MAX_BANK), .oki_on_z80(OKI_ON_Z80),
 	.calc3_io(CALC3_IO), .base_oki2(OKI2_BASE), .oki2_max_bank(OKI2_MAX_BANK),
 	.in_unk_val(IN_UNK_VAL),
@@ -1370,13 +1372,15 @@ kaneko_irq u_irq
 (
 	.clk(clk_sys), .rst(cpu_rst),
 	.vcnt(vcnt),
+	.lvl_a(IRQ_LVL_A), .lvl_b(IRQ_LVL_B), .lvl_c(IRQ_LVL_C),
 	.fc(cpu_fc), .as(~ASn), .a_level(eab[3:1]),
 	.ipl_n(cpu_ipl_n), .vpa_n(cpu_vpa_n), .iack(cpu_iack)
 );
 
 // Interrupts acknowledged per frame. Zero while the game masks — explbrkr does
-// so for its first few seconds of self-test — then three every frame: IRQ5 at
-// scanline 224, IRQ3 at 144, IRQ4 at 64.
+// so for its first few seconds of self-test — then three every frame. The
+// LEVELS are per game: Tier 1 takes IRQ5 at scanline 224, IRQ3 at 144 and IRQ4
+// at 64; the CALC3 board takes 4, 2 and 3 at the same three lines.
 //
 // This is on screen because simulation cannot cheaply reach the point where the
 // game unmasks, and `make boot` can only force level 7 to prove the

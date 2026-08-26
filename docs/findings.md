@@ -6861,3 +6861,52 @@ that apply today were updated; history was not.
 
 Two names that are NOT the core and did not change: `/home/ben/roms/Kaneko16`,
 the ROM directory on this machine, and `kaneko16.cpp`, MAME's driver.
+
+## The CALC3 board's interrupts are one level lower, 2026-08-26
+
+Both Tier 2 games came up black with a 68000 that was plainly running --
+the overlay's bus-cycle row counted and its last bit flickered -- and an MCU
+that had finished reading its whole data ROM and was sitting idle. The
+command registers had never been written: `status` was zero, so the game
+had never asked the device for anything.
+
+It never got that far. `kaneko16.cpp`'s `shogwarr_interrupt` raises **4 at
+scanline 224, 3 at 64 and 2 at 144**. The Tier 1 boards raise **5, 4 and 3**
+at those same three lines. Every level is one lower, and **IRQ2 is a level
+the older boards never use at all**, so the core never generated it. The
+game's main handler was never called. `brapboys(config)` inherits that
+machine, so both games are affected.
+
+This is hard rule 9 in its purest form: same driver, same board, same three
+scanlines, different levels. Nothing about the video, the memory map or the
+MCU was wrong.
+
+The levels are now per game, from the game table, and they are INPUTS to
+`kaneko_irq` rather than parameters because the game is not known until the
+MRA's config byte arrives long after elaboration. Two details that had to
+change with them:
+
+- **The pending flags are named after the LINE, not the level.** They were
+  `pend5`, `pend4`, `pend3`, and that naming is what made the levels look
+  like a fixed property of the hardware.
+- **An acknowledge clears by matching the LEVEL**, not by a fixed case on
+  5/4/3. Such a case would leave the CALC3 board's IRQ2 pending for ever,
+  and the 68000 would take it again the instant it returned from it.
+
+`tb_kaneko_irq` now runs both boards, 119 checks. Pinning one level back to
+3 fails it in two places.
+
+**Two things about how this was found are worth keeping.**
+
+The overlay could not be read. Single bits in a fused four-row block cannot
+be counted off a photograph -- one reading came back saying the checksum
+scan had finished while every bit that says a memory access happened was
+dark, which cannot both be true. Each flag now fills a whole nibble.
+
+And **only about twelve blocks of a sixteen-block row are visible on the
+board**: the row is clipped at both ends, one block off the left and four
+off the right. A four-group layout had put "did the controller ever serve
+port 10" in the invisible fourth group, where it would have read dark
+whatever the truth was. That was found by the owner saying *"there is only
+11 there"* -- not by any reasoning here. **Ask what the screen actually
+shows before trusting a layout.**

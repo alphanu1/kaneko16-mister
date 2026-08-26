@@ -75,6 +75,13 @@ module kaneko_gamecfg #(
     // shogwarr's machine. Type 1 is a 2D box intersection, type 2 is three
     // axes with a mode register.
     output wire        hit_type2,
+    // THE INTERRUPT LEVELS ARE PER GAME. kaneko16.cpp raises 5, 4 and 3 at
+    // scanlines 224, 64 and 144 on the Tier 1 boards, and shogwarr_interrupt
+    // raises 4, 3 and 2 at the same three lines -- every level one lower, with
+    // IRQ2 a level the older boards never use. brapboys inherits that machine.
+    output wire [2:0]  irq_lvl_a,     // at scanline 224, the main one
+    output wire [2:0]  irq_lvl_b,     // at scanline 64
+    output wire [2:0]  irq_lvl_c,     // at scanline 144
 
     // ---- video
     output wire signed [10:0] v2_dx, v2_dy,
@@ -237,6 +244,10 @@ module kaneko_gamecfg #(
     assign base_calc3rom = SDR_AW'(25'h0020000);        // byte 0x0040000
 
     assign hit_type2 = is_bb;
+
+    assign irq_lvl_a = calc3_board ? 3'd4 : 3'd5;
+    assign irq_lvl_b = calc3_board ? 3'd3 : 3'd4;
+    assign irq_lvl_c = calc3_board ? 3'd2 : 3'd3;
 
     assign base_oki   = calc3_board ? SDR_AW'(25'h230000)  // byte 0x460000
                       : is_wf ? SDR_AW'(25'h280000)

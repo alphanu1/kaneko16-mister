@@ -44,6 +44,10 @@ void iack(int level) {
     ck("vpa_n released after iack", dut->vpa_n, 1);
 }
 
+// Does NOT touch the levels. They are a per-game configuration that outlives a
+// reset, and setting them here silently put the Tier 1 numbering back at the
+// start of the CALC3 pass -- which then measured Tier 1 and reported the RTL
+// broken.
 void reset() {
     dut->rst = 1; dut->vcnt = 0; dut->fc = 0; dut->as = 0; dut->a_level = 0;
     for (int i = 0; i < 4; i++) tick();
@@ -56,6 +60,9 @@ void reset() {
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
     dut = new Vkaneko_irq;
+    // Tier 1 levels: 5 at scanline 224, 4 at 64, 3 at 144. The CALC3
+    // board's 4/3/2 are a second pass at the end.
+    dut->lvl_a = 5; dut->lvl_b = 4; dut->lvl_c = 3;
 
     // ---------------------------------------------------- each level alone
     struct { int line; int level; const char* name; } LINES[] = {
@@ -137,6 +144,49 @@ int main(int argc, char** argv) {
     ck("iack low in a normal cycle", dut->iack, 0);
     dut->fc = 5; tick();
     ck("vpa_n released in supervisor data", dut->vpa_n, 1);
+
+    // ------------------------------------------- the CALC3 board's levels
+    //
+    // shogwarr_interrupt raises 4 at scanline 224, 3 at 64 and 2 at 144 --
+    // every level one below Tier 1, and IRQ2 is a level the older boards never
+    // use. Both CALC3 games inherit that machine. With the Tier 1 numbering the
+    // game's main handler is never called: the 68000 runs, never reaches the
+    // code that talks to its MCU, and the screen stays black with nothing else
+    // to see. This pass exists so that cannot come back.
+    dut->lvl_a = 4; dut->lvl_b = 3; dut->lvl_c = 2;
+    reset();
+
+    // ASCENDING, and one acknowledge each. goto_line walks the counter up to
+    // the target, so jumping to 144 first passes 64 and raises that interrupt
+    // as well -- which then outranks the one under test and the reading is of
+    // the wrong level entirely.
+    struct { int line; int level; const char* name; } CALC3[] = {
+        {  64, 3, "CALC3: scanline 64 -> IRQ3" },
+        { 144, 2, "CALC3: scanline 144 -> IRQ2" },
+        { 224, 4, "CALC3: scanline 224 -> IRQ4" },
+    };
+    for (auto& L : CALC3) {
+        goto_line(L.line);
+        ck(L.name, dut->ipl_n, (~L.level) & 7);
+        iack(L.level);
+        tick();
+        ck("CALC3: cleared by its acknowledge", dut->ipl_n, 7);
+    }
+
+    // The highest LEVEL wins, and the clear must match BY LEVEL rather than by
+    // a fixed case on 5/4/3 -- such a case would leave IRQ2 pending for ever
+    // and the 68000 would take it again the instant it returned.
+    reset();
+    goto_line(144);
+    goto_line(64);
+    goto_line(224);
+    ck("CALC3: IRQ4 outranks 3 and 2", dut->ipl_n, (~4) & 7);
+    iack(4); tick();
+    ck("CALC3: IRQ3 next", dut->ipl_n, (~3) & 7);
+    iack(3); tick();
+    ck("CALC3: IRQ2 last", dut->ipl_n, (~2) & 7);
+    iack(2); tick();
+    ck("CALC3: all cleared", dut->ipl_n, 7);
 
     std::printf("kaneko_irq: checks=%d fails=%d\n", checks, fails);
     delete dut;

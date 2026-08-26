@@ -32,6 +32,18 @@
 // the CPU acknowledges it. A one-cycle pulse would be missed whenever the 68000
 // happened to be masking interrupts, and the game would drop frames in a way
 // that looks like a timing bug anywhere but here.
+// THE LEVELS ARE PER GAME, and the CALC3 board uses different ones.
+//
+// kaneko16.cpp's shogwarr_interrupt raises 4 at scanline 224, 3 at 64 and 2 at
+// 144 -- every level one BELOW the Tier 1 games, and IRQ2 is a level the older
+// boards never use at all. brapboys inherits that machine, so both CALC3 games
+// want it. With the Tier 1 numbering the game's main handler is never called:
+// it sat with a running 68000 that never reached the code talking to its MCU,
+// and the screen stayed black with no other symptom.
+//
+// The lines are the same three on both boards; only the levels move. They are
+// INPUTS rather than parameters because the game is not known until the MRA's
+// config byte arrives, long after elaboration.
 module kaneko_irq #(
     parameter int unsigned LINE_IRQ5 = 224,
     parameter int unsigned LINE_IRQ4 = 64,
@@ -41,6 +53,12 @@ module kaneko_irq #(
     input  wire       rst,
 
     input  wire [9:0] vcnt,        // raw scanline, kaneko_video_timing
+
+    // The level raised at each of the three lines. Tier 1 is 5, 4, 3; the
+    // CALC3 board is 4, 3, 2.
+    input  wire [2:0] lvl_a,       // at LINE_IRQ5, the main one
+    input  wire [2:0] lvl_b,       // at LINE_IRQ4
+    input  wire [2:0] lvl_c,       // at LINE_IRQ3
 
     // 68000 side. fc is FC2:FC0; the 68000 drives 3'b111 for a CPU-space
     // cycle, which for this machine only ever means interrupt acknowledge.
@@ -69,33 +87,43 @@ module kaneko_irq #(
     always_ff @(posedge clk) iack_d <= iack;
     wire iack_edge = iack && !iack_d;
 
-    logic pend5, pend4, pend3;
+    // Named after the LINE that raises them, not after a level: the level is
+    // now a per-game input, and naming these pend5/pend4/pend3 is what made the
+    // levels look like a fixed property of the hardware.
+    logic pend_a, pend_b, pend_c;
 
     always_ff @(posedge clk) begin
         if (rst) begin
-            pend5 <= 1'b0; pend4 <= 1'b0; pend3 <= 1'b0;
+            pend_a <= 1'b0; pend_b <= 1'b0; pend_c <= 1'b0;
         end else begin
             // Raise first, clear second: a level re-raised on the very edge
             // that acknowledges it must survive, or the interrupt is lost
             // exactly when the machine is busiest.
             if (line_start) begin
-                if (vcnt == 10'(LINE_IRQ5)) pend5 <= 1'b1;
-                if (vcnt == 10'(LINE_IRQ4)) pend4 <= 1'b1;
-                if (vcnt == 10'(LINE_IRQ3)) pend3 <= 1'b1;
+                if (vcnt == 10'(LINE_IRQ5)) pend_a <= 1'b1;
+                if (vcnt == 10'(LINE_IRQ4)) pend_b <= 1'b1;
+                if (vcnt == 10'(LINE_IRQ3)) pend_c <= 1'b1;
             end
+            // Clear by MATCHING THE LEVEL, since which line owns a level is
+            // now per game. A fixed case on 5/4/3 would leave the CALC3
+            // board's level 2 pending for ever, and the 68000 would take that
+            // interrupt again the instant it returned from it.
             if (iack_edge) begin
-                case (a_level)
-                    3'd5:    pend5 <= 1'b0;
-                    3'd4:    pend4 <= 1'b0;
-                    3'd3:    pend3 <= 1'b0;
-                    default: ;   // no other level is ever raised here
-                endcase
+                if (a_level == lvl_a) pend_a <= 1'b0;
+                if (a_level == lvl_b) pend_b <= 1'b0;
+                if (a_level == lvl_c) pend_c <= 1'b0;
             end
         end
     end
 
-    // Highest pending level wins, encoded active-low for the 68000.
-    wire [2:0] level = pend5 ? 3'd5 : pend4 ? 3'd4 : pend3 ? 3'd3 : 3'd0;
+    // Highest pending LEVEL wins -- compared as numbers, because the mapping
+    // from line to level is per game and the highest line is not the highest
+    // level on every board.
+    wire [2:0] la = pend_a ? lvl_a : 3'd0;
+    wire [2:0] lb = pend_b ? lvl_b : 3'd0;
+    wire [2:0] lc = pend_c ? lvl_c : 3'd0;
+    wire [2:0] lab   = (la >= lb) ? la : lb;
+    wire [2:0] level = (lab >= lc) ? lab : lc;
     assign ipl_n = ~level;
 
     // Autovector. The board has no vector generator, so every acknowledge is
