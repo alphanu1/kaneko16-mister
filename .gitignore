@@ -148,6 +148,9 @@ obj_dir/
 # MRA to carry. tools/gen_calc3_keys.py regenerates them.
 !rtl/mcu/calc3_keys.hex
 !rtl/mcu/calc3_keyidx.hex
+# Same shape: EEPROM defaults from MAME's driver, not from any romset, so
+# there is nothing for an MRA to carry. tools/gen_eeprom_defaults.py makes it.
+!rtl/io/eeprom_defaults.hex
 
 # ------------------------------------------------------------------ editor
 # Shared project settings are committed; everything else under .vscode/ is not.

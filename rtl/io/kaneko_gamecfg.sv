@@ -70,6 +70,11 @@ module kaneko_gamecfg #(
     // stream, and check_bases.py holds the two in step.
     output wire [SDR_AW:1] base_mcuram,
     output wire [SDR_AW:1] base_calc3rom,
+    // The hitbox calculator is the same chip on both CALC3 games and a
+    // DIFFERENT DEVICE: brapboys(config) calls set_type(2) after inheriting
+    // shogwarr's machine. Type 1 is a 2D box intersection, type 2 is three
+    // axes with a mode register.
+    output wire        hit_type2,
 
     // ---- video
     output wire signed [10:0] v2_dx, v2_dy,
@@ -230,6 +235,8 @@ module kaneko_gamecfg #(
     // it stays a named base rather than a constant so it cannot quietly become
     // one if a third board arrives with a different layout.
     assign base_calc3rom = SDR_AW'(25'h0020000);        // byte 0x0040000
+
+    assign hit_type2 = is_bb;
 
     assign base_oki   = calc3_board ? SDR_AW'(25'h230000)  // byte 0x460000
                       : is_wf ? SDR_AW'(25'h280000)

@@ -451,10 +451,40 @@ where a stolen read only gives the MCU a stale word on a boot where the HPS
 happens to be loading at the same instant. `eep_rd` says when the MCU is using
 it rather than muxing on the address alone.
 
-Still to do: **the hit calculator is type 1 only, and B.Rap Boys needs type 2**
-(`brapboys(config)` sets it, along with its own EEPROM defaults). That gap is
-`kaneko_hit.sv`'s own header and predates this work. Neither game's EEPROM
-defaults are loaded yet either.
+**Both remaining gaps are closed.**
+
+`rtl/io/kaneko_hit2.sv` is the type-2 hitbox calculator. Same chip as Shogun
+Warriors' and a different device: type 1 is a 2D box intersection, type 2 is
+three axes with a mode register that changes how each reads its position and
+size, and a flags word built from nine comparisons. `brapboys(config)` calls
+`set_type(2)` after inheriting shogwarr's machine — hard rule 9 in one line,
+since both games sit on the same board. Both calculators are instantiated and
+the game picks; only the write strobe is steered, so the unselected one never
+sees a write.
+
+Fuzzed at 1,260,000 checks, 0 fails, with 7,797 overlapping cases and 29,826
+misses — the values are clustered small most of the time on purpose, because a
+uniform 16-bit spread almost never makes two boxes meet and the overlap paths
+would go untested. **Every register has two write addresses and the pairs
+interleave** (x1po at 0x00 and 0x28, x1so at 0x04 and 0x2c, z1po at 0x38 and
+0x50), so the fuzz writes through both at random: 27,767 alias writes. Pointing
+one alias at the wrong register fails by trial 16.
+
+**EEPROM defaults** are loaded for both games, from
+`tools/gen_eeprom_defaults.py`. They matter on a first boot where the HPS has no
+saved file, and B.Rap Boys' array is not just title text — it carries coinage,
+difficulty and a service counter, so an erased 0xffff device is not the same as
+a defaulted one.
+
+Two details worth keeping. The generator **strips block comments first**:
+`kaneko16.cpp` carries two arrays named `shogwarr_default_eeprom`, an earlier
+one commented out with the note that it "looks corrupt, some of the text is
+wrong", and the live one below it — a parser taking the first match would take
+the corrupt one, and both contain readable text, so nothing would look wrong.
+And the load runs **when the ROM download finishes, not at reset**: `game_id`
+arrives from the MRA over ioctl long after reset, so at reset no game looks like
+one with defaults. That is the same late-config trap this core has already paid
+for once.
 
 ### It builds
 

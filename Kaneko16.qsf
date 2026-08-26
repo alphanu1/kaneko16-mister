@@ -120,6 +120,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/mcu/kaneko_mcuram_arb.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/mem/kaneko_vmem.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/kaneko_bus.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/io/kaneko_hit.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/io/kaneko_hit2.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/io/kaneko_gamecfg.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/kaneko_irq.sv
 set_global_assignment -name SYSTEMVERILOG_FILE third_party/fx68k/hdl/fx68k.sv
