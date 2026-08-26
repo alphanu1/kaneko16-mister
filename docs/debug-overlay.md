@@ -76,8 +76,8 @@ who wrote what.
 |---|---|---|
 | 1st | 40-45 | Status and progress — see the bit table below |
 | 2nd | 46-51 | The last command word read. `00ff` is init; anything else is a count of table transfers |
-| 3rd | 52-57 | MCU RAM accesses acknowledged this frame |
-| 4th | 58-63 | Data ROM bytes acknowledged this frame |
+| 3rd | 52-57 | **SDRAM port 10 REQUESTS** this frame, counted at the controller |
+| 4th | 58-63 | **SDRAM port 10 GRANTS** this frame, counted at the controller |
 
 The first sub-row, bit by bit, MSB on the left as always:
 
@@ -93,7 +93,7 @@ Reading it:
 
 | First row | Means |
 |---|---|
-| all dark | The checksum scan never finished — look at the arbiter or the ROM feeder, not at the MCU |
+| all dark | The checksum scan never finished. The 3rd and 4th sub-rows say where: requests with no grants is the controller; no requests at all is everything above it |
 | `8000`, second row dark | Scan finished, and the game has never written a command |
 | `8f00`+, second row `00ff` | The game asked for init and the MCU took it — the channel works |
 | bit 13 lit | A table named a missing key; the decode is wrong, not the plumbing |

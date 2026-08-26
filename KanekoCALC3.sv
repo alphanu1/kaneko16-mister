@@ -593,7 +593,14 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(700),
                // sound CPU stalled with its clock enable held low.
                // Bit 9 is the second OKI, urgent for the same reason bit 5
                // is: a starved sample fetch is audible.
-               .URGENT(10'b11_0011_1111)) u_sdram
+               // ELEVEN BITS, one per port. This was a 10-bit literal after
+               // NPORTS went to 11 for the CALC3's port, so bit 10 was decided
+               // by zero-extension rather than by anybody. The MCU can wait --
+               // it is not real time, unlike the sample and opcode fetches --
+               // so non-urgent is the right answer, but it is now the stated
+               // one. Bits 6 and 7 are the sprite ROM, also deliberately not
+               // urgent.
+               .URGENT(11'b0_11_0011_1111)) u_sdram
 (
 	.clk(clk_sdram), .rst_n(pll_locked), .ready(mem_ready),
 	// THE FIRST OSD POSITION IS THE DEFAULT AND MUST WORK ON THE BOARD.
@@ -1399,6 +1406,28 @@ end
 reg [15:0] occ_any, occ_tile, occ_spr, occ_peak;
 reg [15:0] occ_any_l, occ_tile_l, occ_spr_l, occ_peak_l;
 reg [9:0]  occ_div;
+// Port 10 is the CALC3's, and it had never been used on hardware before this
+// branch -- neither as a read nor a write. These two say whether the controller
+// sees it asking and whether it ever serves it, which splits the fault cleanly:
+// requests without grants is the controller, no requests at all is everything
+// above it.
+reg [15:0] p10_req_cnt, p10_req_l, p10_gnt_cnt, p10_gnt_l;
+always @(posedge clk_sdram) begin
+	if (vbl_rise_sdr) begin
+		p10_req_l <= p10_req_cnt; p10_req_cnt <= 16'd0;
+		p10_gnt_l <= p10_gnt_cnt; p10_gnt_cnt <= 16'd0;
+	end else begin
+		if (sdr_dbg_req[10])   p10_req_cnt <= p10_req_cnt + 16'd1;
+		if (sdr_dbg_grant[10]) p10_gnt_cnt <= p10_gnt_cnt + 16'd1;
+	end
+end
+// vbl_rise is in the core domain; a two-flop sync is enough for a frame tick.
+reg vbl_s1, vbl_s2, vbl_s3;
+always @(posedge clk_sdram) begin
+	vbl_s1 <= vbl_rise; vbl_s2 <= vbl_s1; vbl_s3 <= vbl_s2;
+end
+wire vbl_rise_sdr = vbl_s2 & ~vbl_s3;
+
 wire       occ_g_any  = |sdr_dbg_grant;
 wire       occ_g_tile = |(sdr_dbg_grant & 9'b0_0001_1101);   // 0,2,3,4
 wire       occ_g_spr  = |(sdr_dbg_grant & 9'b0_1100_0000);   // 6,7
@@ -2469,8 +2498,8 @@ wire [15:0] oki_row_val = (screen_y < 9'd46)
                               ? {c3_crc_ready, c3_busy, c3_key_missing, 1'b0,
                                  c3_dbg_status, c3_dbg_cmds}
                         : (screen_y < 9'd52) ? c3_dbg_cmd
-                        : (screen_y < 9'd58) ? c3_ram_acc_l
-                                             : c3_rom_acc_l;
+                        : (screen_y < 9'd58) ? p10_req_l
+                                             : p10_gnt_l;
 wire       oki_set = oki_row_val[oki_bit];
 
 // Row 9, magenta: the RAW joystick word for pad 1, live — not a per-frame
