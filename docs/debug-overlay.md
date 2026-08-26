@@ -68,54 +68,44 @@ diagnosis. Screen `y` is given because it is the one thing that cannot drift.
 It gets repurposed for whatever is under investigation. **It currently shows
 the CALC3 MCU**, for the Tier 2 bring-up: both games sit waiting on that device,
 and a black screen looks identical whether it is dead, stalled, or answering
-with the wrong thing. It cannot be watched any other way on hardware — every
-byte it touches is in SDRAM the 68000 also uses, so a memory dump cannot say
-who wrote what.
+with the wrong thing.
 
-| Sub-row | y | Shows |
-|---|---|---|
-| 1st | 40-45 | Status and progress — see the bit table below |
-| 2nd | 46-51 | **BUILD MARKER**, currently `c302`. Not a measurement — see below |
-| 3rd | 52-57 | **SDRAM port 10 REQUESTS** this frame, counted at the controller |
-| 4th | 58-63 | **SDRAM port 10 GRANTS** this frame, counted at the controller |
+**Each flag fills a whole nibble — four identical blocks.** Single bits in a
+fused four-row block cannot be read reliably off a photograph. Two rounds were
+lost to it, and the reading that came back was self-contradictory: the scan
+reported finished while every bit that says a memory access happened was dark.
+Both cannot be true, so the instrument was wrong rather than the eye. With the
+separators either side, each group reads as solid or dark and miscounting by one
+cannot change the answer.
 
-**Read the build marker first.** Two builds in a row drew an identical block,
-and there was no way to tell a dead signal from a bitstream that never loaded —
-MiSTer keeps the running core until an MRA is loaded again. If the 2nd sub-row
-does not read `c302`, the core on the screen is not the core on the card and
-nothing else in the panel means anything. This is the visible marker the
-`Kaneko16_GOOD.rbf` incident called for and this branch had been going without.
+Read each sub-row as four groups, left to right:
 
-The first sub-row, bit by bit, MSB on the left as always. Bits 12 to 8 are
-**sticky**: they latch the first time the thing happens and never clear, which
-a per-frame counter cannot do — a counter that reads zero because its frame
-tick or its cross-domain read is wrong looks exactly like the event never
-happening, and that is the question being asked.
+| Sub-row | y | Group 1 | Group 2 | Group 3 | Group 4 |
+|---|---|---|---|---|---|
+| 1st | 40-45 | scan finished | feeder asked | controller SAW port 10 | controller SERVED port 10 |
+| 2nd | 46-51 | **BUILD MARKER**: solid, solid, dark, solid | | | |
+| 3rd | 52-57 | busy | missing key | commands seen | MCU asked for RAM |
+| 4th | 58-63 | port 10 grants this frame, as a plain number | | | |
 
-| Bit | Means |
+**Read the marker first.** The 2nd sub-row must be **solid, solid, dark,
+solid**. MiSTer keeps the running core until an MRA is loaded again, so if the
+marker is wrong the core on the screen is not the core on the card and nothing
+else in the panel means anything. This is the visible marker the
+`Kaneko16_GOOD.rbf` incident called for.
+
+The first sub-row is a chain running outward from the device, and **the first
+dark group names the broken link**:
+
+| First sub-row | Where the fault is |
 |---|---|
-| 15 | `crc_ready` — the checksum scan over the 128 KB data ROM finished. **This is the one that proves the arbiter and the SDRAM read path work end to end.** |
-| 14 | `busy` — a command is running |
-| 13 | `key_missing` — sticky. A block named a key that does not exist. Should stay dark |
-| 12 | the ROM feeder has asked for a line |
-| 11 | the MCU has asked for shared RAM |
-| 10 | the arbiter has asked the SDRAM port |
-| 9 | the controller has SEEN port 10 ask |
-| 8 | the controller has SERVED port 10 |
-| 7-4 | The four command-register bits. Wants `1111` once the game has poked all four |
-| 3-0 | Commands executed |
+| all four solid | the whole SDRAM path works; the game is not talking to the MCU |
+| 1 dark, 2 3 4 solid | data moves but the scan does not finish — the device |
+| 2 solid, 3 dark | the request never reaches the controller — gating or the crossing |
+| 2 dark | the feeder never asked — the device or the feeder itself |
 
-Bits 12 down to 8 form a chain from the device outward, so the first dark one
-names the link that is broken.
-
-Reading it:
-
-| First row | Means |
-|---|---|
-| all dark | The checksum scan never finished. The 3rd and 4th sub-rows say where: requests with no grants is the controller; no requests at all is everything above it |
-| `8000`, second row dark | Scan finished, and the game has never written a command |
-| `8f00`+, second row `00ff` | The game asked for init and the MCU took it — the channel works |
-| bit 13 lit | A table named a missing key; the decode is wrong, not the plumbing |
+Group 2 of the third sub-row is `key_missing`, which should stay dark: a lit one
+means a table named a key that does not exist, which is a decode fault rather
+than plumbing.
 
 Previously this block carried SDRAM occupancy per scanline for the
 sprite-bitmap move, and before that the 68000's bus-address probe, the IPL

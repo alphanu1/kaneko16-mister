@@ -2515,20 +2515,27 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 // A first row of 8000 with a dark second row means the scan finished and the
 // game has never written a command. All dark means the scan never finished,
 // and then the arbiter or the ROM feeder is where to look.
-wire [15:0] oki_row_val = (screen_y < 9'd46)
-                              ? {c3_crc_ready, c3_busy, c3_key_missing,
-                                 ever_rom_req, ever_ram_req, ever_arb_req,
-                                 ever_p10_req, ever_p10_gnt,
-                                 c3_dbg_status, c3_dbg_cmds[3:0]}
-                        // A BUILD MARKER, not a measurement. Two builds in a
-                        // row drew an identical block, and there was no way to
-                        // tell a dead signal from a bitstream that never
-                        // loaded. This changes every build; if it does not
-                        // match what the deploy printed, nothing else in the
-                        // panel is worth reading.
-                        : (screen_y < 9'd52) ? 16'hc302
-                        : (screen_y < 9'd58) ? p10_req_l
-                                             : p10_gnt_l;
+// ONE FLAG PER NIBBLE, each repeated four times.
+//
+// Single bits in a fused four-row block cannot be read reliably off a
+// photograph -- two rounds were lost to it, and the last reading was
+// self-contradictory: the scan reported finished while every bit that says a
+// memory access happened was dark. Both cannot be true, so the instrument was
+// wrong rather than the eye. Four identical blocks with a separator either side
+// read as a solid group, and miscounting by one cannot change the answer.
+//
+//   1st sub-row   scan done | feeder asked | controller saw | controller served
+//   2nd sub-row   BUILD MARKER, solid-solid-dark-solid
+//   3rd sub-row   busy | missing key | commands seen | MCU asked for RAM
+//   4th sub-row   port 10 grants this frame, as a number
+wire [15:0] oki_row_val =
+      (screen_y < 9'd46) ? {{4{c3_crc_ready}}, {4{ever_rom_req}},
+                            {4{ever_p10_req}}, {4{ever_p10_gnt}}}
+    : (screen_y < 9'd52) ? 16'hff0f
+    : (screen_y < 9'd58) ? {{4{c3_busy}}, {4{c3_key_missing}},
+                            {4{|c3_dbg_status}}, {4{ever_ram_req}}}
+                         : p10_gnt_l;
+
 wire       oki_set = oki_row_val[oki_bit];
 
 // Row 9, magenta: the RAW joystick word for pad 1, live — not a per-frame
