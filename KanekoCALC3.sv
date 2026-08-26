@@ -1188,20 +1188,48 @@ always @(posedge clk_sys) if (c3_ram_req) c3_ram_lane <= c3_ram_addr[2:1];
 assign c3_ram_rdata = arb_dout[{c3_ram_lane, 4'd0} +: 16];
 assign c3_ram_valid = arb_ack[1];
 
-// Three masters, one port. See kaneko_mcuram_arb's header for why this is not
-// three ports.
-wire [2:0]            arb_req  = {c3_romp_req, c3_ram_req, cpu_mcu_req};
-wire [2:0][SDR_AW:1]  arb_addr = {c3_romp_addr, c3_ram_sdr_addr, cpu_mcu_addr};
-wire [2:0]            arb_we   = {1'b0, c3_ram_wr, cpu_mcu_we};
-wire [2:0][15:0]      arb_din  = {16'd0, c3_ram_wdata, cpu_mcu_din};
-wire [2:0][1:0]       arb_be   = {2'b11, c3_ram_be, cpu_mcu_be};
-wire [2:0]            arb_ack;
+// ------------------------------------------- MCU RAM self-test, at boot
+//
+// A DIAGNOSTIC. Shogun Warriors verifies this RAM before it will do anything
+// else -- 262,378 byte writes read back and compared, with every interrupt
+// masked for the 356 frames it takes -- so a board stuck in that loop shows a
+// running 68000, no interrupts and a black screen, which is exactly what this
+// core does. The RAM is in SDRAM here and the SDRAM WRITE path has never run on
+// hardware. This asks the board directly instead of inferring.
+//
+// It writes 64 words at the base of that RAM before the game's own test can
+// reach them. That is deliberate for a diagnostic build and would not belong in
+// a shipped one.
+wire        rt_req, rt_we, rt_running, rt_done, rt_pass;
+wire [SDR_AW:1] rt_addr;
+wire [15:0] rt_din, rt_fail_got, rt_fail_want;
+wire [1:0]  rt_be;
+wire [3:0]  rt_fail_stage;
+
+kaneko_ramtest #(.SDR_AW(SDR_AW), .WORDS(64)) u_ramtest
+(
+	.clk(clk_sys), .rst(rst_sys),
+	.enable(rom_loaded), .base_mcuram(BASE_MCURAM),
+	.req(rt_req), .addr(rt_addr), .we(rt_we), .din(rt_din), .be(rt_be),
+	.ack(arb_ack[3]), .dout(arb_dout),
+	.running(rt_running), .done(rt_done), .pass(rt_pass),
+	.fail_stage(rt_fail_stage), .fail_got(rt_fail_got), .fail_want(rt_fail_want)
+);
+
+// Four masters, one port. See kaneko_mcuram_arb's header for why this is not
+// four ports.
+wire [3:0]            arb_req  = {rt_req, c3_romp_req, c3_ram_req, cpu_mcu_req};
+wire [3:0][SDR_AW:1]  arb_addr = {rt_addr, c3_romp_addr, c3_ram_sdr_addr, cpu_mcu_addr};
+wire [3:0]            arb_we   = {rt_we, 1'b0, c3_ram_wr, cpu_mcu_we};
+wire [3:0][15:0]      arb_din  = {rt_din, 16'd0, c3_ram_wdata, cpu_mcu_din};
+wire [3:0][1:0]       arb_be   = {rt_be, 2'b11, c3_ram_be, cpu_mcu_be};
+wire [3:0]            arb_ack;
 wire [63:0]           arb_dout;
 
 assign cpu_mcu_ack  = arb_ack[0];
 assign cpu_mcu_dout = arb_dout;
 
-kaneko_mcuram_arb #(.SDR_AW(SDR_AW), .NM(3)) u_mcu_arb
+kaneko_mcuram_arb #(.SDR_AW(SDR_AW), .NM(4)) u_mcu_arb
 (
 	.clk(clk_sys), .rst_n(~rst_sys),
 	.m_req(arb_req), .m_addr(arb_addr), .m_we(arb_we),
@@ -2536,13 +2564,16 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 //   2nd sub-row   BUILD MARKER: solid, dark, solid
 //   3rd sub-row   busy | missing key | commands seen
 //   4th sub-row   port 10 grants this frame, as a number
+//   1st sub-row   MCU scan done | RAM self-test DONE | self-test PASSED
+//   2nd sub-row   BUILD MARKER: solid, dark, dark  (f00f, changed again)
+//   3rd sub-row   which stage failed | game wrote a command | MCU busy
+//   4th sub-row   the word the self-test read back when it failed
 wire [15:0] oki_row_val =
-      (screen_y < 9'd46) ? {{4{c3_crc_ready}}, {4{ever_rom_req}},
-                            {4{ever_p10_gnt}}, 4'h0}
-    : (screen_y < 9'd52) ? 16'hf0f0
-    : (screen_y < 9'd58) ? {{4{c3_busy}}, {4{c3_key_missing}},
-                            {4{|c3_dbg_status}}, 4'h0}
-                         : p10_gnt_l;
+      (screen_y < 9'd46) ? {{4{c3_crc_ready}}, {4{rt_done}}, {4{rt_pass}}, 4'h0}
+    : (screen_y < 9'd52) ? 16'hf00f
+    : (screen_y < 9'd58) ? {rt_fail_stage, {4{|c3_dbg_status}},
+                            {4{c3_busy}}, 4'h0}
+                         : rt_fail_got;
 
 wire       oki_set = oki_row_val[oki_bit];
 

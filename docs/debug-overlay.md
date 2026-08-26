@@ -87,29 +87,28 @@ Read each sub-row as three groups, left to right:
 
 | Sub-row | y | Group 1 | Group 2 | Group 3 |
 |---|---|---|---|---|
-| 1st | 40-45 | scan finished | feeder asked | port 10 SERVED |
-| 2nd | 46-51 | **BUILD MARKER**: solid, dark, solid | | |
-| 3rd | 52-57 | busy | missing key | commands seen |
-| 4th | 58-63 | port 10 grants this frame, as a plain number | | |
+| 1st | 40-45 | MCU scan finished | RAM self-test DONE | self-test **PASSED** |
+| 2nd | 46-51 | **BUILD MARKER**: solid, dark, dark | | |
+| 3rd | 52-57 | which stage failed, as a number | game wrote a command | MCU busy |
+| 4th | 58-63 | the word the self-test read back when it failed | | |
 
-**Read the marker first.** The 2nd sub-row must be **solid, dark, solid**. MiSTer keeps the running core until an MRA is loaded again, so if the
-marker is wrong the core on the screen is not the core on the card and nothing
-else in the panel means anything. This is the visible marker the
-`Kaneko16_GOOD.rbf` incident called for.
+**Read the marker first.** The 2nd sub-row must be **solid, dark, dark**.
+MiSTer keeps the running core until an MRA is loaded again, so if the marker is
+wrong the core on the screen is not the core on the card.
 
-The first sub-row is a chain running outward from the device, and **the first
-dark group names the broken link**:
+**Then the first sub-row's third group.** That is the answer to the question the
+whole Tier 2 bring-up now rests on:
 
-| First sub-row | Where the fault is |
+| First sub-row | Means |
 |---|---|
-| all three solid | the whole SDRAM path works; the game is not talking to the MCU |
-| 1 dark, 2 and 3 solid | data moves but the scan does not finish — the device |
-| 2 solid, 3 dark | the feeder asks and the controller never serves it |
-| 2 dark | the feeder never asked — the device or the feeder itself |
+| all three solid | the MCU read its ROM, the self-test ran, and **the SDRAM path is honest** — the fault is elsewhere |
+| 1 and 2 solid, 3 dark | **the self-test FAILED**: MCU RAM does not read back what was written, which is why the game never leaves its boot RAM test |
+| 2 dark | the self-test never finished — it is stuck waiting on the arbiter |
 
-Group 2 of the third sub-row is `key_missing`, which should stay dark: a lit one
-means a table named a key that does not exist, which is a decode fault rather
-than plumbing.
+If it failed, the third sub-row's first group is the stage as a number — 0 and 1
+walking ones and zeros, 2 and 3 address-in-data, **4 and 5 the byte halves**, the
+case the game does 262,378 times — and the fourth sub-row is the word that came
+back instead.
 
 Previously this block carried SDRAM occupancy per scanline for the
 sprite-bitmap move, and before that the 68000's bus-address probe, the IPL
