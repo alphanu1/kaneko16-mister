@@ -22,12 +22,17 @@
 module kaneko_calc3_keys #(
     parameter KEYS_HEX = "rtl/mcu/calc3_keys.hex",
     parameter IDX_HEX  = "rtl/mcu/calc3_keyidx.hex",
-    parameter int unsigned NKEYS = 36
+    // SIXTY-FOUR SLOTS, though only 36 keys exist. The address is
+    // slot * 64 + index, twelve bits; at 36 slots most of those addresses
+    // are out of range, Quartus cannot prove the index is bounded, and it
+    // builds the table from LOGIC rather than inferring a memory -- 378
+    // ALMs and zero M10K, measured. Padding makes every address valid.
+    parameter int unsigned NSLOTS = 64
 ) (
     input  wire       clk,
     input  wire [7:0] key_sel,     // the block header's key byte
     input  wire [5:0] key_idx,     // byte within the key, i & 0x3f
-    output logic [7:0] key_data,   // registered, one cycle after the inputs
+    output wire  [7:0] key_data,   // registered, one cycle after the inputs
     output logic       absent      // key_sel names no key; registered alongside
 );
 
@@ -35,7 +40,7 @@ module kaneko_calc3_keys #(
 
   // Two memories rather than one 16 KB array. The index is small enough to
   // land in logic; the keys want a block.
-  (* ram_style = "block" *) logic [7:0] keys [0:NKEYS*64-1];
+  (* ram_style = "block" *) logic [7:0] keys [0:NSLOTS*64-1];
   logic [5:0] kidx [0:255];
 
   initial begin
@@ -50,9 +55,23 @@ module kaneko_calc3_keys #(
   // to index past the array.
   wire [11:0] addr = {slot[5:0], 6'd0} + {6'd0, key_idx};
 
+  // THE READ IS UNCONDITIONAL, and the absent case is handled after it.
+  //
+  // Writing `key_data <= (slot == NONE) ? 8'h00 : keys[addr]` reads the memory
+  // only on one branch, and a conditional read defeats inference outright --
+  // already on record in this repository. Quartus built the whole table from
+  // logic instead: 378 ALMs, zero M10K, measured, and padding the array to a
+  // power of two on its own changed nothing (the bitstream came out
+  // byte-identical, which is what gave it away).
+  //
+  // Reading every cycle regardless is what makes it a ROM, and it is safe
+  // because every 12-bit address is in range now that there are 64 slots.
+  logic [7:0] key_q;
   always_ff @(posedge clk) begin
-    absent   <= (slot == NONE);
-    key_data <= (slot == NONE) ? 8'h00 : keys[addr[11:0]];
+    absent <= (slot == NONE);
+    key_q  <= keys[addr];
   end
+
+  assign key_data = absent ? 8'h00 : key_q;
 
 endmodule

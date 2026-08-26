@@ -456,6 +456,32 @@ Still to do: **the hit calculator is type 1 only, and B.Rap Boys needs type 2**
 `kaneko_hit.sv`'s own header and predates this work. Neither game's EEPROM
 defaults are loaded yet either.
 
+### It builds
+
+| | MCU RAM in SDRAM | with the CALC3 wired in |
+|---|---|---|
+| ALMs | 14,187 (34%) | **15,014 (36%)** |
+| M10K | 467 / 553 (84%) | **471 / 553 (85%)** |
+| slack | +0.331 ns | **+0.464 ns** |
+
+The whole device costs about 830 ALMs and 4 blocks. `check_ports` is clean.
+
+**The key ROM took two goes to become a ROM, and the second attempt proved
+nothing on its own.** It was built from LOGIC — 378 ALMs, zero M10K — because
+the read was conditional:
+
+```
+key_data <= (slot == NONE) ? 8'h00 : keys[addr];   // reads on one branch only
+```
+
+A conditional read defeats inference outright, which is already on record here.
+Padding the array to a power of two was necessary too — with 36 slots most
+12-bit addresses are out of range and Quartus will not infer a memory it cannot
+prove is bounded — but padding **alone changed nothing**, and the way that
+showed was a **byte-identical bitstream**. That is the same tell as the edit
+script that silently matched nothing. Reading unconditionally and applying the
+absent case afterwards turned 378 ALMs into 15.1 and 0 blocks into 4.
+
 Nothing here has run on hardware.
 
 A diff rather than a write tap deliberately — a tap sees every access through
