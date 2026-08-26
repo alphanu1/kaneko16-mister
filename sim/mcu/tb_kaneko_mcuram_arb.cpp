@@ -37,22 +37,25 @@
 #include "Vkaneko_mcuram_arb_harness.h"
 #include "verilated.h"
 
-namespace { constexpr int NM = 3; }
+// FOUR, matching the core: the 68000, the MCU's RAM port, its data ROM
+// fetch, and the boot RAM self-test. It was fuzzed at three while the core
+// ran four.
+namespace { constexpr int NM = 4; }
 
 int main(int argc, char** argv) {
   Verilated::commandArgs(argc, argv);
   auto* d = new Vkaneko_mcuram_arb_harness;
   std::mt19937 rng(0xa4b17e40u);
   long checks = 0, fails = 0, inflight_max = 0;
-  long done[NM] = {0, 0, 0};
+  long done[NM] = {0, 0, 0, 0};
 
   std::map<uint32_t, uint16_t> mem;
 
   auto tick = [&] { d->clk = 0; d->eval(); d->clk = 1; d->eval(); };
 
   d->rst_n = 0; d->s_ack = 0;
-  d->m0_req = d->m1_req = d->m2_req = 0;
-  d->m0_we = d->m1_we = 0;
+  d->m0_req = d->m1_req = d->m2_req = d->m3_req = 0;
+  d->m0_we = d->m1_we = d->m3_we = 0;
   for (int i = 0; i < 4; i++) tick();
   d->rst_n = 1;
 
@@ -68,6 +71,7 @@ int main(int argc, char** argv) {
       case 0: d->m0_addr = addr; d->m0_din = din; d->m0_we = we; d->m0_req = 1; break;
       case 1: d->m1_addr = addr; d->m1_din = din; d->m1_we = we; d->m1_req = 1; break;
       case 2: d->m2_addr = addr; d->m2_req = 1; break;
+      case 3: d->m3_addr = addr; d->m3_din = din; d->m3_we = we; d->m3_req = 1; break;
       default: printf("  FATAL master %d out of range\n", i); std::abort();
     }
   };
@@ -76,6 +80,7 @@ int main(int argc, char** argv) {
       case 0: return (int)d->m0_ack;
       case 1: return (int)d->m1_ack;
       case 2: return (int)d->m2_ack;
+      case 3: return (int)d->m3_ack;
       default: printf("  FATAL master %d out of range\n", i); std::abort();
     }
   };
@@ -84,6 +89,7 @@ int main(int argc, char** argv) {
       case 0: d->m0_req = 0; break;
       case 1: d->m1_req = 0; break;
       case 2: d->m2_req = 0; break;
+      case 3: d->m3_req = 0; break;
       default: printf("  FATAL master %d out of range\n", i); std::abort();
     }
   };
@@ -96,7 +102,7 @@ int main(int argc, char** argv) {
     p[i].busy = true;
     p[i].addr = (uint32_t)(i * 32 + rng() % 32);   // one range per master
     // Master 2 is the data ROM fetch: a reader, never a writer.
-    p[i].we = (i < 2) && ((rng() % 3) == 0);
+    p[i].we = (i != 2) && ((rng() % 3) == 0);   // only the ROM fetch never writes
     p[i].din = (uint16_t)rng();
     if (p[i].we) mem[p[i].addr] = p[i].din;
     else p[i].want = mem.count(p[i].addr) ? mem[p[i].addr] : 0;
@@ -173,11 +179,11 @@ int main(int argc, char** argv) {
     }
   }
 
-  const long total = done[0] + done[1] + done[2];
+  const long total = done[0] + done[1] + done[2] + done[3];
   for (int i = 0; i < NM; i++) {
     checks++;
     const double share = (double)done[i] / (double)total;
-    if (share < 0.25 || share > 0.42) {
+    if (share < 0.18 || share > 0.32) {
       printf("  FAIL master %d starved or favoured: %ld of %ld (%.2f)\n",
              i, done[i], total, share);
       fails++;
@@ -190,9 +196,9 @@ int main(int argc, char** argv) {
     fails++;
   }
 
-  printf("kaneko_mcuram_arb: checks=%ld fails=%ld served=%ld/%ld/%ld "
+  printf("kaneko_mcuram_arb: checks=%ld fails=%ld served=%ld/%ld/%ld/%ld "
          "max_contending=%ld\n", checks, fails, done[0], done[1], done[2],
-         inflight_max);
+         done[3], inflight_max);
   delete d;
   return fails ? 1 : 0;
 }

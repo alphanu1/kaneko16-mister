@@ -88,11 +88,15 @@ Read each sub-row as three groups, left to right:
 | Sub-row | y | Group 1 | Group 2 | Group 3 |
 |---|---|---|---|---|
 | 1st | 40-45 | MCU scan finished | RAM self-test DONE | self-test **PASSED** |
-| 2nd | 46-51 | **BUILD MARKER**: solid, dark, dark | | |
+| 2nd | 46-51 | **BUILD MARKER**: solid, solid, dark | | |
 | 3rd | 52-57 | which stage failed, as a number | game wrote a command | MCU busy |
 | 4th | 58-63 | the word the self-test read back when it failed | | |
 
-**Read the marker first.** The 2nd sub-row must be **solid, dark, dark**.
+**Read the marker first.** The 2nd sub-row must be **solid, solid, dark**.
+
+The RAM self-test only runs when **MCU RAM self-test** is On in the OSD; it
+is a diagnostic and is off by default, so groups 2 and 3 of the first
+sub-row stay dark until it is switched on.
 MiSTer keeps the running core until an MRA is loaded again, so if the marker is
 wrong the core on the screen is not the core on the card.
 

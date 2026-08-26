@@ -85,6 +85,10 @@ localparam CONF_STR = {
 	"O[15],Sprite offscreen skip,Off,On;",
 	"O[16],Sprites,On,Off;",
 	"O[17],Tilemaps,On,Off;",
+	// A DIAGNOSTIC, off by default. It makes the boot RAM self-test a master
+	// on the shared SDRAM port and lets it write over the base of MCU RAM,
+	// neither of which belongs in a normal run.
+	"O[18],MCU RAM self-test,Off,On;",
 	"O[26:24],Rotation,Off,Auto (per game),CW 90,CCW 90,180;",
 	"O[20:19],Game override,Off(MRA),1 Magical Crystals,2 Blaze On,3 Wing Force;",
 	"O[23:21],Layer1 dx,+2 (MAME),0,-2,+4;",
@@ -1209,7 +1213,12 @@ wire [3:0]  rt_fail_stage;
 kaneko_ramtest #(.SDR_AW(SDR_AW), .WORDS(64)) u_ramtest
 (
 	.clk(clk_sys), .rst(rst_sys),
-	.enable(rom_loaded), .base_mcuram(BASE_MCURAM),
+	// OFF BY DEFAULT. The build that ran this unconditionally stopped the
+	// 68000 completing bus cycles at all, and nothing in simulation
+	// reproduces that -- the arbiter serves four masters evenly across
+	// 257,184 checks. Until that is understood it does not run unless it is
+	// asked for, so the default build is no worse than the one before it.
+	.enable(rom_loaded && status[18]), .base_mcuram(BASE_MCURAM),
 	.req(rt_req), .addr(rt_addr), .we(rt_we), .din(rt_din), .be(rt_be),
 	.ack(arb_ack[3]), .dout(arb_dout),
 	.running(rt_running), .done(rt_done), .pass(rt_pass),
@@ -2570,7 +2579,7 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 //   4th sub-row   the word the self-test read back when it failed
 wire [15:0] oki_row_val =
       (screen_y < 9'd46) ? {{4{c3_crc_ready}}, {4{rt_done}}, {4{rt_pass}}, 4'h0}
-    : (screen_y < 9'd52) ? 16'hf00f
+    : (screen_y < 9'd52) ? 16'hff00
     : (screen_y < 9'd58) ? {rt_fail_stage, {4{|c3_dbg_status}},
                             {4{c3_busy}}, 4'h0}
                          : rt_fail_got;
