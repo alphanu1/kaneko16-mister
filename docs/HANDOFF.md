@@ -380,9 +380,35 @@ compares two arbitrary choices. The directed test states the expectation: raise
 `key_missing`, write nothing, leave the pointer alone. The only writes it
 tolerates are the command-word handshake and the DSW.
 
-Still to do: wire the device into `Kaneko16.sv` — it needs SDRAM for both its
-data ROM reads and its MCU RAM accesses, which the 68000 also reaches on port
-10, so that sharing has to be arbitrated. Nothing here has run on hardware.
+### Wiring it in
+
+Two pieces the device needs from the core, and the shape chosen for each:
+
+**Its data ROM reads go through `kaneko_tilerom`**, the byte feeder the OKI
+already uses — an 8-byte cache in front of one SDRAM port, fuzzed at 240,001
+checks. Reusing it beats writing another adapter, and the cache matters: the
+checksum scan reads all 128 KB at reset, which is eight times fewer round trips
+through a line than byte by byte. `base_calc3rom` is byte 0x40000 on both games,
+now a named base checked against the ROM layout by `check_bases` — and that
+check fails when the base is wrong, verified by making it wrong.
+
+**Its MCU RAM accesses share port 10 with the 68000, through
+`rtl/mcu/kaneko_mcuram_arb.sv`.** A second SDRAM port would also work and the
+controller would serialise it, but it would put a SECOND writer on the SDRAM
+where this core has exactly one — and the write path is the part that has never
+run on hardware. One arbitrated port also makes coherency structural: only one
+access is ever in flight, so a read cannot pass a write to the same address.
+With two ports that ordering would be a hope.
+
+Priority ALTERNATES. The CALC3 issues thousands of back-to-back accesses while
+decompressing a table, and a fixed priority either way starves the other master
+for the whole run — the 68000 waits on DTACK, so starving it stalls the game.
+`tb_kaneko_mcuram_arb` holds both requests high for 200,000 cycles and requires
+both to progress: 257,159 checks, 0 fails, 28,579 accesses each, an exactly even
+split. Making the priority fixed drives one master to zero and fails the test.
+
+Still to do: the instantiation in `Kaneko16.sv` itself, and `NPORTS` 11 -> 12
+for the data ROM's port. Nothing here has run on hardware.
 
 A diff rather than a write tap deliberately — a tap sees every access through
 the space and cannot say who made it, so the 68000's own use of that RAM would

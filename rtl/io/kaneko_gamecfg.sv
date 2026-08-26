@@ -69,6 +69,7 @@ module kaneko_gamecfg #(
     // agree or the reads land in the sprite ROM. It sits immediately above the
     // stream, and check_bases.py holds the two in step.
     output wire [SDR_AW:1] base_mcuram,
+    output wire [SDR_AW:1] base_calc3rom,
 
     // ---- video
     output wire signed [10:0] v2_dx, v2_dy,
@@ -222,6 +223,13 @@ module kaneko_gamecfg #(
     // are already 64 KB aligned, so the MCU RAM starts exactly there.
     assign base_mcuram = is_bb ? SDR_AW'(25'h07b0000)   // byte 0x0f60000
                                : SDR_AW'(25'h0bb0000);  // byte 0x1760000
+
+    // The MCU's external DATA rom -- not its internal program, which has never
+    // been dumped. 128 KB, at byte 0x40000 on BOTH CALC3 games: it follows the
+    // 68000 program, which is 0x40000 on each. Not a per-game value today, and
+    // it stays a named base rather than a constant so it cannot quietly become
+    // one if a third board arrives with a different layout.
+    assign base_calc3rom = SDR_AW'(25'h0020000);        // byte 0x0040000
 
     assign base_oki   = calc3_board ? SDR_AW'(25'h230000)  // byte 0x460000
                       : is_wf ? SDR_AW'(25'h280000)

@@ -27,7 +27,10 @@ import sys
 # four games have a Z80, so the entry is allowed to be absent.
 REGION = {"base_trom0": "view2_0", "base_trom1": "view2_1",
           "base_spr": "kan_spr", "base_oki": "oki1",
-          "base_z80": "audiocpu"}
+          "base_z80": "audiocpu",
+          # The CALC3 board's MCU data ROM. Present on two of the six games,
+          # and the loop below skips a region a game does not have.
+          "base_calc3rom": "calc3_rom"}
 
 
 def load_tool():
