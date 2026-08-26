@@ -488,13 +488,14 @@ for once.
 
 ### It builds
 
-| | MCU RAM in SDRAM | with the CALC3 wired in |
-|---|---|---|
-| ALMs | 14,187 (34%) | **15,014 (36%)** |
-| M10K | 467 / 553 (84%) | **471 / 553 (85%)** |
-| slack | +0.331 ns | **+0.464 ns** |
+| | MCU RAM in SDRAM | CALC3 wired in | + type 2 and EEPROM defaults |
+|---|---|---|---|
+| ALMs | 14,187 (34%) | 15,014 (36%) | **15,686 (37%)** |
+| M10K | 467 / 553 (84%) | 471 / 553 (85%) | **471 / 553 (85%)** |
+| slack | +0.331 ns | +0.464 ns | **+0.470 ns** |
 
-The whole device costs about 830 ALMs and 4 blocks. `check_ports` is clean.
+The MCU costs about 830 ALMs and 4 blocks; the second hitbox calculator about
+670 ALMs and no blocks. `check_ports` is clean on every one of these.
 
 **The key ROM took two goes to become a ROM, and the second attempt proved
 nothing on its own.** It was built from LOGIC — 378 ALMs, zero M10K — because
