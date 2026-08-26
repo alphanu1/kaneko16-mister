@@ -58,6 +58,10 @@ module kaneko_calc3 #(
     // EEPROM contents for the init command's copy.
     output logic [5:0]  eep_addr,
     input  wire  [15:0] eep_data,
+    // High only while the init command is copying the EEPROM. The port it
+    // reads is shared with the HPS's save and restore, so the core needs to
+    // know when this side is using it rather than mux on the address alone.
+    output wire         eep_rd,
 
     // The DIP switches. MAME writes these into MCU RAM at the top of every
     // run, with the comment that the game reads them back live every frame.
@@ -67,6 +71,9 @@ module kaneko_calc3 #(
     output logic        crc_ready,
     output logic        key_missing        // sticky: a block named a missing key
 );
+
+  // Only the two EEPROM-copy states touch that port.
+  assign eep_rd = (state == S_INIT_EEP) || (state == S_INIT_EEP_W);
 
   // ------------------------------------------------------------ status bits
   logic [3:0] status;

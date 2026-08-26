@@ -423,8 +423,40 @@ so indexing it addresses the wrong bits and reports the arbiter swapping data
 between masters — a convincing-looking lie, already on record against
 `kaneko_sdram_harness` for the same reason.
 
-Still to do: the instantiation in `Kaneko16.sv` itself. Nothing here has run on
-hardware.
+### It is wired in
+
+`Kaneko16.sv` now carries the device, its ROM feeder and the arbiter. The parts
+that needed a decision rather than a connection:
+
+**The command registers.** `kaneko_bus` decodes 280000, 290000, 2b0000 and
+2d0000 as four separate write strobes. They are NOT contiguous, and 2c0000 sits
+in the gap carrying MAME's comment *"run calc 3? or irq ack?"* — decoding the
+range instead of the four addresses would swallow it and hide whatever it is.
+
+**The tick** is `vbl_rise`. MAME runs the device off a 59.1854 Hz timer, which
+is a frame.
+
+**The DSW is a constant, `0xE5`,** and not an OSD option yet: flip screen off,
+demo sounds on, difficulty 0x20 of 0x38, can-join, continue-coin — MAME's
+default positions. Bit 1 is **not defined by the port**, and MAME reads
+undefined port bits as zero, so it is 0 and not 1. That is the same rule that
+made Blaze On's idle SYSTEM word 0xFF00 rather than 0xFFFF. The device inverts
+it, as MAME does. Confirmation the chain is right: MAME delivers this byte to
+`200059`, and `dsw_addr` in the captured init parameters is `0x0059`.
+
+**The EEPROM's backup port is shared** between the HPS's save/restore and the
+MCU's init copy. The HPS keeps priority whenever it is *writing*: stealing the
+address from a write sends that word to the wrong place and corrupts saved data,
+where a stolen read only gives the MCU a stale word on a boot where the HPS
+happens to be loading at the same instant. `eep_rd` says when the MCU is using
+it rather than muxing on the address alone.
+
+Still to do: **the hit calculator is type 1 only, and B.Rap Boys needs type 2**
+(`brapboys(config)` sets it, along with its own EEPROM defaults). That gap is
+`kaneko_hit.sv`'s own header and predates this work. Neither game's EEPROM
+defaults are loaded yet either.
+
+Nothing here has run on hardware.
 
 A diff rather than a write tap deliberately — a tap sees every access through
 the space and cannot say who made it, so the 68000's own use of that RAM would

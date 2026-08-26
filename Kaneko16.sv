@@ -182,6 +182,7 @@ wire [SDR_AW-1:0] BASE_Z80;
 // landed inside the stream would put the MCU's working memory on top of the
 // sprite ROM -- which loads without error and looks like an MCU fault.
 wire [SDR_AW:1] BASE_MCURAM;
+wire [SDR_AW:1] BASE_CALC3ROM;
 wire        HAS_Z80;
 wire [2:0]  OKI_MAX_BANK;
 wire        OKI_ON_Z80;
@@ -250,6 +251,7 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 	.v_start(CFG_V_START), .h_sync_start(CFG_HSYNC), .h_start(CFG_H_START),
 	.inputs_blazeon(INPUTS_BLAZEON),
 	.base_z80(BASE_Z80), .has_z80(HAS_Z80), .base_mcuram(BASE_MCURAM),
+	.base_calc3rom(BASE_CALC3ROM),
 	.oki_max_bank(OKI_MAX_BANK), .oki_on_z80(OKI_ON_Z80),
 	.calc3_io(CALC3_IO), .base_oki2(OKI2_BASE), .oki2_max_bank(OKI2_MAX_BANK),
 	.in_unk_val(IN_UNK_VAL),
@@ -258,7 +260,12 @@ kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 );
 
 // WIDE=1, so ioctl_addr counts bytes and advances by two per word.
-wire [5:0]  bk_addr = ioctl_addr[6:1];
+// THE EEPROM'S BACKUP PORT IS SHARED with the CALC3, which copies 64 words out
+// of it on its init command. The HPS keeps priority whenever it is writing:
+// stealing the address from a write would send that word to the wrong place and
+// corrupt the saved data, where a stolen READ only gives the MCU a stale word
+// on a boot where the HPS happens to be loading at the same instant.
+wire [5:0]  bk_addr = (c3_eep_rd && !bk_we) ? c3_eep_addr : ioctl_addr[6:1];
 wire [15:0] bk_din  = ioctl_dout;
 wire        bk_we   = ioctl_download && ioctl_wr && nv_sel;
 wire [15:0] bk_q;
@@ -699,9 +706,10 @@ kaneko_bus #(.SDR_AW(SDR_AW), .ROM_BASE(25'd0)) u_bus
 	.oki2_we(oki2_we), .okibk_we(okibk_we), .oki2_dout(oki2_dout),
 	.hit_we(hit_we), .hit_addr(hit_addr), .hit_dout(hit_dout),
 	// The MCU's RAM is an SDRAM master on port 10, not a block memory.
-	.mcuram_req(p10_req), .mcuram_addr(p10_addr), .mcuram_we(p10_we),
-	.mcuram_din(p10_din), .mcuram_be(p10_be),
-	.mcuram_ack(p10_ack), .mcuram_dout(p10_dout),
+	.mcuram_req(cpu_mcu_req), .mcuram_addr(cpu_mcu_addr),
+	.mcuram_we(cpu_mcu_we), .mcuram_din(cpu_mcu_din), .mcuram_be(cpu_mcu_be),
+	.mcuram_ack(cpu_mcu_ack), .mcuram_dout(cpu_mcu_dout),
+	.com_w(calc3_com_w),
 	.base_mcuram(BASE_MCURAM),
 	.calc3_io(CALC3_IO),
 
@@ -985,6 +993,125 @@ kaneko_hit u_hit
 	.addr(hit_addr), .din(oEdb), .we(hit_we),
 	.uds(~UDSn), .lds(~LDSn), .dout(hit_dout),
 	.rnd(hit_lfsr)
+);
+
+// ------------------------------------------------------- the CALC3 MCU
+//
+// The device, its data ROM feeder, and the arbiter that lets all three of its
+// masters share one SDRAM port. Inert on every game but the two CALC3 titles:
+// calc3_io gates the decode, so nothing else can reach the command registers,
+// and with no commands the device sits in its idle poll.
+wire        cpu_mcu_req, cpu_mcu_we, cpu_mcu_ack;
+wire [SDR_AW:1] cpu_mcu_addr;
+wire [15:0] cpu_mcu_din;
+wire [1:0]  cpu_mcu_be;
+wire [63:0] cpu_mcu_dout;
+wire [3:0]  calc3_com_w;
+
+// The device's own two interfaces.
+wire [16:0] c3_rom_addr;
+wire        c3_rom_rd;
+wire [7:0]  c3_rom_data;
+wire        c3_rom_valid;
+wire [15:0] c3_ram_addr;
+wire        c3_ram_rd, c3_ram_wr;
+wire [1:0]  c3_ram_be;
+wire [15:0] c3_ram_wdata;
+wire [5:0]  c3_eep_addr;
+wire        c3_eep_rd;
+wire        c3_busy, c3_crc_ready, c3_key_missing;
+
+kaneko_calc3 #(.AW(17), .ROM_BYTES(32'h20000)) u_calc3
+(
+	.clk(clk_sys), .rst_n(~rst_sys),
+	.com_w(calc3_com_w),
+	// MAME runs the device off a 59.1854 Hz timer, which is a frame.
+	.tick(vbl_rise),
+	// NOT an OSD option yet, so this is MAME's default switch positions:
+	// flip screen off (0x01), demo sounds on (0x04), difficulty 0x20 of 0x38,
+	// can-join 0x40, continue-coin 0x80. Bit 1 is not defined by the port and
+	// MAME reads undefined port bits as ZERO, so it is 0 rather than 1 -- the
+	// same rule that made Blaze On's idle SYSTEM word 0xFF00 and not 0xFFFF.
+	// The device inverts it, as MAME does.
+	.dsw(8'he5),
+
+	.rom_addr(c3_rom_addr), .rom_rd(c3_rom_rd),
+	.rom_data(c3_rom_data), .rom_valid(c3_rom_valid),
+
+	.ram_addr(c3_ram_addr), .ram_rd(c3_ram_rd), .ram_wr(c3_ram_wr),
+	.ram_be(c3_ram_be), .ram_wdata(c3_ram_wdata),
+	.ram_rdata(c3_ram_rdata), .ram_valid(c3_ram_valid),
+
+	.eep_addr(c3_eep_addr), .eep_data(bk_q), .eep_rd(c3_eep_rd),
+
+	.busy(c3_busy), .crc_ready(c3_crc_ready), .key_missing(c3_key_missing)
+);
+
+// The data ROM through the same byte feeder the OKI uses: an eight-byte cache
+// in front of one requester. The cache is not a nicety here -- the checksum
+// scan reads all 128 KB at reset, and a line covers eight of those bytes.
+wire [7:0]  c3_rom_byte;
+wire        c3_rom_ok;
+wire        c3_romp_req;
+wire [SDR_AW:1] c3_romp_addr;
+
+kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_calc3rom
+(
+	.clk(clk_sys), .rst(rst_sys),
+	.req_addr({{7{1'b0}}, c3_rom_addr}),
+	.base_addr(BASE_CALC3ROM),
+	.req_data(c3_rom_byte),
+	.port_ready(c3_rom_ok),
+	.sdr_req(c3_romp_req), .sdr_addr(c3_romp_addr),
+	.sdr_ack(arb_ack[2]), .sdr_dout(arb_dout)
+);
+
+// The feeder answers with an address-and-ready contract; the device asks with
+// a request and waits for a valid. `pending` is what bridges them, and it also
+// stops a ready left high from a CACHE HIT at the previous address being read
+// as an answer to a request issued this cycle.
+reg c3_rom_pending;
+always @(posedge clk_sys) begin
+	if (rst_sys)            c3_rom_pending <= 1'b0;
+	else if (c3_rom_rd)     c3_rom_pending <= 1'b1;
+	else if (c3_rom_valid)  c3_rom_pending <= 1'b0;
+end
+assign c3_rom_valid = c3_rom_pending && c3_rom_ok;
+assign c3_rom_data  = c3_rom_byte;
+
+// The MCU RAM side of the device, as an SDRAM master.
+wire [15:0] c3_ram_rdata;
+wire        c3_ram_valid;
+wire        c3_ram_req = c3_ram_rd | c3_ram_wr;
+// A byte address inside the 64 KB becomes a word address in the region.
+wire [SDR_AW:1] c3_ram_sdr_addr = BASE_MCURAM + SDR_AW'(c3_ram_addr[15:1]);
+reg  [1:0]  c3_ram_lane;
+always @(posedge clk_sys) if (c3_ram_req) c3_ram_lane <= c3_ram_addr[2:1];
+assign c3_ram_rdata = arb_dout[{c3_ram_lane, 4'd0} +: 16];
+assign c3_ram_valid = arb_ack[1];
+
+// Three masters, one port. See kaneko_mcuram_arb's header for why this is not
+// three ports.
+wire [2:0]            arb_req  = {c3_romp_req, c3_ram_req, cpu_mcu_req};
+wire [2:0][SDR_AW:1]  arb_addr = {c3_romp_addr, c3_ram_sdr_addr, cpu_mcu_addr};
+wire [2:0]            arb_we   = {1'b0, c3_ram_wr, cpu_mcu_we};
+wire [2:0][15:0]      arb_din  = {16'd0, c3_ram_wdata, cpu_mcu_din};
+wire [2:0][1:0]       arb_be   = {2'b11, c3_ram_be, cpu_mcu_be};
+wire [2:0]            arb_ack;
+wire [63:0]           arb_dout;
+
+assign cpu_mcu_ack  = arb_ack[0];
+assign cpu_mcu_dout = arb_dout;
+
+kaneko_mcuram_arb #(.SDR_AW(SDR_AW), .NM(3)) u_mcu_arb
+(
+	.clk(clk_sys), .rst_n(~rst_sys),
+	.m_req(arb_req), .m_addr(arb_addr), .m_we(arb_we),
+	.m_din(arb_din), .m_be(arb_be),
+	.m_ack(arb_ack), .m_dout(arb_dout),
+	.s_req(p10_req), .s_addr(p10_addr), .s_we(p10_we),
+	.s_din(p10_din), .s_be(p10_be),
+	.s_ack(p10_ack), .s_dout(p10_dout)
 );
 
 // THE MCU'S 64 KB LIVES IN SDRAM NOW, NOT HERE.

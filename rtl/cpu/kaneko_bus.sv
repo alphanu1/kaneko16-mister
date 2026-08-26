@@ -165,6 +165,8 @@ module kaneko_bus #(
     // e00001, and the hit calculator at a00000. Gated so no Tier 1 board
     // answers at those addresses.
     input  wire         calc3_io,
+    // The CALC3's four command-register write strobes.
+    output logic [3:0]  com_w,
 
     // Observability. An unmapped access is acknowledged so the CPU cannot hang
     // on it, but it must not pass silently.
@@ -231,6 +233,20 @@ module kaneko_bus #(
     wire sel_hit   = calc3_io && (a[23:7] == 17'h14000);
     // 64 KB of MCU RAM at 200000-20ffff, shared with the CALC3 simulation.
     wire sel_mcu   = calc3_io && (a[23:16] == 8'h20);
+
+    // The CALC3's four command registers. WRITE ONLY, one word each, and the
+    // MCU runs only once all four have been written -- MAME's mcu_status is
+    // the same four bits and mcu_run tests for all of them.
+    //
+    // They are at 280000, 290000, 2b0000 and 2d0000: NOT contiguous, and
+    // 2c0000 sits in the gap with MAME's comment "run calc 3? or irq ack?"
+    // against it, unmapped. Decoding the range rather than the four addresses
+    // would swallow 2c0000 too and hide whatever it is.
+    wire sel_com0  = calc3_io && (a[23:1] == 23'h140000);   // byte 280000
+    wire sel_com1  = calc3_io && (a[23:1] == 23'h148000);   // byte 290000
+    wire sel_com2  = calc3_io && (a[23:1] == 23'h158000);   // byte 2b0000
+    wire sel_com3  = calc3_io && (a[23:1] == 23'h168000);   // byte 2d0000
+    wire sel_com   = sel_com0 | sel_com1 | sel_com2 | sel_com3;
     wire sel_v2w0  = (a[23:16] == pg_v2w0) && (a[15:14] == 2'd0);
     wire sel_v2w1  = (a[23:16] == pg_v2w1) && (a[15:14] == 2'd0);
     wire sel_spr   = (a[23:16] == pg_spr)  && (a[15:13] == 3'd0);
@@ -288,7 +304,8 @@ module kaneko_bus #(
                  | sel_v2w1 | sel_spr | sel_pal | sel_v2r0 | sel_sprr | sel_wdog
                  | sel_v2r1 | sel_ctrl | sel_in  | sel_snd
                  | sel_iack2 | sel_iack3 | sel_sprr2
-                 | sel_oki_a | sel_oki_b | sel_okibk | sel_hit | sel_mcu;
+                 | sel_oki_a | sel_oki_b | sel_okibk | sel_hit | sel_mcu
+                 | sel_com;
 
     // ---------------------------------------------------------- work RAM
     // 64 KB as 32k x 16, held as TWO BYTE-WIDE ARRAYS rather than one 16-bit
@@ -405,6 +422,7 @@ module kaneko_bus #(
         oki_we   <= 1'b0; snd_we <= 1'b0;
         oki2_we  <= 1'b0; okibk_we <= 1'b0;
         hit_we   <= 1'b0;
+        com_w    <= 4'd0;
         unmapped_hit <= 1'b0;
 
         if (rst) begin
@@ -460,6 +478,10 @@ module kaneko_bus #(
                                 oki2_we   <= sel_oki_b && ~LDSn;
                                 okibk_we  <= sel_okibk && ~LDSn;
                                 hit_we    <= sel_hit;
+                                // One strobe per register; the CALC3 keeps
+                                // the four bits and decides when it has all.
+                                com_w     <= {sel_com3, sel_com2,
+                                              sel_com1, sel_com0};
 
                                 snd_we    <= sel_snd  && ~UDSn;
                             end

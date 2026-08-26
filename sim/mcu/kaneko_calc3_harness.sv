@@ -37,6 +37,7 @@ module kaneko_calc3_harness #(
 
     output logic [5:0]  eep_addr,
     input  wire  [15:0] eep_data,
+    output logic        eep_rd,
 
     output logic        busy,
     output logic        crc_ready,
@@ -76,7 +77,7 @@ module kaneko_calc3_harness #(
       .rom_data(rom_data), .rom_valid(rom_valid),
       .ram_addr(ram_addr), .ram_rd(ram_rd), .ram_wr(ram_wr), .ram_be(ram_be),
       .ram_wdata(ram_wdata), .ram_rdata(ram_rdata), .ram_valid(ram_valid),
-      .eep_addr(eep_addr), .eep_data(eep_data),
+      .eep_addr(eep_addr), .eep_data(eep_data), .eep_rd(eep_rd),
       .busy(busy), .crc_ready(crc_ready), .key_missing(key_missing)
   );
 
