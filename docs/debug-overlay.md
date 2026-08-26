@@ -78,17 +78,21 @@ Both cannot be true, so the instrument was wrong rather than the eye. With the
 separators either side, each group reads as solid or dark and miscounting by one
 cannot change the answer.
 
-Read each sub-row as four groups, left to right:
+**Only about twelve blocks of a sixteen-block row are visible on the board** —
+the right-hand end runs off the screen. Everything here lives in the LEFT THREE
+groups; the fourth is deliberately empty rather than carrying something that
+would be silently lost.
 
-| Sub-row | y | Group 1 | Group 2 | Group 3 | Group 4 |
-|---|---|---|---|---|---|
-| 1st | 40-45 | scan finished | feeder asked | controller SAW port 10 | controller SERVED port 10 |
-| 2nd | 46-51 | **BUILD MARKER**: solid, solid, dark, solid | | | |
-| 3rd | 52-57 | busy | missing key | commands seen | MCU asked for RAM |
-| 4th | 58-63 | port 10 grants this frame, as a plain number | | | |
+Read each sub-row as three groups, left to right:
 
-**Read the marker first.** The 2nd sub-row must be **solid, solid, dark,
-solid**. MiSTer keeps the running core until an MRA is loaded again, so if the
+| Sub-row | y | Group 1 | Group 2 | Group 3 |
+|---|---|---|---|---|
+| 1st | 40-45 | scan finished | feeder asked | port 10 SERVED |
+| 2nd | 46-51 | **BUILD MARKER**: solid, dark, solid | | |
+| 3rd | 52-57 | busy | missing key | commands seen |
+| 4th | 58-63 | port 10 grants this frame, as a plain number | | |
+
+**Read the marker first.** The 2nd sub-row must be **solid, dark, solid**. MiSTer keeps the running core until an MRA is loaded again, so if the
 marker is wrong the core on the screen is not the core on the card and nothing
 else in the panel means anything. This is the visible marker the
 `Kaneko16_GOOD.rbf` incident called for.
@@ -98,9 +102,9 @@ dark group names the broken link**:
 
 | First sub-row | Where the fault is |
 |---|---|
-| all four solid | the whole SDRAM path works; the game is not talking to the MCU |
-| 1 dark, 2 3 4 solid | data moves but the scan does not finish — the device |
-| 2 solid, 3 dark | the request never reaches the controller — gating or the crossing |
+| all three solid | the whole SDRAM path works; the game is not talking to the MCU |
+| 1 dark, 2 and 3 solid | data moves but the scan does not finish — the device |
+| 2 solid, 3 dark | the feeder asks and the controller never serves it |
 | 2 dark | the feeder never asked — the device or the feeder itself |
 
 Group 2 of the third sub-row is `key_missing`, which should stay dark: a lit one

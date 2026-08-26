@@ -2515,25 +2515,29 @@ wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
 // A first row of 8000 with a dark second row means the scan finished and the
 // game has never written a command. All dark means the scan never finished,
 // and then the arbiter or the ROM feeder is where to look.
-// ONE FLAG PER NIBBLE, each repeated four times.
+// ONE FLAG PER NIBBLE, IN THE LEFT THREE NIBBLES ONLY.
 //
-// Single bits in a fused four-row block cannot be read reliably off a
-// photograph -- two rounds were lost to it, and the last reading was
-// self-contradictory: the scan reported finished while every bit that says a
-// memory access happened was dark. Both cannot be true, so the instrument was
-// wrong rather than the eye. Four identical blocks with a separator either side
-// read as a solid group, and miscounting by one cannot change the answer.
+// Two things had to be fixed about this readout, and the second was found by
+// asking rather than assuming. Single bits in a fused four-row block cannot be
+// counted off a photograph -- two rounds went to that, and the reading that
+// came back was self-contradictory. So each flag fills a whole nibble.
 //
-//   1st sub-row   scan done | feeder asked | controller saw | controller served
-//   2nd sub-row   BUILD MARKER, solid-solid-dark-solid
-//   3rd sub-row   busy | missing key | commands seen | MCU asked for RAM
+// And ONLY ABOUT TWELVE BLOCKS OF A SIXTEEN-BLOCK ROW ARE ACTUALLY VISIBLE on
+// the board: the right-hand end of every 16-bit row runs off the screen. So a
+// four-group layout puts two flags where nobody can see them, and the fourth
+// nibble is left empty on purpose rather than carrying something that would be
+// silently lost.
+//
+//   1st sub-row   scan finished | feeder asked | port 10 SERVED
+//   2nd sub-row   BUILD MARKER: solid, dark, solid
+//   3rd sub-row   busy | missing key | commands seen
 //   4th sub-row   port 10 grants this frame, as a number
 wire [15:0] oki_row_val =
       (screen_y < 9'd46) ? {{4{c3_crc_ready}}, {4{ever_rom_req}},
-                            {4{ever_p10_req}}, {4{ever_p10_gnt}}}
-    : (screen_y < 9'd52) ? 16'hff0f
+                            {4{ever_p10_gnt}}, 4'h0}
+    : (screen_y < 9'd52) ? 16'hf0f0
     : (screen_y < 9'd58) ? {{4{c3_busy}}, {4{c3_key_missing}},
-                            {4{|c3_dbg_status}}, {4{ever_ram_req}}}
+                            {4{|c3_dbg_status}}, 4'h0}
                          : p10_gnt_l;
 
 wire       oki_set = oki_row_val[oki_bit];
