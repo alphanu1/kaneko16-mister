@@ -43,6 +43,15 @@ module kaneko_cpumem_harness #(
     output wire [15:0] selftest_got,
     output wire [15:0] selftest_want,
     output wire [3:0]  dbg_com_w,
+    // What the MCU RAM port actually receives, at the controller's door: the
+    // CPU trace shows what the 68000 ASKED for, and the two have to be
+    // compared to find a write that is issued and never lands.
+    output wire        dbg_p10_req,
+    output wire        dbg_p10_we,
+    output wire        dbg_p10_ack,
+    output wire [1:0]  dbg_p10_be,
+    output wire [15:0] dbg_p10_din,
+    output wire [SDR_AW:1] dbg_p10_addr,
 
     // OKI sound telemetry, the four links the hardware overlay counts.
     output logic [31:0] oki_wr_cnt,
@@ -362,6 +371,13 @@ module kaneko_cpumem_harness #(
     // kaneko_bus -- and to calc3_io twice. It has been unbuildable since the
     // MCU's RAM moved to SDRAM, and the only reason that was not noticed is
     // that nothing runs it. Same shape as the x2 harness that sat orphaned.
+    assign dbg_p10_req  = p10_req;
+    assign dbg_p10_we   = p10_we;
+    assign dbg_p10_ack  = p_ack_bus[10];
+    assign dbg_p10_be   = p10_be;
+    assign dbg_p10_din  = p10_din;
+    assign dbg_p10_addr = p10_addr;
+
     assign selftest_done  = rt_done;
     assign selftest_pass   = rt_pass;
     assign selftest_stage  = rt_fail_stage;
@@ -545,6 +561,15 @@ module kaneko_cpumem_harness #(
 
         .rom_req(p1_req), .rom_addr(p1_addr),
         .rom_ack(p_ack_bus[1]), .rom_dout(p_dout_bus[1]),
+        // WITHOUT THIS the CALC3 decode is off and sel_mcu never matches, so
+        // every MCU RAM read returns the bus's 0xffff default and every write
+        // is dropped. It reproduced the board's symptom exactly -- the game's
+        // RAM test reading back ffff and branching into its failure path -- and
+        // was an unconnected input reading as zero in the HARNESS, not a fault
+        // in the core, which wires it. An omitted input is the same silent
+        // failure check_ports exists to catch on the core, and harnesses have
+        // no such check.
+        .calc3_io(CFG_CALC3_IO),
         .mcuram_req(cpu_mcu_req), .mcuram_addr(cpu_mcu_addr),
         .mcuram_we(cpu_mcu_we), .mcuram_din(cpu_mcu_din),
         .mcuram_be(cpu_mcu_be), .mcuram_ack(cpu_mcu_ack),

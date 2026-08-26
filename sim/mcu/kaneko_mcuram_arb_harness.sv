@@ -18,6 +18,10 @@ module kaneko_mcuram_arb_harness #(
     input  wire [SDR_AW:1] m0_addr, m1_addr, m2_addr, m3_addr,
     input  wire            m0_we,  m1_we,  m3_we,
     input  wire [15:0]     m0_din, m1_din, m3_din,
+    // BYTE ENABLES, per master. These were hardcoded to 2'b11 here, so the
+    // arbiter's byte-enable path had never been tested -- and a byte write
+    // that arrives as a whole word silently destroys the other half.
+    input  wire [1:0]      m0_be,  m1_be,  m3_be,
     output logic           m0_ack, m1_ack, m2_ack, m3_ack,
     output logic [63:0]    m_dout,
 
@@ -38,7 +42,8 @@ module kaneko_mcuram_arb_harness #(
   // self-test, which does.
   wire [NM-1:0]           m_we   = {m3_we, 1'b0, m1_we, m0_we};
   wire [NM-1:0][15:0]     m_din  = {m3_din, 16'd0, m1_din, m0_din};
-  wire [NM-1:0][1:0]      m_be   = {2'b11, 2'b11, 2'b11, 2'b11};
+  // Master 2 is the data ROM fetch: a reader, so its enables never matter.
+  wire [NM-1:0][1:0]      m_be   = {m3_be, 2'b11, m1_be, m0_be};
   wire [NM-1:0]           m_ack;
 
   assign {m3_ack, m2_ack, m1_ack, m0_ack} = m_ack;

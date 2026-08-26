@@ -9,6 +9,7 @@
 // big-endian words straight from the file and never went through the loader,
 // so the two conventions never met. This runs both and prints the difference.
 #include <cstdio>
+#include <string>
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
@@ -35,12 +36,27 @@ static uint8_t  game_id   = 0;
 static bool     data_only = false;   // skip the ROM window, as the Lua can
 static size_t   tail_next = 0;
 static FILE*    trace_fp    = nullptr;
+static FILE*    p10_log     = nullptr;
 static uint64_t trace_limit = 0;
 static uint64_t trace_n     = 0;
+
+// Every completed MCU RAM write, where the CONTROLLER sees it. The CPU trace
+// says what the 68000 asked for; this says what arrived. A write present in one
+// and absent from the other is a lost write, and the two halves of a
+// byte-written word are exactly where that shows.
+static void log_p10() {
+    if (!p10_log) return;
+    if (dut->dbg_p10_ack && dut->dbg_p10_we) {
+        std::fprintf(p10_log, "%06x W %04x be%d\n",
+                     (unsigned)dut->dbg_p10_addr, dut->dbg_p10_din,
+                     dut->dbg_p10_be);
+    }
+}
 
 static void tick() {
     dut->clk = 0; dut->eval();
     dut->clk = 1; dut->eval();
+    log_p10();
     tick_count++;
 }
 
@@ -324,6 +340,10 @@ int main(int argc, char** argv) {
     dut = new Vkaneko_cpumem_harness;
     if (trace_path) {
         trace_fp = std::fopen(trace_path, "w");
+        {
+            std::string pl = std::string(trace_path) + ".p10";
+            p10_log = std::fopen(pl.c_str(), "w");
+        }
         if (!trace_fp) { std::fprintf(stderr, "cannot write %s\n", trace_path); return 2; }
         trace_limit = trace_count;
         trace_n = 0;

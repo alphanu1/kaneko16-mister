@@ -507,7 +507,35 @@ module kaneko_bus #(
                             // deliberately left high until the data is here.
                             if (sel_mcu) begin
                                 mcuram_req  <= 1'b1;
-                                mcuram_addr <= base_mcuram + SDR_AW'(a[16:1]);
+                                // A READ MUST BE ALIGNED DOWN, a write must not.
+                                //
+                                // The controller starts its burst at exactly
+                                // the address it is given, so an unaligned read
+                                // returns the wanted word as word 0 of the
+                                // line -- while mcu_lane below selects with
+                                // a[2:1], which only means anything if the line
+                                // IS aligned. Every read at an address that was
+                                // not a multiple of four words therefore
+                                // returned a NEIGHBOURING word: a plausible
+                                // value from the wrong place.
+                                //
+                                // Shogun Warriors fills this RAM with a
+                                // repeating pattern and reads it back before it
+                                // will boot, so it read a real pattern word
+                                // that was not the one it wrote, failed its RAM
+                                // test, and sat there with a black screen.
+                                //
+                                // The ROM path has always aligned -- see
+                                // rom_addr above, "aligned down so the burst is
+                                // a natural line". This one did not, and no
+                                // testbench compared the two.
+                                //
+                                // A WRITE keeps the exact address: it is a
+                                // single word, and aligning it would put it in
+                                // the wrong place entirely.
+                                mcuram_addr <= base_mcuram +
+                                    (wr ? SDR_AW'(a[16:1])
+                                        : SDR_AW'({a[16:3], 2'b00}));
                                 mcuram_we   <= wr;
                                 mcuram_din  <= oEdb;
                                 mcuram_be   <= {~UDSn, ~LDSn};

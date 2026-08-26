@@ -455,6 +455,30 @@ calc3:
 	@tools/calc3_ref.py $(CALC3_DIR)/$(CALC3_SET)-calc3rom.bin \
 	  --selftest $(CALC3_DIR)
 
+# --------------------------------------------------------------- lockstep
+# The core's 68000 against MAME's, access by access, from reset.
+#
+# Not part of `make test`: it needs MAME, a romset and a long simulation,
+# none of which is in the repository. It is the check that found the MCU RAM
+# read misalignment, which no unit test could -- every module involved was
+# correct on its own, and the fault was in how one of them asked for a burst.
+LOCK_SET   ?= shogwarr
+LOCK_TICKS ?= 400000000
+LOCK_SECS  ?= 8
+
+.PHONY: lockstep
+lockstep: regions
+	@mkdir -p build/mamerun
+	@cd build/mamerun && TRACE_OUT=../../build/mame_lock.txt TRACE_LIMIT=4000000 \
+	  mame -rompath $(ROMPATH) $(LOCK_SET) \
+	  -autoboot_script ../../tools/mame_bustrace.lua \
+	  -skip_gameinfo -autoboot_delay 0 -seconds_to_run $(LOCK_SECS) \
+	  -video none -sound none >/dev/null 2>&1
+	@$(MAKE) --no-print-directory boot SET=$(LOCK_SET) \
+	  BOOT_ARGS="--ticks $(LOCK_TICKS) --trace build/core_lock.txt \
+	             --count 4000000 --data-only" >/dev/null 2>&1
+	@tools/lockstep.py build/mame_lock.txt build/core_lock.txt
+
 # ------------------------------------------------------------ multi-game gate
 # Hard rule 9: a change to shared video code must be checked against every
 # configured game, not just the one being worked on. Games differ in chip

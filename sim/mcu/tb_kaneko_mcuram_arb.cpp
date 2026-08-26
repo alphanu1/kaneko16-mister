@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
   Verilated::commandArgs(argc, argv);
   auto* d = new Vkaneko_mcuram_arb_harness;
   std::mt19937 rng(0xa4b17e40u);
-  long checks = 0, fails = 0, inflight_max = 0;
+  long checks = 0, fails = 0, inflight_max = 0, byte_writes = 0;
   long done[NM] = {0, 0, 0, 0};
 
   std::map<uint32_t, uint16_t> mem;
@@ -56,22 +56,24 @@ int main(int argc, char** argv) {
   d->rst_n = 0; d->s_ack = 0;
   d->m0_req = d->m1_req = d->m2_req = d->m3_req = 0;
   d->m0_we = d->m1_we = d->m3_we = 0;
+  d->m0_be = d->m1_be = d->m3_be = 3;
   for (int i = 0; i < 4; i++) tick();
   d->rst_n = 1;
 
   struct Pend { bool busy = false; uint32_t addr = 0; bool we = false;
-                uint16_t din = 0; uint16_t want = 0; bool raised = false; };
+                uint16_t din = 0; uint16_t want = 0; bool raised = false;
+                uint8_t be = 3; };
   Pend p[NM];
 
   // Verilator packs the flattened arrays; set each master's slice by index.
   // NO `default:`; an out-of-range master must be loud, not routed onto one
   // that happens to exist.
-  auto set_master = [&](int i, uint32_t addr, bool we, uint16_t din) {
+  auto set_master = [&](int i, uint32_t addr, bool we, uint16_t din, uint8_t be) {
     switch (i) {
-      case 0: d->m0_addr = addr; d->m0_din = din; d->m0_we = we; d->m0_req = 1; break;
-      case 1: d->m1_addr = addr; d->m1_din = din; d->m1_we = we; d->m1_req = 1; break;
+      case 0: d->m0_addr = addr; d->m0_din = din; d->m0_we = we; d->m0_be = be; d->m0_req = 1; break;
+      case 1: d->m1_addr = addr; d->m1_din = din; d->m1_we = we; d->m1_be = be; d->m1_req = 1; break;
       case 2: d->m2_addr = addr; d->m2_req = 1; break;
-      case 3: d->m3_addr = addr; d->m3_din = din; d->m3_we = we; d->m3_req = 1; break;
+      case 3: d->m3_addr = addr; d->m3_din = din; d->m3_we = we; d->m3_be = be; d->m3_req = 1; break;
       default: printf("  FATAL master %d out of range\n", i); std::abort();
     }
   };
@@ -104,9 +106,19 @@ int main(int argc, char** argv) {
     // Master 2 is the data ROM fetch: a reader, never a writer.
     p[i].we = (i != 2) && ((rng() % 3) == 0);   // only the ROM fetch never writes
     p[i].din = (uint16_t)rng();
-    if (p[i].we) mem[p[i].addr] = p[i].din;
-    else p[i].want = mem.count(p[i].addr) ? mem[p[i].addr] : 0;
-    set_master(i, p[i].addr, p[i].we, p[i].din);
+    // BYTE writes as often as words. A byte write that reaches memory as a
+    // whole word destroys the half it should not touch, and nothing downstream
+    // notices until a game reads that half back.
+    p[i].be = p[i].we ? (uint8_t)(1 + rng() % 3) : (uint8_t)3;
+    if (p[i].we) {
+      uint16_t cur = mem.count(p[i].addr) ? mem[p[i].addr] : 0;
+      if (p[i].be & 2) cur = (uint16_t)((cur & 0x00ff) | (p[i].din & 0xff00));
+      if (p[i].be & 1) cur = (uint16_t)((cur & 0xff00) | (p[i].din & 0x00ff));
+      mem[p[i].addr] = cur;
+    } else {
+      p[i].want = mem.count(p[i].addr) ? mem[p[i].addr] : 0;
+    }
+    set_master(i, p[i].addr, p[i].we, p[i].din, p[i].be);
   };
 
   int s_delay = 0; bool s_busy = false;
@@ -173,6 +185,7 @@ int main(int argc, char** argv) {
           fails++;
         }
       }
+      if (p[i].we && p[i].be != 3) byte_writes++;
       p[i].busy = false;
       p[i].raised = false;
       clear_req(i);
@@ -190,6 +203,11 @@ int main(int argc, char** argv) {
     }
   }
   checks++;
+  if (!byte_writes) {
+    printf("  FAIL no byte writes were exercised\n");
+    fails++;
+  }
+  checks++;
   if (inflight_max < NM) {
     printf("  FAIL the masters never all contended, so arbitration was "
            "never tested\n");
@@ -197,8 +215,8 @@ int main(int argc, char** argv) {
   }
 
   printf("kaneko_mcuram_arb: checks=%ld fails=%ld served=%ld/%ld/%ld/%ld "
-         "max_contending=%ld\n", checks, fails, done[0], done[1], done[2],
-         done[3], inflight_max);
+         "max_contending=%ld byte_writes=%ld\n", checks, fails, done[0],
+         done[1], done[2], done[3], inflight_max, byte_writes);
   delete d;
   return fails ? 1 : 0;
 }
