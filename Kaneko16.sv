@@ -987,30 +987,6 @@ kaneko_hit u_hit
 	.rnd(hit_lfsr)
 );
 
-// SHARED WITH THE CALC3 SIMULATION, AND CURRENTLY 8 KB RATHER THAN 64.
-//
-// shogwarr_map declares 200000-20ffff, sixty-four kilobytes. That does not
-// fit, and the way it does not fit is the M10K cliff this core has hit before.
-//
-// The 64 KB version costs about 64 M10K blocks. Taking them leaves too few for
-// kaneko_vmem, whose sprite and palette memories are ONE WRITE TWO READS --
-// which an M10K cannot be, so Quartus duplicates them, silently, and only
-// while blocks are spare. With the spare gone it built registers instead:
-// vmem alone asked for 65,563 of them and the fitter wanted 6,773 LABs against
-// the device's 4,191. The same failure kaneko_z80rom.sv's header describes,
-// from a different direction.
-//
-// Eight kilobytes is a PLACEHOLDER so the design builds while CALC3 is
-// written. It is certainly too small -- the init command alone places an
-// EEPROM copy at an address the game chooses -- and the real fix is one of:
-//
-//   - free the 192 blocks the sprite bitmap holds, which is blocked on SDRAM
-//     bandwidth (D5) and is the same 192 blocks Tier 3 needs
-//   - put this RAM in SDRAM, at the cost of latency on every MCU access
-//   - establish how much of the 64 KB the games actually touch
-//
-// Whichever it is, it has to be settled before Tier 2 can run. Recorded in
-// HANDOFF as the blocker rather than left to be rediscovered by a build.
 // THE MCU'S 64 KB LIVES IN SDRAM NOW, NOT HERE.
 //
 // In block memory it cost 56 M10K and took the device to 95%, where the

@@ -392,23 +392,39 @@ through a line than byte by byte. `base_calc3rom` is byte 0x40000 on both games,
 now a named base checked against the ROM layout by `check_bases` — and that
 check fails when the base is wrong, verified by making it wrong.
 
-**Its MCU RAM accesses share port 10 with the 68000, through
-`rtl/mcu/kaneko_mcuram_arb.sv`.** A second SDRAM port would also work and the
-controller would serialise it, but it would put a SECOND writer on the SDRAM
-where this core has exactly one — and the write path is the part that has never
-run on hardware. One arbitrated port also makes coherency structural: only one
-access is ever in flight, so a read cannot pass a write to the same address.
-With two ports that ordering would be a hope.
+**Everything the CALC3 touches shares port 10**, through
+`rtl/mcu/kaneko_mcuram_arb.sv` — three masters: the 68000 reaching the shared
+RAM, the CALC3 reaching that same RAM, and the CALC3's data ROM fetch. So
+`NPORTS` stays 11 and the data ROM does not get a port of its own.
 
-Priority ALTERNATES. The CALC3 issues thousands of back-to-back accesses while
-decompressing a table, and a fixed priority either way starves the other master
-for the whole run — the 68000 waits on DTACK, so starving it stalls the game.
-`tb_kaneko_mcuram_arb` holds both requests high for 200,000 cycles and requires
-both to progress: 257,159 checks, 0 fails, 28,579 accesses each, an exactly even
-split. Making the priority fixed drives one master to zero and fails the test.
+Three reasons, in order of what they cost to get wrong:
 
-Still to do: the instantiation in `Kaneko16.sv` itself, and `NPORTS` 11 -> 12
-for the data ROM's port. Nothing here has run on hardware.
+- A port each puts a **second writer** on the SDRAM. This core has exactly one,
+  the harness that checks the write path models one, and that path has never run
+  on hardware. Two writers is not the change to make in the same step as
+  bringing up a new device.
+- One port makes coherency **structural**. The 68000 and the MCU share that RAM
+  as their channel; with one access ever in flight a read cannot pass a write to
+  the same address. Across two ports that ordering would be a hope.
+- Every extra port is another entry in seven harnesses and a per-port switch in
+  `tb_kaneko_sdram` — the churn where the last port-count change went wrong
+  twice in one evening.
+
+**Round robin, not fixed priority.** The CALC3 issues thousands of back-to-back
+accesses while decompressing a table, and a fixed order starves whoever sits
+below it for the whole run; the 68000 waits on DTACK, so starving it stalls the
+game. `tb_kaneko_mcuram_arb` holds all three requests high for 200,000 cycles
+and requires an even split: 257,068 checks, 0 fails, 19,021 / 19,022 / 19,021
+served. Making the order fixed sends two masters to zero and fails it.
+
+The testbench goes through a harness with one flat port per master. A packed
+`[NM-1:0][SDR_AW:1]` reaches C++ as a single scalar, not one entry per master,
+so indexing it addresses the wrong bits and reports the arbiter swapping data
+between masters — a convincing-looking lie, already on record against
+`kaneko_sdram_harness` for the same reason.
+
+Still to do: the instantiation in `Kaneko16.sv` itself. Nothing here has run on
+hardware.
 
 A diff rather than a write tap deliberately — a tap sees every access through
 the space and cannot say who made it, so the 68000's own use of that RAM would

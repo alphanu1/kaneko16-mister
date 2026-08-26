@@ -1,113 +1,112 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Two masters, one SDRAM port, for the CALC3 board's shared MCU RAM.
+// N masters, one SDRAM port, for the CALC3 board.
 //
-// The 64 KB at 200000 is shared between the 68000 and the CALC3 -- that is what
-// makes it the communication channel, and both reach it through SDRAM here.
+// Three masters share it: the 68000 reaching the MCU's shared RAM, the CALC3
+// reaching that same RAM, and the CALC3 reading its external data ROM.
 //
-// ONE PORT, ARBITRATED, rather than a port each. Two ports would work and the
-// controller would serialise them, but it would put a SECOND writer on the
-// SDRAM, and this core has exactly one -- the harness that checks the write
-// path models one, and the write path is the part that has never run on
-// hardware. Sharing one port also makes coherency structural: the two masters
-// cannot have overlapping accesses in flight, so a read cannot pass a write to
-// the same address. With two ports that ordering would be a hope.
+// ONE PORT, ARBITRATED, rather than a port each. Three reasons, in order of
+// how much they cost to get wrong:
 //
-// ALTERNATING PRIORITY, not fixed. The CALC3 issues a long run of accesses when
-// it decompresses a table -- thousands, back to back -- and a fixed priority
-// either way starves the other master for the whole run. The 68000 stalls on
-// DTACK while it waits, so starving it stalls the game.
+//   A port each puts a SECOND WRITER on the SDRAM. This core has exactly one,
+//   the harness that checks the write path models one, and that path has never
+//   run on hardware. Two writers is not the change to make in the same step as
+//   bringing up a new device.
+//
+//   One port makes coherency STRUCTURAL. The 68000 and the MCU share that RAM
+//   as their communication channel; with one access ever in flight a read
+//   cannot pass a write to the same address. Across two ports that ordering
+//   would be a hope.
+//
+//   Every extra port is another entry in seven harnesses and a per-port switch
+//   in tb_kaneko_sdram. That churn is where the last port-count change went
+//   wrong twice.
+//
+// ROUND ROBIN, not fixed priority. The CALC3 issues thousands of back-to-back
+// accesses while decompressing a table, and a fixed order starves whoever sits
+// below it for the whole run -- the 68000 waits on DTACK, so starving it stalls
+// the game.
 
 module kaneko_mcuram_arb #(
-    parameter int unsigned SDR_AW = 25
+    parameter int unsigned SDR_AW = 25,
+    parameter int unsigned NM     = 3      // masters
 ) (
-    input  wire        clk,
-    input  wire        rst_n,
+    input  wire clk,
+    input  wire rst_n,
 
-    // Master A: the 68000, through kaneko_bus.
-    input  wire            a_req,
-    input  wire [SDR_AW:1] a_addr,
-    input  wire            a_we,
-    input  wire [15:0]     a_din,
-    input  wire [1:0]      a_be,
-    output logic           a_ack,
-    output logic [63:0]    a_dout,
-
-    // Master B: the CALC3.
-    input  wire            b_req,
-    input  wire [SDR_AW:1] b_addr,
-    input  wire            b_we,
-    input  wire [15:0]     b_din,
-    input  wire [1:0]      b_be,
-    output logic           b_ack,
-    output logic [63:0]    b_dout,
+    // Masters, flattened. Master 0 is the 68000, 1 the CALC3's RAM port, 2 its
+    // data ROM fetch. Only master 0 and 1 ever write; the ROM fetch is a reader
+    // and ties its we low.
+    input  wire [NM-1:0]            m_req,
+    input  wire [NM-1:0][SDR_AW:1]  m_addr,
+    input  wire [NM-1:0]            m_we,
+    input  wire [NM-1:0][15:0]      m_din,
+    input  wire [NM-1:0][1:0]       m_be,
+    output logic [NM-1:0]           m_ack,
+    output logic [63:0]             m_dout,     // shared: valid with m_ack
 
     // The SDRAM port.
-    output logic           s_req,
+    output logic            s_req,
     output logic [SDR_AW:1] s_addr,
-    output logic           s_we,
-    output logic [15:0]    s_din,
-    output logic [1:0]     s_be,
-    input  wire            s_ack,
-    input  wire [63:0]     s_dout
+    output logic            s_we,
+    output logic [15:0]     s_din,
+    output logic [1:0]      s_be,
+    input  wire             s_ack,
+    input  wire [63:0]      s_dout
 );
 
-  typedef enum logic [1:0] { S_IDLE, S_A, S_B } state_t;
-  state_t state;
-  logic   last_was_a;          // for the alternation
+  localparam int unsigned MW = (NM <= 1) ? 1 : $clog2(NM);
 
-  // Whose turn it is when both ask at once.
-  wire a_first = !last_was_a;
+  logic              busy;
+  logic [MW-1:0]     grant;
+  logic [MW-1:0]     last;        // who went last, for the rotation
+
+  // The next requester at or after `start`, searched in rotation order so no
+  // master can be passed over twice while it is asking.
+  function automatic [MW-1:0] pick(input [MW-1:0] from, input [NM-1:0] asking);
+    logic [MW-1:0] c;
+    begin
+      pick = from;
+      for (int k = 0; k < NM; k++) begin
+        c = MW'((int'(from) + k) % NM);
+        if (asking[c]) begin
+          pick = c;
+          break;
+        end
+      end
+    end
+  endfunction
+
+  wire [MW-1:0] next_start = MW'((int'(last) + 1) % NM);
+  wire          any_req    = |m_req;
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      state      <= S_IDLE;
-      s_req      <= 1'b0;
-      a_ack      <= 1'b0;
-      b_ack      <= 1'b0;
-      last_was_a <= 1'b0;
+      busy  <= 1'b0;
+      s_req <= 1'b0;
+      m_ack <= '0;
+      last  <= '0;
+      grant <= '0;
     end else begin
-      // Acknowledges are single-cycle pulses, as every master here expects.
-      a_ack <= 1'b0;
-      b_ack <= 1'b0;
+      m_ack <= '0;                     // single-cycle pulses
 
-      case (state)
-        S_IDLE: begin
-          if (a_req && (a_first || !b_req)) begin
-            s_req  <= 1'b1;
-            s_addr <= a_addr;
-            s_we   <= a_we;
-            s_din  <= a_din;
-            s_be   <= a_be;
-            state  <= S_A;
-          end else if (b_req) begin
-            s_req  <= 1'b1;
-            s_addr <= b_addr;
-            s_we   <= b_we;
-            s_din  <= b_din;
-            s_be   <= b_be;
-            state  <= S_B;
-          end
+      if (!busy) begin
+        if (any_req) begin
+          grant  <= pick(next_start, m_req);
+          s_req  <= 1'b1;
+          s_addr <= m_addr[pick(next_start, m_req)];
+          s_we   <= m_we  [pick(next_start, m_req)];
+          s_din  <= m_din [pick(next_start, m_req)];
+          s_be   <= m_be  [pick(next_start, m_req)];
+          busy   <= 1'b1;
         end
-
-        S_A: if (s_ack) begin
-          s_req      <= 1'b0;
-          a_dout     <= s_dout;
-          a_ack      <= 1'b1;
-          last_was_a <= 1'b1;
-          state      <= S_IDLE;
-        end
-
-        S_B: if (s_ack) begin
-          s_req      <= 1'b0;
-          b_dout     <= s_dout;
-          b_ack      <= 1'b1;
-          last_was_a <= 1'b0;
-          state      <= S_IDLE;
-        end
-
-        default: state <= S_IDLE;
-      endcase
+      end else if (s_ack) begin
+        s_req         <= 1'b0;
+        m_dout        <= s_dout;
+        m_ack[grant]  <= 1'b1;
+        last          <= grant;
+        busy          <= 1'b0;
+      end
     end
   end
 
