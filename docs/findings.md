@@ -7151,3 +7151,38 @@ the fix it reports `a one-cycle write request reached the memory as a READ`.
 Found by putting the MCU in the lockstep harness and logging its own accesses:
 its reads returned exactly the values MAME's did, and nothing it wrote was ever
 read back by anything.
+
+## The SDRAM interface was never timed, and constraining it gained 2 ns
+
+Neither `KanekoCALC3.sdc` nor `sys/sys_top.sdc` referenced an SDRAM pin. The
+build report said so for anyone who looked:
+
+    Unconstrained Input Ports   20      <- SDRAM_DQ[0..15]
+    Unconstrained Output Ports  87      <- SDRAM_A[*], SDRAM_BA[*], the rest
+
+So every build in this repository's history reported "timing closed" with the
+memory interface entirely untimed: the fitter routed those pins to suit itself
+and the analyser never asked whether data lands in the sampling window.
+Simulation cannot see it either -- there are no I/O delays in simulation -- so
+this was invisible to the whole gate and could only ever have shown up as
+memory that reads back wrong on the board, intermittently.
+
+**The first attempt reported -9.259 ns and was wrong.** A board that streams
+graphics and sound out of this memory is not 9 ns short. `SDRAM_CLK` is driven
+from outclk_2, 180 degrees from the controller's outclk_0, so read data is
+captured by the controller edge AFTER the one a default single-cycle analysis
+picks; it was comparing against an edge 5.2 ns too early. With
+`set_multicycle_path -setup -end 2` on the data pins the read path closes at
++0.373 ns.
+
+What was left was real and had been invisible: the address and command outputs
+missed setup by **-0.339 ns**, measured against a placement the fitter had
+produced while the constraints did not exist. Rebuilding with them active:
+
+    SDRAM_CLK_pin   -0.339  ->  +1.848
+    general[0]                  +0.384
+    total negative slack         0.000
+
+The fitter closed it as soon as it was told the paths mattered, for ten ALMs.
+Where a measurement and a working board disagree the measurement is wrong until
+shown otherwise -- and then the corrected measurement is worth having.

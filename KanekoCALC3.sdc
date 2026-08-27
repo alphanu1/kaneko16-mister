@@ -62,3 +62,57 @@ if {[llength $sdram_clk] == 0 || [llength $core_clk] == 0} {
        SDRAM) and general[1] (48 MHz core), and did not find both. Outputs with\
        identical frequency and phase share one counter -- see rtl/pll/pll.v."
 }
+
+# ---------------------------------------------------------------- SDRAM I/O
+#
+# THE SDRAM INTERFACE WAS ENTIRELY UNTIMED, and a build reported timing closed
+# while it was. The report says so plainly once it is read:
+#
+#     Unconstrained Input Ports   20      <- SDRAM_DQ[0..15] among them
+#     Unconstrained Output Ports  87      <- SDRAM_A[*], SDRAM_BA[*], the rest
+#
+# Nothing in this file or in sys/sys_top.sdc referenced an SDRAM pin, so the
+# fitter routed them to suit itself and STA never asked whether data arrives
+# inside the sampling window. Every simulation passes regardless -- simulation
+# has no I/O delays -- so this is invisible to the entire test gate and shows
+# up only as memory that reads back wrong on the board, intermittently.
+#
+# The pin clock is outclk_2: 96 MHz, 180 degrees from the controller's
+# outclk_0, which is what SDRAM_CLK is assigned from in KanekoCALC3.sv. A
+# generated clock on the PORT is what makes the rest of these mean anything --
+# without it there is no reference for the data to be late or early against.
+create_generated_clock -name SDRAM_CLK_pin \
+    -source [get_pins {*|pll|pll_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+    [get_ports {SDRAM_CLK}]
+
+# Numbers for a W9825G6KH-6 class part, which is what the MiSTer SDRAM modules
+# carry, plus about 1 ns of board routing:
+#   input  max  tAC 5.4 + 1.0     data valid this long after the clock edge
+#   input  min  tOH 0   + 1.0     and held at least this long
+#   output max  tSU 1.5           the device needs setup this far ahead
+#   output min  tH -0.8           and hold this far after
+# CHECK THESE AGAINST THE MODULE ACTUALLY FITTED before trusting a pass: a
+# wrong number here does not fail, it moves the window, which is the same
+# class of fault as a default that returns a plausible value.
+set sdram_out [get_ports {SDRAM_A[*] SDRAM_BA[*] SDRAM_DQ[*] SDRAM_DQML \
+                          SDRAM_DQMH SDRAM_nCS SDRAM_nRAS SDRAM_nCAS \
+                          SDRAM_nWE SDRAM_CKE}]
+
+set_input_delay  -clock SDRAM_CLK_pin -max 6.4  [get_ports {SDRAM_DQ[*]}]
+set_input_delay  -clock SDRAM_CLK_pin -min 1.0  [get_ports {SDRAM_DQ[*]}]
+set_output_delay -clock SDRAM_CLK_pin -max 1.5  $sdram_out
+set_output_delay -clock SDRAM_CLK_pin -min -0.8 $sdram_out
+
+# THE CAPTURING EDGE IS THE NEXT ONE, and saying so is the difference between
+# a report that means something and a 9 ns violation on an interface that
+# demonstrably works. SDRAM_CLK_pin is 180 degrees from the controller clock,
+# so read data launched by the pin clock is captured by the controller edge
+# AFTER the one a default single-cycle analysis picks -- it compares against an
+# edge 5.2 ns too early and reports -9.259 ns.
+#
+# A build that fits and streams graphics and sound out of this memory is not
+# 9 ns short. Where a measurement and a working board disagree, the measurement
+# is wrong until shown otherwise -- which is the same rule that has caught
+# three testbenches in this repository.
+set_multicycle_path -setup -end 2 -from [get_ports {SDRAM_DQ[*]}]
+set_multicycle_path -hold  -end 1 -from [get_ports {SDRAM_DQ[*]}]
