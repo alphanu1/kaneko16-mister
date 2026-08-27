@@ -147,7 +147,13 @@ module kaneko_calc3_sys_harness #(
   assign dbg_rom_valid = c3_rom_valid;
 
   wire c3_ram_req = c3_ram_rd | c3_ram_wr;
-  wire [SDR_AW:1] c3_ram_sdr_addr = base_mcuram + SDR_AW'(c3_ram_addr[15:1]);
+  // Aligned read, exact write -- the same pairing the core uses, because this
+  // harness exists to run the MCU against the real crossing, controller and
+  // DRAM model. Copying the core's glue is the point; copying its bug made
+  // this harness agree with it.
+  wire [SDR_AW:1] c3_ram_sdr_addr = base_mcuram +
+      (c3_ram_wr ? SDR_AW'(c3_ram_addr[15:1])
+                 : SDR_AW'({c3_ram_addr[15:3], 2'b00}));
   logic [1:0] c3_ram_lane;
   always_ff @(posedge clk) if (c3_ram_req) c3_ram_lane <= c3_ram_addr[2:1];
   wire [15:0] c3_ram_rdata = arb_dout[{c3_ram_lane, 4'd0} +: 16];

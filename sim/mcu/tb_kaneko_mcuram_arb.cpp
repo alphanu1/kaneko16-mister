@@ -214,6 +214,53 @@ int main(int argc, char** argv) {
     fails++;
   }
 
+  // A HELD REQUEST IS ONE REQUEST, NOT A STREAM OF THEM.
+  //
+  // Every master above holds its request high continuously, which is a
+  // throughput test: repeated service is the correct answer there. The real
+  // masters do something this file never modelled -- kaneko_bus and
+  // kaneko_tilerom hold until the acknowledge and then MOVE ON, changing
+  // address and data. The request is therefore still high on the very cycle
+  // the transaction completes, and an arbiter that reads it as a fresh access
+  // runs a second one a cycle later against the master's NEW address. For a
+  // read that wastes a slot. For a write it puts the finished transaction's
+  // data at the address the master has moved to, which is silent corruption
+  // of memory nobody wrote.
+  for (int i = 0; i < NM; i++) clear_req(i);
+  for (int i = 0; i < 40; i++) { d->s_ack = d->s_req; tick(); }
+  d->s_ack = 0;
+  {
+    const uint32_t A = 0x1000, B = 0x2000;
+    long xacts = 0, at_B = 0;
+    bool acked = false;
+    set_master(0, A, true, 0xbeef, 3);
+    for (int c = 0; c < 60; c++) {
+      // Single-cycle slave: acknowledge whatever is asked, and record it.
+      const bool serving = d->s_req;
+      const uint32_t sa = d->s_addr;
+      d->s_ack = serving ? 1 : 0;
+      if (serving) { xacts++; if (sa == B) at_B++; }
+      tick();
+      if (!acked && ack_of(0)) {
+        acked = true;
+        clear_req(0);
+        d->m0_addr = B; d->m0_din = 0x1234;   // the master has moved on
+      }
+    }
+    d->s_ack = 0;
+    checks++;
+    if (xacts != 1) {
+      printf("  FAIL one held request produced %ld transactions\n", xacts);
+      fails++;
+    }
+    checks++;
+    if (at_B) {
+      printf("  FAIL %ld transaction(s) ran at the address the master moved "
+             "to after its acknowledge\n", at_B);
+      fails++;
+    }
+  }
+
   printf("kaneko_mcuram_arb: checks=%ld fails=%ld served=%ld/%ld/%ld/%ld "
          "max_contending=%ld byte_writes=%ld\n", checks, fails, done[0],
          done[1], done[2], done[3], inflight_max, byte_writes);

@@ -130,6 +130,15 @@ module kaneko_mcuram_arb #(
         m_ack[grant]  <= 1'b1;
         last          <= grant;
         busy          <= 1'b0;
+        // A HELD REQUEST IS NOT A SECOND REQUEST. kaneko_bus and
+        // kaneko_tilerom both hold until their acknowledge, so m_req is still
+        // high on the cycle the transaction completes -- and the `pend | m_req`
+        // above would take that as a fresh access. The arbiter then ran it a
+        // cycle later against whatever the master had MOVED ON to: for a read
+        // that is a wasted slot, but for a write it puts the previous data at
+        // the next address. Clear the acknowledged master here; it re-requests
+        // by raising m_req after it has seen the ack.
+        pend          <= (pend | m_req) & ~(NM'(1) << grant);
       end
     end
   end

@@ -6962,3 +6962,55 @@ conventions are valid. Only mixing them is wrong.
 The general shape is worth more than the fix: **a model built from the same
 assumption as the code it checks cannot fail.** The CPU fault was only ever
 found against MAME, which shares no assumptions with any of this.
+
+## A held request is one request, and the arbiter counted it twice
+
+`kaneko_mcuram_arb` latches requests into `pend` because not every master
+holds one -- `kaneko_calc3` clears `ram_rd`/`ram_wr` immediately, and a pulse
+that is not caught is lost. The latch runs unconditionally:
+
+    pend <= pend | m_req;
+
+On the cycle a transaction completes, the acknowledged master's `m_req` is
+still high: `kaneko_bus` and `kaneko_tilerom` both hold until they see the
+acknowledge and drop it on the edge after. So the OR above set the bit again,
+and the arbiter started a SECOND transaction a cycle later -- against whatever
+address and data the master had moved on to by then.
+
+For a read that is a wasted slot and nothing worse. For a write it puts the
+completed write's data at the master's NEXT address: memory nobody wrote,
+changed by a transaction nobody asked for. The 68000's shared-RAM writes go
+through this arbiter, and Shogun Warriors verifies that RAM before it will do
+anything else.
+
+The acknowledged master is now cleared from `pend` on completion. It
+re-requests by raising `m_req` after seeing the acknowledge, which is what its
+own state machine does anyway.
+
+**The testbench could not have caught it.** Every master in
+`tb_kaneko_mcuram_arb` holds its request high continuously -- a throughput
+test, where repeated service is the correct answer. Nothing modelled the one
+thing the real masters do: hold until the acknowledge, then move on. That case
+is now a test, and it fails without the fix with `one held request produced 2
+transactions` and `1 transaction ran at the address the master moved to`.
+
+## Open: the CALC3 system harness reports failures and counts none
+
+`tb_kaneko_calc3_sys` prints `10 of 16 word writes read back wrong` and `44 of
+64 byte writes read back wrong`, then reports `checks=82 fails=0`. The counts
+go into local variables that never reach `fails`, so the gate has been green
+across every run that printed them.
+
+Neither fix above changes those numbers, and the failure does not reproduce in
+the controller's own testbench (6,323 general-port writes pass), the crossing's
+(port `NP-1` writes through it pass), or the arbiter's. Moving the test region
+outside the MCU's 64 KB window does not change it either, so it is not the live
+MCU overwriting the words. Draining 200 cycles between write and readback makes
+it worse, not better, and one readback returned another test word's value --
+which points at the address a write lands on rather than at completion timing.
+
+Recorded rather than fixed: making the counts real turns the gate red on
+something not yet understood, and the two proven fixes above are worth
+measuring on hardware first. **Whoever picks this up should start here, because
+a test that prints FAIL and reports green is the same family as a default that
+returns a plausible value.**
