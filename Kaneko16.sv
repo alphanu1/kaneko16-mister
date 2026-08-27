@@ -905,15 +905,22 @@ wire signed [16:0] snd_mix = ym_part + oki_part;
 //
 // If loud effects distort, back this off to <<< 1 -- that is the largest shift
 // that cannot clip.
-// x6, RAISED FROM x4 on the owner's report that Explosive Breaker is still
-// too quiet -- about 3.5 dB. The reasoning below still holds and this goes
-// further past the point the sum can be proven not to clip, which is why the
-// saturation under it is not optional.
+// x4, WHICH IS UNITY FOR THIS BOARD, and the DC fix is what made it enough.
 //
-// THE PRODUCT IS FORMED AT 21 BITS, NOT AT THE TARGET'S. 17 bits by 6 needs
-// 20; a narrower target truncates in silence, which is exactly how Wing
-// Force's music turned to noise a second in.
-wire signed [20:0] snd_gain = $signed({{4{snd_mix[16]}}, snd_mix}) * 21'sd6;
+// This was x4, then x6 chasing a soundtrack nobody could hear. The cause was
+// never the gain: a silent YM2149 reads 0 rather than mid-scale, so centring
+// it put a permanent -24576 into the mix, and the OKI rode on that into the
+// rail. Removing the DC gave the headroom back, and x6 was then too loud --
+// reported from hardware, exactly as raising it had been.
+//
+// x4 is where the arithmetic says unity is: jt6295's sample is 14 bits, so
+// four times it fills a 16-bit output. ADPCM rarely reaches full scale, so
+// peaks that do are caught by the saturation below rather than being designed
+// around, and anyone wanting more has the SFX control.
+//
+// THE PRODUCT IS FORMED AT 21 BITS, NOT AT THE TARGET'S. A narrower target
+// truncates in silence, which is how Wing Force's music turned to noise.
+wire signed [20:0] snd_gain = $signed({{4{snd_mix[16]}}, snd_mix}) * 21'sd4;
 wire [15:0] ym_mix = (snd_gain >  21'sd32767) ? 16'h7fff
                    : (snd_gain < -21'sd32768) ? 16'h8000
                                               : snd_gain[15:0];

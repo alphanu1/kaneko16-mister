@@ -6911,6 +6911,13 @@ pass with a corner near 7 Hz, which is what the board's coupling capacitors
 are. A real board never has this problem, because a DC level from a silent DAC
 does not reach the speaker.
 
+**And the gain went back to x4 once the DC was gone.** The level had been
+raised twice -- x4 to x6 -- chasing a soundtrack nobody could hear, and with
+the offset removed x6 was reported too loud from the same hardware. x4 is where
+the arithmetic says unity is: jt6295's sample is 14 bits, so four times it
+fills a 16-bit output. Both gain changes were treating a symptom; neither was
+the fix, and the second had to be undone.
+
 **The lesson is about what "silence" means at an interface.** The midpoint
 subtraction was correct arithmetic on an assumption nobody had checked -- that
 an unsigned audio signal idles at mid-scale. jt49 idles at zero. Nothing warned,
