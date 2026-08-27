@@ -6923,3 +6923,40 @@ subtraction was correct arithmetic on an assumption nobody had checked -- that
 an unsigned audio signal idles at mid-scale. jt49 idles at zero. Nothing warned,
 the offset was inaudible on its own, and it was only visible once something
 amplified it.
+
+## Widening a status field silently changed what an old setting meant
+, 2026-08-27
+
+Reported from a third party: rotation worked on `Kaneko16_20260824` and not on
+`Kaneko16_20260825`, on a CRT through VGA, while HDMI still rotated.
+
+The only video change between those two builds is the commit that added 180.
+For CW and CCW it produces IDENTICAL inputs to `screen_rotate` -- same
+`rotate_ccw`, same `no_rotate`, and `flip` is zero either way. Diffed to be
+sure. So the rotation logic cannot have changed behaviour... except that the
+select widened from `status[25:24]` to `[26:24]`.
+
+**Bit 26 had never meant anything before, so a config saved by the older core
+can have it set to anything.** With it set, "CW 90" -- 10 in two bits -- comes
+back as 110, code 6, which the unused-code term sent to no rotation. The menu
+still reads CW, the picture is upright, and nothing says why. Re-picking the
+option writes all three bits and clears it, which is why a setting touched
+since the upgrade behaves and one left alone does not.
+
+Codes 5, 6 and 7 now fall back to what their low two bits meant before. Only
+code 4 is new and only code 4 is 180.
+
+**Two lessons, and the second cost more than the first.**
+
+Widening a status field is not a compatible change. The bits above the old
+field carry whatever the previous core left in them, and a value that used to
+be unreachable becomes a setting -- usually the wrong one. Either fold the old
+encoding forward, as this now does, or move the option to fresh bits.
+
+And **a bitstream's commit says nothing about what source built it.** Checking
+whether the 180 commit was an ancestor of the commit that ADDED
+`Kaneko16_20260824.rbf` said yes, and that was used to tell the owner the
+feature was already in the build that worked. It was not: that file was
+recovered off an SD card and committed long afterwards, which its own changelog
+states. The owner said so and was right. **The changelog records what is in a
+build; git history records when a file was added.**

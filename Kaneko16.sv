@@ -2849,15 +2849,35 @@ wire       ROT_EN, ROT_CCW;
 // be reached, which left a physically portrait monitor with three settings
 // that are each a quarter turn out and none that is right -- reported from
 // hardware, and the reason this exists.
-wire [2:0] rot_sel = status[26:24];
+// AN OLD SETTING MUST SURVIVE THE FIELD GETTING WIDER.
+//
+// This was status[25:24] until 180 was added, and widening it to [26:24] gave
+// bit 26 a meaning it had never had. A config saved by the older core can have
+// that bit set to anything, so "CW 90" -- 10 in two bits -- comes back as 110,
+// which is code 6, which the unused-code term below sends to NO ROTATION. The
+// option still reads CW in the menu and the picture is upright, and nothing
+// says why.
+//
+// That is the shape of the CRT report: rotation that worked on the previous
+// release and not on the one after it, with no change to any rotation signal
+// between them. Re-picking the option writes all three bits and clears it,
+// which is why a setting touched since the upgrade behaves and one left alone
+// does not.
+//
+// So codes 5, 6 and 7 fall back to what their LOW TWO BITS meant before: 101
+// is Auto, 110 is CW, 111 is CCW. Only code 4 is new, and only code 4 is 180.
+wire [2:0] rot_raw = status[26:24];
+wire [2:0] rot_sel = (rot_raw >= 3'd5) ? {1'b0, rot_raw[1:0]} : rot_raw;
 wire       rot_ccw = (rot_sel == 3'd1) ? ROT_CCW      // per game
                    : (rot_sel == 3'd3);               // 2 = CW, 3 = CCW
 wire       rot_180 = (rot_sel == 3'd4);
 // Positions 5..7 do not exist in the menu. They resolve to Off rather than to
 // a rotation, because a spare code that lands on a real setting is the shape
 // of bug this file has paid for repeatedly.
+// Only code 4 reaches here as "at or above 4" now: 5 to 7 were folded onto
+// their old two-bit meaning above.
 wire       no_rot  = (rot_sel == 3'd0)                // explicitly off
-                  || (rot_sel >= 3'd4)                // 180, and the unused codes
+                  || (rot_sel == 3'd4)                // 180 is a flip, not a turn
                   || ((rot_sel == 3'd1) && !ROT_EN);  // auto, game is ROT0
 wire       video_rotated;
 
