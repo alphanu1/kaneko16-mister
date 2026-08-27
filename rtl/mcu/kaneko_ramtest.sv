@@ -39,7 +39,12 @@ module kaneko_ramtest #(
     // Words to cover. The fault this is looking for is in the path, not in the
     // silicon, so a short sweep at both ends of a page is enough and keeps the
     // test inside a frame.
-    parameter int unsigned WORDS  = 64
+    parameter int unsigned WORDS  = 64,
+    // Words BETWEEN the ones tested. A stride lets a bounded number of
+    // accesses reach across the whole 64 KB region instead of sitting in the
+    // first 128 bytes of it, which is where an address line that does not
+    // decode, or a region that aliases onto itself, actually shows.
+    parameter int unsigned STRIDE = 1
 ) (
     input  wire clk,
     input  wire rst,
@@ -76,11 +81,15 @@ module kaneko_ramtest #(
   logic [2:0]  stage;        // 0 walking, 1 address, 2 low byte, 3 high byte
   logic [1:0]  lane;
 
+  // The word index actually under test, once, so the write, the read and the
+  // lane cannot disagree about it.
+  wire [15:0] wordi = 16'(idx * 16'(STRIDE));
+
   // The pattern for a word, by stage. Every one differs from zero and from its
   // neighbours, so a read that returns the wrong word is not mistaken for a
   // pass.
   // Eight bits of index is all the patterns use; WORDS is far below 256.
-  function automatic [15:0] pattern(input [2:0] st, input [7:0] i);
+  function automatic [15:0] pattern(input [2:0] st, input [15:0] i);
     // EVERY STAGE DIFFERS FROM THE ONE BEFORE IT, IN BOTH HALVES.
     //
     // Stages 3, 4 and 5 all fell through to one default, so a byte stage wrote
@@ -95,16 +104,20 @@ module kaneko_ramtest #(
     case (st)
       3'd0:    pattern = 16'h0001 << i[3:0];          // walking one
       3'd1:    pattern = ~(16'h0001 << i[3:0]);       // walking zero
-      3'd2:    pattern = {i, ~i};                     // address in data
-      3'd3:    pattern = {~i, i};
-      3'd4:    pattern = {8'h5a, i};                  // low half written
-      default: pattern = {i, 8'ha5};                  // high half written
+      // THE WHOLE ADDRESS, not eight bits of it. With a stride these stages
+      // are the aliasing test: if two addresses land in the same place, the
+      // second write changes the first and the readback says so with the
+      // address that overwrote it.
+      3'd2:    pattern = i;                           // address in data
+      3'd3:    pattern = ~i;
+      3'd4:    pattern = {8'h5a, i[7:0]};             // low half written
+      default: pattern = {i[7:0], 8'ha5};             // high half written
     endcase
   endfunction
 
   // Byte stages write one half and must leave the other alone.
   wire [1:0]  stage_be   = (stage == 3'd4) ? 2'b01 : (stage == 3'd5) ? 2'b10 : 2'b11;
-  wire [15:0] stage_data = pattern(stage, idx[7:0]);
+  wire [15:0] stage_data = pattern(stage, wordi);
   // What a correct read gives back: for a byte stage, the half just written
   // over the half the previous stage left there.
   // The previous stages' patterns as WIRES, then indexed.
@@ -115,8 +128,8 @@ module kaneko_ramtest #(
   // toolchain instead is what hard rule 7 exists to stop.
   // Only the half each byte stage does NOT write is needed from the stage
   // before it, so these are the halves rather than the whole words.
-  wire [15:0] prev3_full = pattern(3'd3, idx[7:0]);
-  wire [15:0] prev4_full = pattern(3'd4, idx[7:0]);
+  wire [15:0] prev3_full = pattern(3'd3, wordi);
+  wire [15:0] prev4_full = pattern(3'd4, wordi);
   wire [7:0]  prev3_hi   = prev3_full[15:8];
   wire [7:0]  prev4_lo   = prev4_full[7:0];
   /* verilator lint_off UNUSEDSIGNAL */
@@ -150,11 +163,11 @@ module kaneko_ramtest #(
 
         S_WR: begin
           req  <= 1'b1;
-          addr <= base_mcuram + SDR_AW'(idx);
+          addr <= base_mcuram + SDR_AW'(wordi);
           we   <= 1'b1;
           din  <= stage_data;
           be   <= stage_be;
-          lane <= idx[1:0];
+          lane <= wordi[1:0];
           state <= S_WR_W;
         end
 
@@ -168,7 +181,7 @@ module kaneko_ramtest #(
           // Aligned down: lane selects within the burst, and the burst starts
           // where it is told. The write above stays exact -- only the read
           // needs the boundary.
-          addr <= base_mcuram + SDR_AW'({idx[15:2], 2'b00});
+          addr <= base_mcuram + SDR_AW'({wordi[15:2], 2'b00});
           we   <= 1'b0;
           be   <= 2'b11;
           state <= S_RD_W;

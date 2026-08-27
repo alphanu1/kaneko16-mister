@@ -170,6 +170,34 @@ int main(int argc, char** argv) {
         if (be != 3) byte_writes++;
         d->p_req = 0;
         slow_tick();
+
+        // AND ON THE SAME PORT, IMMEDIATELY. Reading back on a different port
+        // proves the value reached memory; it does not exercise what the game
+        // actually does, which is write and read the SAME port back to back --
+        // the 68000's shared RAM is one port through one arbiter, and that
+        // loop at 0x02222e writes a byte and reads it straight back.
+        //
+        // The lockstep harness has no crossing in it and passes this test, so
+        // a fault here would be invisible everywhere except on the board.
+        set_addr(WRP, base);
+        d->p_req = (1u << WRP);
+        g = 0;
+        while (!((d->p_ack >> WRP) & 1) && g++ < 100000) slow_tick();
+        checks++;
+        if (!((d->p_ack >> WRP) & 1)) {
+            printf("  same-port readback never acked\n"); fails++; break;
+        }
+        const uint16_t got_sp =
+            (uint16_t)((get_dout(WRP) >> (16 * (a & 3))) & 0xffff);
+        checks++;
+        if (got_sp != ref[a]) {
+            if (fails < 10)
+                printf("  SAME-PORT READBACK addr %05x be %d got %04x want %04x\n",
+                       a, be, got_sp, ref[a]);
+            fails++;
+        }
+        d->p_req = 0;
+        slow_tick();
     }
 
     // ------------------------------------------------------- read back

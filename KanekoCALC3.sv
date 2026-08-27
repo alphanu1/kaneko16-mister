@@ -1228,7 +1228,12 @@ wire [15:0] rt_din, rt_fail_got, rt_fail_want;
 wire [1:0]  rt_be;
 wire [3:0]  rt_fail_stage;
 
-kaneko_ramtest #(.SDR_AW(SDR_AW), .WORDS(64)) u_ramtest
+// 512 words at a stride of 64 reaches every 128 bytes of the whole 64 KB
+// region, instead of the first 128 bytes of it. The board reports RAM ERROR
+// at 87FE on both CALC3 games while simulation passes the same test, so what
+// is wanted from the hardware is whether the FAR end of that region behaves --
+// which the old sweep could not have told anyone.
+kaneko_ramtest #(.SDR_AW(SDR_AW), .WORDS(512), .STRIDE(64)) u_ramtest
 (
 	.clk(clk_sys), .rst(rst_sys),
 	// OFF BY DEFAULT. The build that ran this unconditionally stopped the
