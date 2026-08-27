@@ -6946,6 +6946,19 @@ mistake was invisible to every test that used it. The model now starts the
 burst where the controller does, and a lane-selecting reader that skips the
 alignment fails the clean case immediately.
 
+The gap underneath all three was in the controller's own testbench, which
+masked every read address with `& ~3u` and said so in a comment -- *burst-
+aligned so any port can read*. Its checker already demanded `addr + w`, the
+correct contract; it was simply never handed an address that could test it.
+Half of those addresses are now deliberately unaligned, and 355,944 checks
+pass, so the contract is measured rather than assumed.
+
+Note which testbenches did NOT have the fault. `tb_kaneko_sdram_x2` pairs an
+aligned address with an `a & 3` lane select and runs against the real
+controller and the DRAM model, so it was already correct; "fixing" it to
+match the ramtest model broke 48 checks and had to be reverted. Both
+conventions are valid. Only mixing them is wrong.
+
 The general shape is worth more than the fix: **a model built from the same
 assumption as the code it checks cannot fail.** The CPU fault was only ever
 found against MAME, which shares no assumptions with any of this.

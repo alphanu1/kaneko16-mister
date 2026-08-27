@@ -323,7 +323,15 @@ int main(int argc, char** argv) {
   {
     std::vector<uint32_t> addrs;
     for (int i = 0; i < 1500; i++) {
-      uint32_t a = pick_addr(rng) & ~3u;      // burst-aligned so any port can read
+      // HALF OF THESE ARE DELIBERATELY UNALIGNED. The controller dispatches
+      // with xfer_addr <= sel, unmasked, and issues its four reads from
+      // there -- so a burst begins at the address asked for, and the checker
+      // above (addr + w) is the contract. Masking every address here left
+      // that contract untested, and two readers then guessed it wrong in
+      // opposite directions: both selected a word by a[2:1] out of a burst
+      // they had asked for unaligned, which is right one time in four.
+      uint32_t a = pick_addr(rng);
+      if (i & 1) a &= ~3u;
       for (int w = 0; w < 4; w++) {
         while (h.wr_busy) h.step();
         h.issueWrite(a + w, (uint16_t)rng());
