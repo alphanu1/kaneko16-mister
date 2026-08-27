@@ -4,7 +4,7 @@ Copy to the SD card:
 
 | from | to |
 |---|---|
-| `Kaneko16_20260825.rbf` | `/media/fat/_Arcade/cores/` — **rename to `Kaneko16.rbf` on the card** |
+| `Kaneko16_20260827.rbf` | `/media/fat/_Arcade/cores/` — **rename to `Kaneko16.rbf` on the card** |
 | `Explosive Breaker (World).mra` | `/media/fat/_Arcade/` |
 | `Blaze On (Japan).mra` | `/media/fat/_Arcade/` |
 | `Wing Force (Japan, prototype).mra` | `/media/fat/_Arcade/` |
@@ -16,8 +16,8 @@ names them. Nothing here contains ROM data.
 **What changed:** `changelog/` carries one file per released bitstream, named
 after it, plus `UNRELEASED.md` for whatever ships next.
 
-**Check what you are running.** `Kaneko16_20260825.rbf` is
-`99b98dfec8e0073f8a7d28c2f788722c`. If the core on your card
+**Check what you are running.** `Kaneko16_20260827.rbf` is
+`08a901048f2ffe08a34d9c294aabd18d`. If the core on your card
 does not have that md5, you are not running this build -- and the usual reason
 is a second file: MiSTer keeps the lexicographically greatest name beginning
 `Kaneko16` followed by `.` or `_`, and `_` sorts after `.`, so a spare
@@ -55,7 +55,7 @@ bases, screen geometry, layer count, sprite list size and input wiring.
 An MRA is shipped only for a game somebody has played on hardware. One that
 merely builds and passes its gates is a candidate, not a release.
 
-## Not finished, as of `Kaneko16_20260825.rbf`
+## Not finished, as of `Kaneko16_20260827.rbf`
 
 This list describes the RBF named above. Every entry is removed in the same
 change as the RBF that fixes it, so if an item is still here it is still true
@@ -199,6 +199,43 @@ unreachable until now: MiSTer's `screen_rotate` asks for a half turn by NOT
 rotating and raising its `flip` input, which this core had tied to zero. On a
 turned monitor that left three settings each a quarter turn out and none
 correct.
+
+**Where a rotated picture can be seen.** Rotation is done by writing each frame
+into DDR3 with the axes swapped and letting the scaler display that, so the
+rotated image exists only in that framebuffer:
+
+| Output | Rotates? |
+|---|---|
+| HDMI | yes |
+| Analog, **Direct Video off** | yes — the core raises `VGA_SCALER` while rotating |
+| Analog, **Direct Video on** | **no, and no core setting changes it** |
+
+Direct Video puts the core's own timing on the VGA pins for a CRT and bypasses
+the scaler by definition, so there is no rotated image on that path to carry.
+**To rotate on a CRT, Direct Video has to be off.**
+
+**If rotation was set before this release, set it again once.** The option
+widened from two bits to three when 180 was added, and a value saved by an
+older core can carry a stale third bit — which this build folds back to its old
+meaning, but re-picking the option is the certain fix.
+
+## Music and SFX volume (OSD)
+
+Two controls, 20% to 200% in steps of ten, both starting at 100%. Which chip
+each moves is per board:
+
+| Board | Music | SFX |
+|---|---|---|
+| Blaze On, Wing Force | YM2151 | OKI M6295 |
+| Explosive Breaker, Magical Crystals | YM2149 x2 | OKI M6295 |
+
+**On Explosive Breaker the split is not real.** That game keeps both YM2149
+volumes at zero and plays its entire soundtrack through the OKI, so `SFX` moves
+everything and `Music` moves nothing you can hear. It is the hardware, not a
+limitation of the control.
+
+The menu runs 100% up to 200% and then wraps to the quiet end, because a fresh
+boot gets whatever sits at position 0 and that must not be silence.
 
 ## Sprite offscreen skip (OSD)
 
