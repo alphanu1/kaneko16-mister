@@ -214,7 +214,7 @@ module kaneko_cpumem_harness #(
 
         .sd_cke(sd_cke), .sd_cs_n(sd_cs_n), .sd_ras_n(sd_ras_n),
         .sd_cas_n(sd_cas_n), .sd_we_n(sd_we_n), .sd_ba(sd_ba),
-        .sd_a(sd_a), .sd_dqm(sd_dqm),
+        .sd_a(sd_a), .dqm_swap(1'b0), .sd_dqm(sd_dqm),
         .sd_dq_o(sd_dq_o), .sd_dq_oe(sd_dq_oe), .sd_dq_i(sd_dq_i),
 
         .wr_req(ldr_wr_req), .wr_addr(ldr_wr_addr), .wr_din(ldr_wr_din),

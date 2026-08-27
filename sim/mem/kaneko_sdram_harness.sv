@@ -155,7 +155,7 @@ module kaneko_sdram_harness #(
     // its job: the model's correct value is not the board's.
     .rd_lat_sel(2'd3),
     .sd_cke(cke), .sd_cs_n(cs_n), .sd_ras_n(ras_n), .sd_cas_n(cas_n),
-    .sd_we_n(we_n), .sd_ba(ba), .sd_a(a), .sd_dqm(dqm),
+    .sd_we_n(we_n), .sd_ba(ba), .sd_a(a), .dqm_swap(1'b0), .sd_dqm(dqm),
     .sd_dq_o(dq_c2m), .sd_dq_oe(dq_oe_c), .sd_dq_i(dq_m2c),
     .wr_req(wr_req), .wr_addr(wr_addr), .wr_din(wr_din), .wr_be(wr_be),
     .wr_ack(wr_ack),

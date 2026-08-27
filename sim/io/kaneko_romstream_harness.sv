@@ -114,7 +114,7 @@ module kaneko_romstream_harness #(
     .clk(clk), .rst_n(rst_n), .ready(mem_ready),
     .rd_lat_sel(rd_lat_sel),
     .sd_cke(cke), .sd_cs_n(cs_n), .sd_ras_n(ras_n), .sd_cas_n(cas_n),
-    .sd_we_n(we_n), .sd_ba(ba), .sd_a(a), .sd_dqm(dqm),
+    .sd_we_n(we_n), .sd_ba(ba), .sd_a(a), .dqm_swap(1'b0), .sd_dqm(dqm),
     .sd_dq_o(dq_c2m), .sd_dq_oe(dq_oe_c), .sd_dq_i(dq_m2c),
     .wr_req(ldr_wr_req), .wr_addr(ldr_wr_addr), .wr_din(ldr_wr_din),
     .wr_be(ldr_wr_be), .wr_ack(ldr_wr_ack),

@@ -601,10 +601,13 @@ kaneko_sdram_x2 #(.NP(NPORTS), .AW(SDR_AW)) u_sdr_x2
 	.f_wr_be(f_wr_be),   .f_wr_ack(f_wr_ack)
 );
 
-// DQMH masks DQ[15:8] and DQML masks DQ[7:0]; sd_dqm[1] is the high half.
-wire [1:0] sd_dqm_w;
-assign {SDRAM_DQMH, SDRAM_DQML} = status[13] ? {sd_dqm_w[0], sd_dqm_w[1]}
-                                             : {sd_dqm_w[1], sd_dqm_w[0]};
+// Two flops into the SDRAM clock, because status crosses from the HPS domain
+// and the pin path has no slack to spend on it.
+reg dqm_swap_s, dqm_swap_q;
+always @(posedge clk_sdram) begin
+	dqm_swap_s <= status[13];
+	dqm_swap_q <= dqm_swap_s;
+end
 
 kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(700),
                // Bit 8 is the Z80's program fetch. Urgent, despite being a
@@ -652,7 +655,7 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(700),
 
 	.sd_cke(SDRAM_CKE), .sd_cs_n(SDRAM_nCS), .sd_ras_n(SDRAM_nRAS),
 	.sd_cas_n(SDRAM_nCAS), .sd_we_n(SDRAM_nWE), .sd_ba(SDRAM_BA),
-	.sd_a(SDRAM_A), .sd_dqm(sd_dqm_w),
+	.sd_a(SDRAM_A), .sd_dqm({SDRAM_DQMH, SDRAM_DQML}), .dqm_swap(dqm_swap_q),
 	.sd_dq_o(sd_dq_o), .sd_dq_oe(sd_dq_oe), .sd_dq_i(SDRAM_DQ),
 
 	.wr_req(f_wr_req), .wr_addr(f_wr_addr), .wr_din(f_wr_din),

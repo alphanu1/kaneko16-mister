@@ -286,7 +286,7 @@ module kaneko_calc3_sys_harness #(
           .clk(clk_fast), .rst_n(~rst), .ready(mem_ready), .rd_lat_sel(2'd3),
           .sd_cke(sd_cke), .sd_cs_n(sd_cs_n), .sd_ras_n(sd_ras_n),
           .sd_cas_n(sd_cas_n), .sd_we_n(sd_we_n), .sd_ba(sd_ba),
-          .sd_a(sd_a), .sd_dqm(sd_dqm),
+          .sd_a(sd_a), .dqm_swap(1'b0), .sd_dqm(sd_dqm),
           .sd_dq_o(sd_dq_o), .sd_dq_oe(sd_dq_oe), .sd_dq_i(sd_dq_i),
           .wr_req(f_wr_req), .wr_addr(f_wr_addr), .wr_din(f_wr_din),
           .wr_be(f_wr_be), .wr_ack(f_wr_ack),

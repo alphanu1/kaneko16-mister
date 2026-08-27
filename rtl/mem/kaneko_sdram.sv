@@ -186,6 +186,11 @@ module kaneko_sdram #(
   output logic [1:0]           sd_ba,
   output logic [12:0]          sd_a,
   output logic [1:0]           sd_dqm,
+  // Swap the two byte masks. A DIAGNOSTIC, and it is applied HERE rather than
+  // at the pins because sd_dqm is already a register: muxing after it puts
+  // combinational logic straight into the SDRAM output path, which cost
+  // -0.323 ns and a failed build the first time it was tried.
+  input  wire                  dqm_swap,
   output logic [15:0]          sd_dq_o,
   output logic                 sd_dq_oe,
   input  logic [15:0]          sd_dq_i,
@@ -829,7 +834,7 @@ module kaneko_sdram #(
             sd_a     <= col_a(xfer_addr);   // A10 low inside col_a: keep row open
             sd_dq_o  <= din_r;
             sd_dq_oe <= 1'b1;
-            sd_dqm   <= ~be_r;
+            sd_dqm   <= dqm_swap ? {~be_r[0], ~be_r[1]} : ~be_r;
             // Hold past tWR and tRAS before anything can precharge this row.
             // The row is left open on purpose: a download write stream is
             // sequential and the next word usually hits the same row.
