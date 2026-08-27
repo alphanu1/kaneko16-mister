@@ -840,7 +840,30 @@ wire signed [11:0] ym_ctr = $signed({1'b0, ym_sum}) - 12'sd1024;
 // The two parts are scaled SEPARATELY now, so Music and SFX are independent
 // where the board makes them so. At 100% each this is bit-for-bit the sum it
 // was: gain8 of 8 is a multiply by 8 and a shift by 3.
-wire signed [16:0] ym_part_raw  = {{3{ym_ctr[11]}}, ym_ctr, 2'd0};
+wire signed [16:0] ym_part_dc   = {{3{ym_ctr[11]}}, ym_ctr, 2'd0};
+
+// AC-COUPLED BEFORE THE VOLUME TOUCHES IT, and this is not a refinement.
+//
+// jt49's sound is unsigned with silence at ZERO, not at mid-scale, so
+// centring it by a fixed midpoint puts a constant -1024 into the mix whenever
+// the chips are quiet. Explosive Breaker keeps both YM2149 volumes at zero for
+// its whole soundtrack, so that offset is permanent: -4096 here, -24576 by the
+// time the mix is scaled, three quarters of the negative rail.
+//
+// It cost twice. The offset ate the headroom the OKI needed, which is why that
+// game stayed quiet however much the gain went up; and once the music control
+// could scale it, anything above 140% pushed it past the rail and every sound
+// stopped, effects included -- reported from hardware on both 68000 games,
+// while the YM2151 boards, which never take this path, were fine.
+//
+// A real board never has this: its output is AC-coupled and a DC level from a
+// silent DAC never reaches the speaker.
+wire signed [16:0] ym_part_raw;
+kaneko_dcblock #(.W(17)) u_ym_dc
+(
+	.clk(clk_sys), .rst(rst_sys),
+	.din(ym_part_dc), .dout(ym_part_raw)
+);
 wire signed [16:0] oki_part_raw = {{3{oki_snd[13]}}, oki_snd};
 wire signed [16:0] ym_part, oki_part;
 

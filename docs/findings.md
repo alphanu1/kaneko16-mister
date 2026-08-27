@@ -6881,3 +6881,38 @@ lower latency -- when not.
 timing on the VGA pins for a CRT and bypasses the scaler by definition, so
 there is nothing rotated for it to carry. Direct Video has to be off to rotate
 on a CRT, and no core-side change alters that.
+
+## A silent YM2149 is not zero, it is -1024, 2026-08-27
+
+Reported from hardware: on Magical Crystals and Explosive Breaker, turning the
+new Music control above 140% stopped ALL audio, effects included. Blaze On and
+Wing Force were fine.
+
+jt49's `sound` is 10-bit UNSIGNED and its silence is ZERO, not mid-scale. The
+68000 boards' mix centres it by subtracting a fixed midpoint, which is right
+for a signal swinging about that point and wrong for a silent one. Explosive
+Breaker keeps both YM2149 volumes at zero for its entire soundtrack, so the
+pair reads 0 and centring puts a CONSTANT -1024 into the mix -- -4096 after the
+shift, -24576 after the overall gain. Three quarters of the negative rail,
+permanently.
+
+The two games that use the YM2151 path never touch it, which is exactly the
+split that was reported.
+
+**It had already cost something before it broke anything.** That offset ate the
+headroom the OKI needed, which is why Explosive Breaker stayed quiet however
+much the gain was raised -- two separate gain increases were made chasing a
+symptom whose cause was a DC level, not a level. Then the music control made
+the offset scalable, and above 140% it pushed past the rail and pinned
+everything there.
+
+The fix is a DC blocker on that path, ahead of the volume: a first-order high
+pass with a corner near 7 Hz, which is what the board's coupling capacitors
+are. A real board never has this problem, because a DC level from a silent DAC
+does not reach the speaker.
+
+**The lesson is about what "silence" means at an interface.** The midpoint
+subtraction was correct arithmetic on an assumption nobody had checked -- that
+an unsigned audio signal idles at mid-scale. jt49 idles at zero. Nothing warned,
+the offset was inaudible on its own, and it was only visible once something
+amplified it.

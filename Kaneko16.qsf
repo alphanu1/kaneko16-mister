@@ -111,6 +111,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/io/kaneko_rom_loader.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/io/kaneko_eeprom93c46.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/kaneko_oki_bank.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/kaneko_volume.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/kaneko_dcblock.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/kaneko_z80snd.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/kaneko_z80rom.sv
 set_global_assignment -name VERILOG_FILE third_party/jt6295/hdl/jt6295.v
