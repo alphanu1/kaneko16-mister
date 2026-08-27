@@ -20,19 +20,20 @@ module kaneko_volume #(
     // signal that was in range before the volume touched it.
     parameter int unsigned W = 17
 ) (
-    // Eighths of unity: 8 is 100%, 16 is 200%, 4 is 50%. Zero is silence, which
-    // is a setting and not a special case.
-    input  wire [4:0]           gain8,
+    // SIXTY-FOURTHS of unity: 64 is 100%, 128 is 200%, 13 is about 20%.
+    // Eighths were too coarse -- 10% steps land between them, and 20% is not
+    // representable at all.
+    input  wire [7:0]           gain64,
     input  wire signed [W-1:0]  din,
     output wire signed [W-1:0]  dout
 );
 
-  // W signed by 5 unsigned needs W+5; +8 is slack, so the width is obviously
+  // W signed by 8 unsigned needs W+8; +10 is slack, so the width is obviously
   // right rather than exactly right. That distinction is what failed before.
-  localparam int unsigned P = W + 8;
+  localparam int unsigned P = W + 10;
 
-  wire signed [P-1:0] scaled  = $signed(din) * $signed({1'b0, gain8});
-  wire signed [P-1:0] shifted = scaled >>> 3;
+  wire signed [P-1:0] scaled  = $signed(din) * $signed({1'b0, gain64});
+  wire signed [P-1:0] shifted = scaled >>> 6;
 
   // TYPED LOCALPARAMS, not sizing casts. Quartus 17.0 will not take (P)'(expr)
   // -- it is a syntax error there though Verilator accepts it, and the build

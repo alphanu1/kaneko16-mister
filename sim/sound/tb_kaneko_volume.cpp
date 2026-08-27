@@ -29,8 +29,8 @@ int main(int argc, char** argv) {
                                          : (int32_t)v);
   };
 
-  for (int g = 0; g <= 16; g++) {
-    for (int n = 0; n < 4000; n++) {
+  for (int g = 0; g <= 128; g += 1) {
+    for (int n = 0; n < 500; n++) {
       // The extremes every time, then random values: an overflow only appears
       // near the ends, and a purely random sweep hits them rarely.
       int32_t in;
@@ -39,11 +39,11 @@ int main(int argc, char** argv) {
       else if (n == 2) in = 0;
       else             in = (int32_t)(rng() % (uint32_t)(HI - LO + 1)) + LO;
 
-      d->gain8 = g;
+      d->gain64 = g;
       d->din = (uint32_t)in & ((1u << W) - 1);
       d->eval();
 
-      int64_t want = ((int64_t)in * g) >> 3;
+      int64_t want = ((int64_t)in * g) >> 6;
       if (want > HI) { want = HI; saturated++; }
       if (want < LO) { want = LO; saturated++; }
 

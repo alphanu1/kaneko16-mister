@@ -103,8 +103,14 @@ localparam CONF_STR = {
 	"O[15],Sprite offscreen skip,Off,On;",
 	"O[16],Sprites,On,Off;",
 	"O[17],Tilemaps,On,Off;",
-	"O[20:19],Game override,Off(MRA),1 Magical Crystals,2 Blaze On,3 Wing Force;",
-	"O[23:21],Layer1 dx,+2 (MAME),0,-2,+4;",
+	// THE TWO DEBUG OPTIONS MOVED UP so the volumes can sit in one piece.
+	// hps_io delivers status in 16-BIT CHUNKS, so a field straddling bit 31/32
+	// is written in two halves -- which is what made the SFX control behave
+	// differently from the Music one when it sat at O[32:30]. Both volumes are
+	// now inside a single chunk. These two are development aids, so they take
+	// the high bits where a straddle would matter least.
+	"O[34:33],Game override,Off(MRA),1 Magical Crystals,2 Blaze On,3 Wing Force;",
+	"O[37:35],Layer1 dx,+2 (MAME),0,-2,+4;",
 	"O[26:24],Rotation,Off,Auto (per game),CW 90,CCW 90,180;",
 	// POSITION 0 IS 100% ON BOTH, because status defaults to zero and a fresh
 	// boot must not be silent or quiet. The same reason the rotation option and
@@ -117,8 +123,15 @@ localparam CONF_STR = {
 	// keeps BOTH YM2149 volumes at zero and plays its whole soundtrack through
 	// the OKI, so on that game SFX moves everything and Music moves nothing
 	// audible. That is the hardware, not a shortcut; see docs/findings.md.
-	"O[29:27],Music volume,100%,125%,150%,200%,75%,50%,25%,Off;",
-	"O[32:30],SFX volume,100%,125%,150%,200%,75%,50%,25%,Off;",
+	// 20% to 200% in tens. NINETEEN levels, so five bits each.
+	//
+	// The list starts at 100% and climbs to 200% before wrapping to the quiet
+	// end, because `status` defaults to zero and position 0 is what a fresh
+	// boot gets -- an ascending list from 20% would boot nearly silent. The
+	// rotation and SDRAM capture options put their working value first for the
+	// same reason.
+	"O[31:27],Music volume,100%,110%,120%,130%,140%,150%,160%,170%,180%,190%,200%,20%,30%,40%,50%,60%,70%,80%,90%;",
+	"O[23:19],SFX volume,100%,110%,120%,130%,140%,150%,160%,170%,180%,190%,200%,20%,30%,40%,50%,60%,70%,80%,90%;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
@@ -238,23 +251,42 @@ always @(posedge clk_sys) begin
 		cfg_writes <= cfg_writes + 1'd1;
 end
 
-wire [1:0] game_ovr = status[20:19];
+wire [1:0] game_ovr = status[34:33];
 
-// Volume, in eighths of unity. Position 0 is 100%.
-function automatic [4:0] vol8(input [2:0] sel);
+// Volume in SIXTY-FOURTHS of unity, 20% to 200% in tens. Menu order is
+// 100..200 then 20..90, so position 0 -- what a fresh boot gets -- is 100%.
+//
+// Each value is round(level * 64 / 100). Eighths could not express 10% steps
+// and had no 20% at all, which is why the scale changed with the range.
+function automatic [7:0] vol64(input [4:0] sel);
 	case (sel)
-		3'd0: vol8 = 5'd8;    // 100%
-		3'd1: vol8 = 5'd10;   // 125%
-		3'd2: vol8 = 5'd12;   // 150%
-		3'd3: vol8 = 5'd16;   // 200%
-		3'd4: vol8 = 5'd6;    // 75%
-		3'd5: vol8 = 5'd4;    // 50%
-		3'd6: vol8 = 5'd2;    // 25%
-		default: vol8 = 5'd0; // Off
+		5'd0:  vol64 = 8'd64;    // 100%
+		5'd1:  vol64 = 8'd70;    // 110%
+		5'd2:  vol64 = 8'd77;    // 120%
+		5'd3:  vol64 = 8'd83;    // 130%
+		5'd4:  vol64 = 8'd90;    // 140%
+		5'd5:  vol64 = 8'd96;    // 150%
+		5'd6:  vol64 = 8'd102;   // 160%
+		5'd7:  vol64 = 8'd109;   // 170%
+		5'd8:  vol64 = 8'd115;   // 180%
+		5'd9:  vol64 = 8'd122;   // 190%
+		5'd10: vol64 = 8'd128;   // 200%
+		5'd11: vol64 = 8'd13;    // 20%
+		5'd12: vol64 = 8'd19;    // 30%
+		5'd13: vol64 = 8'd26;    // 40%
+		5'd14: vol64 = 8'd32;    // 50%
+		5'd15: vol64 = 8'd38;    // 60%
+		5'd16: vol64 = 8'd45;    // 70%
+		5'd17: vol64 = 8'd51;    // 80%
+		5'd18: vol64 = 8'd58;    // 90%
+		// 19 to 31 are not in the menu. They resolve to 100%, not to silence:
+		// a spare code that lands on "off" is the shape of bug this file has
+		// paid for before.
+		default: vol64 = 8'd64;
 	endcase
 endfunction
-wire [4:0] g_music = vol8(status[29:27]);
-wire [4:0] g_sfx   = vol8(status[32:30]);
+wire [7:0] g_music = vol64(status[31:27]);
+wire [7:0] g_sfx   = vol64(status[23:19]);
 
 kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 (
@@ -812,8 +844,8 @@ wire signed [16:0] ym_part_raw  = {{3{ym_ctr[11]}}, ym_ctr, 2'd0};
 wire signed [16:0] oki_part_raw = {{3{oki_snd[13]}}, oki_snd};
 wire signed [16:0] ym_part, oki_part;
 
-kaneko_volume #(.W(17)) u_vol_music_a (.gain8(g_music), .din(ym_part_raw),  .dout(ym_part));
-kaneko_volume #(.W(17)) u_vol_sfx_a   (.gain8(g_sfx),   .din(oki_part_raw), .dout(oki_part));
+kaneko_volume #(.W(17)) u_vol_music_a (.gain64(g_music), .din(ym_part_raw),  .dout(ym_part));
+kaneko_volume #(.W(17)) u_vol_sfx_a   (.gain64(g_sfx),   .din(oki_part_raw), .dout(oki_part));
 
 wire signed [16:0] snd_mix = ym_part + oki_part;
 
@@ -947,9 +979,9 @@ wire signed [17:0] z80_oki_w  = (z80_oki_x1 <<< 1) + z80_oki_x1;   // x3
 // Scaled separately, so Music moves the YM2151 and SFX moves the OKI. At 100%
 // each this is the same sum it was.
 wire signed [17:0] z80_ym_lv, z80_ym_rv, z80_oki_v;
-kaneko_volume #(.W(18)) u_vol_music_l (.gain8(g_music), .din(z80_ym_l),  .dout(z80_ym_lv));
-kaneko_volume #(.W(18)) u_vol_music_r (.gain8(g_music), .din(z80_ym_r),  .dout(z80_ym_rv));
-kaneko_volume #(.W(18)) u_vol_sfx_z   (.gain8(g_sfx),   .din(z80_oki_w), .dout(z80_oki_v));
+kaneko_volume #(.W(18)) u_vol_music_l (.gain64(g_music), .din(z80_ym_l),  .dout(z80_ym_lv));
+kaneko_volume #(.W(18)) u_vol_music_r (.gain64(g_music), .din(z80_ym_r),  .dout(z80_ym_rv));
+kaneko_volume #(.W(18)) u_vol_sfx_z   (.gain64(g_sfx),   .din(z80_oki_w), .dout(z80_oki_v));
 
 wire signed [17:0] z80_sum_l = z80_ym_lv + z80_oki_v;
 wire signed [17:0] z80_sum_r = z80_ym_rv + z80_oki_v;
@@ -2013,9 +2045,9 @@ end
 // moves LEFT. Whichever position makes Blaze On's copyright screen and Atlas
 // logo line up is the measurement; the difference from +2 is the bug.
 wire signed [10:0] l1_dx =
-      (status[23:21] == 3'd1) ? V2_DX_CFG
-    : (status[23:21] == 3'd2) ? 11'(V2_DX_CFG - 11'sd2)
-    : (status[23:21] == 3'd3) ? 11'(V2_DX_CFG + 11'sd4)
+      (status[37:35] == 3'd1) ? V2_DX_CFG
+    : (status[37:35] == 3'd2) ? 11'(V2_DX_CFG - 11'sd2)
+    : (status[37:35] == 3'd3) ? 11'(V2_DX_CFG + 11'sd4)
                               : 11'(V2_DX_CFG + 11'sd2);
 wire [43:0] lay_dx = { 11'(l1_dx), 11'(V2_DX_CFG),
                        11'(l1_dx), 11'(V2_DX_CFG) };
