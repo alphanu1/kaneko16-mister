@@ -290,9 +290,22 @@ static void report(const char* name, const Stats& s, uint64_t run_ticks) {
     std::printf("    CALC3 crc_ready %u  busy %u  status %X  frame ticks %u\n",
                 (unsigned)dut->dbg_c3_crc_ready, (unsigned)dut->dbg_c3_busy,
                 (unsigned)dut->dbg_c3_status, (unsigned)dut->dbg_tick_cnt);
-    std::printf("    CALC3 ram writes %u  reads %u  busy cycles %u\n",
+    std::printf("    CALC3 ram writes %u  reads %u  arb served %u  busy cycles %u\n",
                 (unsigned)dut->dbg_c3_wr_cnt, (unsigned)dut->dbg_c3_rd_cnt,
-                (unsigned)dut->dbg_c3_busy_cnt);
+                (unsigned)dut->dbg_c3_ack_cnt, (unsigned)dut->dbg_c3_busy_cnt);
+    if (dut->dbg_c3_wr_cnt)
+        std::printf("    CALC3 first writes  %04X=%04X %04X=%04X %04X=%04X %04X=%04X"
+                    "   (MAME starts 019E=0000)\n",
+                    (unsigned)dut->dbg_c3_wa0, (unsigned)dut->dbg_c3_wd0,
+                    (unsigned)dut->dbg_c3_wa1, (unsigned)dut->dbg_c3_wd1,
+                    (unsigned)dut->dbg_c3_wa2, (unsigned)dut->dbg_c3_wd2,
+                    (unsigned)dut->dbg_c3_wa3, (unsigned)dut->dbg_c3_wd3);
+    std::printf("    CALC3 commands %u  last cmd %04X  last write %04X=%04X"
+                "  frames first/last %u/%u\n",
+                (unsigned)dut->dbg_c3_cmds, (unsigned)dut->dbg_c3_cmd,
+                (unsigned)dut->dbg_c3_wlast_a, (unsigned)dut->dbg_c3_wlast_d,
+                (unsigned)dut->dbg_c3_wfirst_tick,
+                (unsigned)dut->dbg_c3_wlast_tick);
     std::printf("    OKI wr/fetch/busy/sample  %u / %u / %u / %u\n",
                 (unsigned)dut->oki_wr_cnt, (unsigned)dut->oki_ok_cnt,
                 (unsigned)dut->oki_busy_cnt, (unsigned)dut->oki_snd_cnt);

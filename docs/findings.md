@@ -7085,3 +7085,28 @@ streams it there.
 The device comes alive and checksums its ROM; the game never writes it a
 command. That is exactly what the overlay reads on hardware, and it is now
 somewhere a MAME diff can reach.
+
+## The init command copies the EEPROM, so a blank EEPROM is a stalled game
+
+With the MCU in the lockstep harness, Shogun Warriors' init command runs and
+writes shared RAM at the address MAME writes -- `019E`, the EEPROM address the
+game passes as a parameter -- but with the wrong DATA:
+
+    CALC3 first writes  0000=0000 0042=0000 019E=FFFF 01A0=FFFF
+    MAME                                    20019e W 0000
+
+`FFFF` is a blank 93C46. The init command copies 64 words out of the EEPROM
+into shared RAM, so a part with no contents hands the game a region of ones
+and it never proceeds.
+
+The core already loads defaults for this -- `rtl/io/eeprom_defaults.hex`, from
+MAME, on `rom_loaded` for game ids 4 and 5 -- and the harness did not. With the
+same loader added, the device writes `019E=0000 01A0=0000`: identical to MAME.
+
+**The ordering that makes this worth watching on hardware.** The defaults load
+runs once out of the ROM download, and the HPS's saved-NVRAM restore arrives
+AFTER it, deliberately, so that a real save beats the defaults. A saved file
+that is blank therefore overwrites the defaults with exactly the `FFFF` above,
+and the game stalls in a way that looks nothing like an EEPROM problem. When a
+CALC3 title boots on the board and sits polling its command word, the saved
+NVRAM is the first thing to remove.

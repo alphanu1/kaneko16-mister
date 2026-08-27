@@ -56,6 +56,21 @@ module kaneko_cpumem_harness #(
     output wire [31:0] dbg_c3_wr_cnt,
     output wire [31:0] dbg_c3_rd_cnt,
     output wire [31:0] dbg_c3_busy_cnt,
+    output wire [31:0] dbg_c3_ack_cnt,
+    // The first four shared-RAM writes the device issues, so they can be put
+    // beside MAME's -- which starts at 20019e, the EEPROM address shogwarr
+    // passes to the init command.
+    output wire [15:0] dbg_c3_wa0, dbg_c3_wa1, dbg_c3_wa2, dbg_c3_wa3,
+    output wire [15:0] dbg_c3_wd0, dbg_c3_wd1, dbg_c3_wd2, dbg_c3_wd3,
+    // How many commands the device processed and what the last one was: a
+    // device that ran once and a device that runs every frame look the same
+    // from a write count.
+    output wire [7:0]  dbg_c3_cmds,
+    output wire [15:0] dbg_c3_cmd,
+    // The LAST write it made, and the frame it made it on. The first four say
+    // what it started doing; these say whether it ever stopped.
+    output wire [15:0] dbg_c3_wlast_a, dbg_c3_wlast_d,
+    output wire [31:0] dbg_c3_wfirst_tick, dbg_c3_wlast_tick,
     // What the MCU RAM port actually receives, at the controller's door: the
     // CPU trace shows what the 68000 ASKED for, and the two have to be
     // compared to find a write that is issued and never lands.
@@ -356,7 +371,8 @@ module kaneko_cpumem_harness #(
         .clk(clk), .rst(cpu_rst),
         .cs(|ym1_iob_out), .sk(eeprom_ctl[0]), .di(eeprom_ctl[1]),
         .do_out(eeprom_do),
-        .bk_addr(c3_eep_addr), .bk_din(16'd0), .bk_we(1'b0), .bk_q(bk_q),
+        .bk_addr(eepdef_we ? eepdef_addr : c3_eep_addr),
+        .bk_din(eepdef_din), .bk_we(eepdef_we), .bk_q(bk_q),
         .dirty(), .dirty_clr(1'b0),
         .dbg_state(), .dbg_busy(), .dbg_wen(), .dbg_cmd(), .dbg_cmd_valid()
     );
@@ -377,6 +393,35 @@ module kaneko_cpumem_harness #(
     wire [9:0] CFG_H_VIS, CFG_V_VIS, CFG_V_START, CFG_HSYNC;
     wire [SDR_AW:1] CFG_BASE_MCURAM;
     wire [SDR_AW:1] CFG_BASE_CALC3ROM;
+
+    // THE EEPROM DEFAULTS, exactly as KanekoCALC3.sv loads them. The init
+    // command copies 64 words out of the EEPROM into shared RAM, so without
+    // this the device copies a blank part -- ffff where MAME writes 0000 --
+    // and the game reads back nonsense from the one place it is waiting on.
+    // Started on rom_loaded rather than reset, because game_id arrives from
+    // the MRA long after reset and at reset no game looks like one with
+    // defaults.
+    logic [15:0] eep_def [0:127];
+    initial $readmemh("rtl/io/eeprom_defaults.hex", eep_def);
+    wire       eepdef_has  = (CFG_GAME_ID == 8'd4) || (CFG_GAME_ID == 8'd5);
+    wire       eepdef_slot = (CFG_GAME_ID == 8'd5);
+    reg  [6:0] eepdef_i;
+    reg        eepdef_run, eepdef_done, rom_loaded_d;
+    always_ff @(posedge clk) begin
+        rom_loaded_d <= rom_loaded;
+        if (rst) begin
+            eepdef_i <= 7'd0; eepdef_run <= 1'b0;
+            eepdef_done <= 1'b0; rom_loaded_d <= 1'b0;
+        end else if (rom_loaded && !rom_loaded_d && eepdef_has && !eepdef_done) begin
+            eepdef_i <= 7'd0; eepdef_run <= 1'b1; eepdef_done <= 1'b1;
+        end else if (eepdef_run) begin
+            eepdef_i <= eepdef_i + 7'd1;
+            if (eepdef_i == 7'd63) eepdef_run <= 1'b0;
+        end
+    end
+    wire        eepdef_we   = eepdef_run;
+    wire [5:0]  eepdef_addr = eepdef_i[5:0];
+    wire [15:0] eepdef_din  = eep_def[{eepdef_slot, eepdef_i[5:0]}];
     wire            vbl_rise;
     wire [15:0]     bk_q;
     wire [8:0] CFG_H_START;
@@ -585,17 +630,54 @@ module kaneko_cpumem_harness #(
         .eep_addr(c3_eep_addr), .eep_data(bk_q), .eep_rd(c3_eep_rd),
         .busy(c3_busy), .crc_ready(c3_crc_ready),
         .key_missing(c3_key_missing),
-        .dbg_cmds(), .dbg_cmd(), .dbg_status(dbg_c3_status), .dbg_crc()
+        .dbg_cmds(dbg_c3_cmds), .dbg_cmd(dbg_c3_cmd),
+        .dbg_status(dbg_c3_status), .dbg_crc()
     );
 
-    reg [31:0] c3_wr_cnt, c3_rd_cnt, c3_busy_cnt;
+    reg [31:0] c3_wr_cnt, c3_rd_cnt, c3_busy_cnt, c3_ack_cnt;
+    reg        c3_wr_d, c3_rd_d;
+    reg [15:0] wa [0:3];
+    reg [15:0] wd [0:3];
+    reg [15:0] wlast_a, wlast_d;
+    reg [31:0] wfirst_tick, wlast_tick;
+    assign dbg_c3_wlast_a     = wlast_a;
+    assign dbg_c3_wlast_d     = wlast_d;
+    assign dbg_c3_wfirst_tick = wfirst_tick;
+    assign dbg_c3_wlast_tick  = wlast_tick;
+    always_ff @(posedge clk) begin
+      c3_wr_d <= c3_ram_wr;
+      c3_rd_d <= c3_ram_rd;
+      if (rst) begin
+        for (int i = 0; i < 4; i++) begin wa[i] <= '0; wd[i] <= '0; end
+      end else if (c3_ram_wr && !c3_wr_d) begin
+        if (c3_wr_cnt < 32'd4) begin
+          wa[c3_wr_cnt[1:0]] <= c3_ram_addr;
+          wd[c3_wr_cnt[1:0]] <= c3_ram_wdata;
+        end
+        if (c3_wr_cnt == 32'd0) wfirst_tick <= tick_cnt;
+        wlast_a    <= c3_ram_addr;
+        wlast_d    <= c3_ram_wdata;
+        wlast_tick <= tick_cnt;
+      end
+    end
+    assign dbg_c3_wa0 = wa[0]; assign dbg_c3_wa1 = wa[1];
+    assign dbg_c3_wa2 = wa[2]; assign dbg_c3_wa3 = wa[3];
+    assign dbg_c3_wd0 = wd[0]; assign dbg_c3_wd1 = wd[1];
+    assign dbg_c3_wd2 = wd[2]; assign dbg_c3_wd3 = wd[3];
+    assign dbg_c3_ack_cnt = c3_ack_cnt;
     always_ff @(posedge clk) begin
       if (rst) begin
-        c3_wr_cnt <= '0; c3_rd_cnt <= '0; c3_busy_cnt <= '0;
+        c3_wr_cnt <= '0; c3_rd_cnt <= '0; c3_busy_cnt <= '0; c3_ack_cnt <= '0;
       end else begin
-        if (c3_ram_wr && arb_ack[1]) c3_wr_cnt   <= c3_wr_cnt + 1'b1;
-        if (c3_ram_rd && arb_ack[1]) c3_rd_cnt   <= c3_rd_cnt + 1'b1;
-        if (c3_busy)                 c3_busy_cnt <= c3_busy_cnt + 1'b1;
+        // COUNT THE REQUEST, NOT ITS COINCIDENCE WITH AN ACKNOWLEDGE. The
+        // device pulses ram_rd/ram_wr for one cycle and clears them -- which
+        // is the whole reason the arbiter latches pulses -- so the request is
+        // long gone by the time the acknowledge arrives. Gating one on the
+        // other counts zero and reads exactly like a device that never asks.
+        if (c3_ram_wr && !c3_wr_d) c3_wr_cnt   <= c3_wr_cnt + 1'b1;
+        if (c3_ram_rd && !c3_rd_d) c3_rd_cnt   <= c3_rd_cnt + 1'b1;
+        if (arb_ack[1])            c3_ack_cnt  <= c3_ack_cnt + 1'b1;
+        if (c3_busy)               c3_busy_cnt <= c3_busy_cnt + 1'b1;
       end
     end
     assign dbg_c3_wr_cnt   = c3_wr_cnt;
