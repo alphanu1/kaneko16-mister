@@ -34,11 +34,15 @@ module kaneko_volume #(
   wire signed [P-1:0] scaled  = $signed(din) * $signed({1'b0, gain8});
   wire signed [P-1:0] shifted = scaled >>> 3;
 
-  wire signed [P-1:0] hi =  (P)'(  (1 << (W - 1)) - 1);
-  wire signed [P-1:0] lo = -(P)'(  (1 << (W - 1)));
+  // TYPED LOCALPARAMS, not sizing casts. Quartus 17.0 will not take (P)'(expr)
+  // -- it is a syntax error there though Verilator accepts it, and the build
+  // dies in analysis with the module ignored. Hard rule 7: a construct 17.0
+  // rejects is a construct to rewrite, not a reason to reach for 24.
+  localparam signed [P-1:0] HI =  (1 <<< (W - 1)) - 1;
+  localparam signed [P-1:0] LO = -(1 <<< (W - 1));
 
-  assign dout = (shifted > hi) ? hi[W-1:0]
-              : (shifted < lo) ? lo[W-1:0]
+  assign dout = (shifted > HI) ? HI[W-1:0]
+              : (shifted < LO) ? LO[W-1:0]
                                : shifted[W-1:0];
 
 endmodule
