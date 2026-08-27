@@ -57,7 +57,11 @@ bool run(Vkaneko_ramtest* d, Fault fault, long* cycles, int* stage) {
       } else {
         uint64_t v = 0;
         for (int w = 0; w < 4; w++) {
-          const uint32_t q = (ea & ~3u) + w;
+          // The controller starts its burst AT THE ADDRESS GIVEN -- it does not
+        // align. Modelling it aligned made this testbench agree with the very
+        // mistake it exists to catch: two readers picked a word by lane out of
+        // an unaligned burst, and both passed here and failed on the board.
+        const uint32_t q = ea + w;
           v |= (uint64_t)(mem.count(q) ? mem[q] : 0) << (16 * w);
         }
         d->dout = v;

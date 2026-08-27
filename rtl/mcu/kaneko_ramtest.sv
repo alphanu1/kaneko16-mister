@@ -165,7 +165,10 @@ module kaneko_ramtest #(
 
         S_RD: begin
           req  <= 1'b1;
-          addr <= base_mcuram + SDR_AW'(idx);
+          // Aligned down: lane selects within the burst, and the burst starts
+          // where it is told. The write above stays exact -- only the read
+          // needs the boundary.
+          addr <= base_mcuram + SDR_AW'({idx[15:2], 2'b00});
           we   <= 1'b0;
           be   <= 2'b11;
           state <= S_RD_W;

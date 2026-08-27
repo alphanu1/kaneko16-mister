@@ -1186,7 +1186,17 @@ wire [15:0] c3_ram_rdata;
 wire        c3_ram_valid;
 wire        c3_ram_req = c3_ram_rd | c3_ram_wr;
 // A byte address inside the 64 KB becomes a word address in the region.
-wire [SDR_AW:1] c3_ram_sdr_addr = BASE_MCURAM + SDR_AW'(c3_ram_addr[15:1]);
+// A READ IS ALIGNED DOWN, A WRITE IS NOT -- the same rule the 68000's path
+// follows, for the same reason. The controller starts its burst at exactly
+// the address it is handed (kaneko_sdram: xfer_addr <= sel, unmasked), and
+// c3_ram_lane picks a word out of that burst by a[2:1] -- lanes counted from
+// a 4-word boundary. Asking at the unaligned address puts the wanted word in
+// lane 0 and the MCU then reads whatever sits up to three words PAST it.
+// Correct one time in four: enough for the ROM scan and checksum to come back
+// green, and not enough for any command to execute.
+wire [SDR_AW:1] c3_ram_sdr_addr = BASE_MCURAM +
+    (c3_ram_wr ? SDR_AW'(c3_ram_addr[15:1])
+               : SDR_AW'({c3_ram_addr[15:3], 2'b00}));
 reg  [1:0]  c3_ram_lane;
 always @(posedge clk_sys) if (c3_ram_req) c3_ram_lane <= c3_ram_addr[2:1];
 assign c3_ram_rdata = arb_dout[{c3_ram_lane, 4'd0} +: 16];

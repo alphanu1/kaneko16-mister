@@ -6910,3 +6910,42 @@ port 10" in the invisible fourth group, where it would have read dark
 whatever the truth was. That was found by the owner saying *"there is only
 11 there"* -- not by any reasoning here. **Ask what the screen actually
 shows before trusting a layout.**
+
+## A burst starts at the address it is given, and two readers assumed otherwise
+
+`kaneko_sdram` dispatches with `xfer_addr <= sel` -- the requested address,
+unmasked. So a 4-word read burst returns the words at `addr`, `addr+1`,
+`addr+2`, `addr+3`, and the word a requester asked for is always in lane 0.
+
+There are two consistent ways to read one word out of that. Ask at the exact
+address and take lane 0; or align the address down to the 4-word boundary and
+select with `a[2:1]`. Mixing them reads a word up to three ahead of the one
+wanted, and is correct one time in four -- whenever the address happens to
+land on the boundary already.
+
+Three places mixed them.
+
+The 68000's path through `kaneko_bus` was the first, found by instruction
+lockstep against MAME: aligning its reads carried Shogun Warriors from an
+early divergence to access 1,378,898, past its RAM test and past the command
+registers.
+
+The MCU's own path had the same fault at `c3_ram_sdr_addr`, and it explains
+the board exactly. The CALC3 ROM scan and checksum run out of ROM through a
+different feeder, so they completed and reported ready; every read of shared
+RAM after that returned the wrong word three times in four, so no command
+could execute. A running MCU that answers nothing.
+
+The self-test written to catch precisely this had it too, which is why its
+first verdict on hardware -- stage 0, read back `0x0b36` -- was its own bug
+and not a measurement of the memory.
+
+**All three passed in simulation**, because `tb_kaneko_ramtest` modelled the
+burst as `(ea & ~3u) + w`: aligned. The model agreed with the mistake, so the
+mistake was invisible to every test that used it. The model now starts the
+burst where the controller does, and a lane-selecting reader that skips the
+alignment fails the clean case immediately.
+
+The general shape is worth more than the fix: **a model built from the same
+assumption as the code it checks cannot fail.** The CPU fault was only ever
+found against MAME, which shares no assumptions with any of this.
