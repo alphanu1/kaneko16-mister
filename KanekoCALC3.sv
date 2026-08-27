@@ -81,6 +81,15 @@ localparam CONF_STR = {
 	"O[9],Show,Game,Palette+CPU;",
 	"O[11],Debug overlay,Off,On;",
 	"-;",
+	// A DIAGNOSTIC. The self-test reports stage 4 failing on hardware with
+	// 5a00 read back: a write that enabled the LOW byte put the high half of
+	// the data bus into the HIGH byte. That is a byte mask reaching the wrong
+	// half of the device, and it is invisible everywhere else -- word writes
+	// enable both halves, and Tier 1 never writes a byte to SDRAM at all, so
+	// only the CALC3 games' MCU RAM can see it. Switchable rather than simply
+	// swapped, because the pinout is not something to guess at: if this makes
+	// the self-test pass, the mapping is wrong and belongs fixed in the QSF.
+	"O[13],SDRAM byte lanes,Normal,Swapped;",
 	"O[14],Service switch,Off,On;",
 	"O[15],Sprite offscreen skip,Off,On;",
 	"O[16],Sprites,On,Off;",
@@ -592,6 +601,11 @@ kaneko_sdram_x2 #(.NP(NPORTS), .AW(SDR_AW)) u_sdr_x2
 	.f_wr_be(f_wr_be),   .f_wr_ack(f_wr_ack)
 );
 
+// DQMH masks DQ[15:8] and DQML masks DQ[7:0]; sd_dqm[1] is the high half.
+wire [1:0] sd_dqm_w;
+assign {SDRAM_DQMH, SDRAM_DQML} = status[13] ? {sd_dqm_w[0], sd_dqm_w[1]}
+                                             : {sd_dqm_w[1], sd_dqm_w[0]};
+
 kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(700),
                // Bit 8 is the Z80's program fetch. Urgent, despite being a
                // tiny share of the bandwidth -- one eight-byte line per eight
@@ -638,7 +652,7 @@ kaneko_sdram #(.COL_BITS(SDR_COL), .NP(NPORTS), .T_REFI(700),
 
 	.sd_cke(SDRAM_CKE), .sd_cs_n(SDRAM_nCS), .sd_ras_n(SDRAM_nRAS),
 	.sd_cas_n(SDRAM_nCAS), .sd_we_n(SDRAM_nWE), .sd_ba(SDRAM_BA),
-	.sd_a(SDRAM_A), .sd_dqm({SDRAM_DQMH, SDRAM_DQML}),
+	.sd_a(SDRAM_A), .sd_dqm(sd_dqm_w),
 	.sd_dq_o(sd_dq_o), .sd_dq_oe(sd_dq_oe), .sd_dq_i(SDRAM_DQ),
 
 	.wr_req(f_wr_req), .wr_addr(f_wr_addr), .wr_din(f_wr_din),
