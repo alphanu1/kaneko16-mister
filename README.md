@@ -116,6 +116,27 @@ mame 100000 accesses, 22898 after dropping instruction fetches
 MATCH over all 22897 compared accesses
 ```
 
+## Rotation, and what it can reach
+
+Rotation is done by `screen_rotate`: each frame is written into DDR3 with the
+axes swapped, and the scaler displays that. **The rotated picture only exists in
+that framebuffer**, so where it can be seen depends on what the analog output is
+carrying.
+
+| Output | Rotates? |
+|---|---|
+| HDMI | yes |
+| Analog, **Direct Video off** | yes — the core raises `VGA_SCALER` while rotating so the analog output follows the scaler |
+| Analog, **Direct Video on** | **no, and no core change can fix it** |
+
+Direct Video exists to put the core's own timing on the VGA pins for a CRT. It
+bypasses the scaler by definition, so there is no rotated image on that path to
+carry — the core's raw output is what reaches the monitor, and that is never
+rotated. **To rotate on a CRT, Direct Video has to be off.**
+
+`VGA_SCALER` is raised only while the framebuffer is in use, so a game running
+unrotated keeps the direct path and the frame of latency the framebuffer costs.
+
 ## SDRAM
 
 The MRA describes one contiguous stream and the loader maps it as the identity,
