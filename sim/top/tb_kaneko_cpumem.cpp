@@ -55,6 +55,7 @@ static void log_p10() {
 
 static FILE* c3_trace = nullptr;
 static uint64_t c3_trace_left = 0;
+static bool c3_await_read = false;
 
 static void tick() {
     dut->clk = 0; dut->eval();
@@ -63,6 +64,19 @@ static void tick() {
     // The device's own accesses. MAME's trace taps the address space and so
     // contains the MCU's writes; the 68000's bus trace does not, so without
     // this the two cannot be compared past the first thing the MCU does.
+    // ALSO INTO THE MAIN TRACE, when one is open. MAME's tap sees the whole
+    // address space, so its trace contains the MCU's writes interleaved with
+    // the 68000's; ours contained only the 68000's, and every comparison past
+    // the moment the MCU wakes up diverged on that alone. Twice this was read
+    // as a fault in the core and it was the instrument both times.
+    if (trace_fp && trace_n < trace_limit) {
+        if (dut->dbg_c3_wr_stb) {
+            std::fprintf(trace_fp, "%06x W %04x ffff\n",
+                         0x200000u + 2u * (unsigned)(dut->dbg_c3_acc_addr >> 1),
+                         (unsigned)dut->dbg_c3_acc_data);
+            trace_n++;
+        }
+    }
     if (c3_trace && c3_trace_left) {
         if (dut->dbg_c3_wr_stb) {
             std::fprintf(c3_trace, "%06X W %04X\n",
@@ -70,9 +84,14 @@ static void tick() {
                          (unsigned)dut->dbg_c3_acc_data);
             c3_trace_left--;
         } else if (dut->dbg_c3_rd_stb) {
-            std::fprintf(c3_trace, "%06X R ----\n",
+            std::fprintf(c3_trace, "%06X R ",
                          0x200000u + 2u * (unsigned)(dut->dbg_c3_acc_addr >> 1));
             c3_trace_left--;
+            c3_await_read = true;
+        }
+        if (c3_await_read && dut->dbg_c3_rv_stb) {
+            std::fprintf(c3_trace, "%04X\n", (unsigned)dut->dbg_c3_rdata);
+            c3_await_read = false;
         }
     }
     tick_count++;
@@ -350,7 +369,7 @@ int main(int argc, char** argv) {
             run_ticks_override = std::strtoull(argv[++i], nullptr, 0);
         else if (!std::strcmp(argv[i], "--c3trace") && i + 1 < argc) {
             c3_trace = std::fopen(argv[++i], "w");
-            c3_trace_left = 400;
+            c3_trace_left = 4000;
         }
         else if (!std::strcmp(argv[i], "--calc3") && i + 1 < argc)
             calc3_path = argv[++i];
