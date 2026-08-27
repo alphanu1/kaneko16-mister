@@ -71,6 +71,13 @@ module kaneko_cpumem_harness #(
     // what it started doing; these say whether it ever stopped.
     output wire [15:0] dbg_c3_wlast_a, dbg_c3_wlast_d,
     output wire [31:0] dbg_c3_wfirst_tick, dbg_c3_wlast_tick,
+    // One-cycle strobe with the address and data, so the device's own accesses
+    // can be logged and put beside MAME's -- which contains them, while the
+    // 68000's bus trace does not.
+    output wire        dbg_c3_wr_stb,
+    output wire        dbg_c3_rd_stb,
+    output wire [15:0] dbg_c3_acc_addr,
+    output wire [15:0] dbg_c3_acc_data,
     // What the MCU RAM port actually receives, at the controller's door: the
     // CPU trace shows what the 68000 ASKED for, and the two have to be
     // compared to find a write that is issued and never lands.
@@ -665,6 +672,10 @@ module kaneko_cpumem_harness #(
     assign dbg_c3_wd0 = wd[0]; assign dbg_c3_wd1 = wd[1];
     assign dbg_c3_wd2 = wd[2]; assign dbg_c3_wd3 = wd[3];
     assign dbg_c3_ack_cnt = c3_ack_cnt;
+    assign dbg_c3_wr_stb   = c3_ram_wr && !c3_wr_d;
+    assign dbg_c3_rd_stb   = c3_ram_rd && !c3_rd_d;
+    assign dbg_c3_acc_addr = c3_ram_addr;
+    assign dbg_c3_acc_data = c3_ram_wdata;
     always_ff @(posedge clk) begin
       if (rst) begin
         c3_wr_cnt <= '0; c3_rd_cnt <= '0; c3_busy_cnt <= '0; c3_ack_cnt <= '0;

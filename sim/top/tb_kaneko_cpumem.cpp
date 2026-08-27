@@ -53,10 +53,28 @@ static void log_p10() {
     }
 }
 
+static FILE* c3_trace = nullptr;
+static uint64_t c3_trace_left = 0;
+
 static void tick() {
     dut->clk = 0; dut->eval();
     dut->clk = 1; dut->eval();
     log_p10();
+    // The device's own accesses. MAME's trace taps the address space and so
+    // contains the MCU's writes; the 68000's bus trace does not, so without
+    // this the two cannot be compared past the first thing the MCU does.
+    if (c3_trace && c3_trace_left) {
+        if (dut->dbg_c3_wr_stb) {
+            std::fprintf(c3_trace, "%06X W %04X\n",
+                         0x200000u + 2u * (unsigned)(dut->dbg_c3_acc_addr >> 1),
+                         (unsigned)dut->dbg_c3_acc_data);
+            c3_trace_left--;
+        } else if (dut->dbg_c3_rd_stb) {
+            std::fprintf(c3_trace, "%06X R ----\n",
+                         0x200000u + 2u * (unsigned)(dut->dbg_c3_acc_addr >> 1));
+            c3_trace_left--;
+        }
+    }
     tick_count++;
 }
 
@@ -330,6 +348,10 @@ int main(int argc, char** argv) {
             tail_cap = (size_t)std::strtoull(argv[++i], nullptr, 0);
         else if (!std::strcmp(argv[i], "--ticks") && i + 1 < argc)
             run_ticks_override = std::strtoull(argv[++i], nullptr, 0);
+        else if (!std::strcmp(argv[i], "--c3trace") && i + 1 < argc) {
+            c3_trace = std::fopen(argv[++i], "w");
+            c3_trace_left = 400;
+        }
         else if (!std::strcmp(argv[i], "--calc3") && i + 1 < argc)
             calc3_path = argv[++i];
         else if (!std::strcmp(argv[i], "--calc3-off") && i + 1 < argc)
