@@ -47,6 +47,15 @@ module kaneko_cpumem_harness #(
     output wire [3:0]  dbg_c3_status,
     output wire        dbg_c3_busy,
     output wire        dbg_c3_crc_ready,
+    // The device only leaves idle on a frame tick. A run where this stays 0
+    // has a commanded MCU that can never start, which reads exactly like a
+    // device that ignores its command.
+    output wire [31:0] dbg_tick_cnt,
+    // What the device DID. busy is momentary, so reading it at the end of a
+    // run says nothing; these are cumulative.
+    output wire [31:0] dbg_c3_wr_cnt,
+    output wire [31:0] dbg_c3_rd_cnt,
+    output wire [31:0] dbg_c3_busy_cnt,
     // What the MCU RAM port actually receives, at the controller's door: the
     // CPU trace shows what the 68000 ASKED for, and the two have to be
     // compared to find a write that is issued and never lands.
@@ -578,6 +587,25 @@ module kaneko_cpumem_harness #(
         .key_missing(c3_key_missing),
         .dbg_cmds(), .dbg_cmd(), .dbg_status(dbg_c3_status), .dbg_crc()
     );
+
+    reg [31:0] c3_wr_cnt, c3_rd_cnt, c3_busy_cnt;
+    always_ff @(posedge clk) begin
+      if (rst) begin
+        c3_wr_cnt <= '0; c3_rd_cnt <= '0; c3_busy_cnt <= '0;
+      end else begin
+        if (c3_ram_wr && arb_ack[1]) c3_wr_cnt   <= c3_wr_cnt + 1'b1;
+        if (c3_ram_rd && arb_ack[1]) c3_rd_cnt   <= c3_rd_cnt + 1'b1;
+        if (c3_busy)                 c3_busy_cnt <= c3_busy_cnt + 1'b1;
+      end
+    end
+    assign dbg_c3_wr_cnt   = c3_wr_cnt;
+    assign dbg_c3_rd_cnt   = c3_rd_cnt;
+    assign dbg_c3_busy_cnt = c3_busy_cnt;
+
+    reg [31:0] tick_cnt;
+    always_ff @(posedge clk) if (rst) tick_cnt <= '0;
+                             else if (vbl_rise) tick_cnt <= tick_cnt + 1'b1;
+    assign dbg_tick_cnt = tick_cnt;
 
     assign dbg_c3_busy      = c3_busy;
     assign dbg_c3_crc_ready = c3_crc_ready;

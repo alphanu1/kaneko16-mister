@@ -287,9 +287,12 @@ static void report(const char* name, const Stats& s, uint64_t run_ticks) {
     // The MCU: did it come alive, and was it ever given a command? A run
     // where crc_ready never sets is a device that never read its ROM; a run
     // where status stays 0 is a device the game never asked for anything.
-    std::printf("    CALC3 crc_ready %u  busy %u  status %X\n",
+    std::printf("    CALC3 crc_ready %u  busy %u  status %X  frame ticks %u\n",
                 (unsigned)dut->dbg_c3_crc_ready, (unsigned)dut->dbg_c3_busy,
-                (unsigned)dut->dbg_c3_status);
+                (unsigned)dut->dbg_c3_status, (unsigned)dut->dbg_tick_cnt);
+    std::printf("    CALC3 ram writes %u  reads %u  busy cycles %u\n",
+                (unsigned)dut->dbg_c3_wr_cnt, (unsigned)dut->dbg_c3_rd_cnt,
+                (unsigned)dut->dbg_c3_busy_cnt);
     std::printf("    OKI wr/fetch/busy/sample  %u / %u / %u / %u\n",
                 (unsigned)dut->oki_wr_cnt, (unsigned)dut->oki_ok_cnt,
                 (unsigned)dut->oki_busy_cnt, (unsigned)dut->oki_snd_cnt);
