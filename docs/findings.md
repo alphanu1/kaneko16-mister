@@ -7053,3 +7053,35 @@ own testbench now covers what was actually in doubt -- 160 unaligned writes at
 every alignment, drained and hot, land and read back -- and it passes. The
 suspicion was aimed at the core for a full session on the word of a harness
 that was reporting its own broken preload.
+
+## The lockstep harness now contains the MCU, and it reproduces the board
+
+Lockstep against MAME found the shared-RAM addressing fault and carried Shogun
+Warriors to access 1,378,898 -- past its memory test and past the writes to all
+four command registers. It then stopped being able to say anything, for a
+reason that had nothing to do with the core: **there was no MCU in the
+harness**. The 68000 asked, nothing answered, and it sat in its
+watchdog-and-poll loop while MAME left. Every access after that point was a
+divergence that meant nothing.
+
+The CALC3 now sits in `kaneko_cpumem_harness` on arbiter masters 1 and 2, in
+the order `KanekoCALC3.sv` uses, with its ROM feeder, its aligned-read glue and
+its `tick` from `vblank_rise`. Three things had to be connected that the
+harness had tied off: the game table's `base_calc3rom`, the video timing's
+`vblank_rise` -- without which the device never gets a frame tick -- and the
+EEPROM's `bk_q`, which is what the MCU reads for its defaults.
+
+The MCU's data ROM is a separate region and the harness only ever loaded the
+68000's program, so the device would have scanned empty memory, checksummed it
+and answered nothing -- indistinguishable from a device that does not work.
+`build_rom_regions.py --region-offset <set> <region>` now answers where a
+region sits in the single stream the loader fills, and the boot testbench
+streams it there.
+
+**The result is the board's symptom, in simulation:**
+
+    CALC3 crc_ready 1  busy 0  status 0
+
+The device comes alive and checksums its ROM; the game never writes it a
+command. That is exactly what the overlay reads on hardware, and it is now
+somewhere a MAME diff can reach.

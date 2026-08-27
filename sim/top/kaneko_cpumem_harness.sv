@@ -43,6 +43,10 @@ module kaneko_cpumem_harness #(
     output wire [15:0] selftest_got,
     output wire [15:0] selftest_want,
     output wire [3:0]  dbg_com_w,
+    // The MCU's own state, so a run can say whether it was ever commanded.
+    output wire [3:0]  dbg_c3_status,
+    output wire        dbg_c3_busy,
+    output wire        dbg_c3_crc_ready,
     // What the MCU RAM port actually receives, at the controller's door: the
     // CPU trace shows what the 68000 ASKED for, and the two have to be
     // compared to find a write that is issued and never lands.
@@ -278,7 +282,7 @@ module kaneko_cpumem_harness #(
         .h_vis(CFG_H_VIS), .v_vis(CFG_V_VIS),
         .v_start(CFG_V_START), .h_sync_start(CFG_HSYNC), .h_start(CFG_H_START),
         .hcnt(), .vcnt(vcnt), .screen_x(), .screen_y(),
-        .hsync(), .vsync(), .hblank(), .vblank(), .de(), .vblank_rise()
+        .hsync(), .vsync(), .hblank(), .vblank(), .de(), .vblank_rise(vbl_rise)
     );
 
     // 6 MHz pixel clock from 48 MHz, as the core does.
@@ -343,7 +347,7 @@ module kaneko_cpumem_harness #(
         .clk(clk), .rst(cpu_rst),
         .cs(|ym1_iob_out), .sk(eeprom_ctl[0]), .di(eeprom_ctl[1]),
         .do_out(eeprom_do),
-        .bk_addr(6'd0), .bk_din(16'd0), .bk_we(1'b0), .bk_q(),
+        .bk_addr(c3_eep_addr), .bk_din(16'd0), .bk_we(1'b0), .bk_q(bk_q),
         .dirty(), .dirty_clr(1'b0),
         .dbg_state(), .dbg_busy(), .dbg_wen(), .dbg_cmd(), .dbg_cmd_valid()
     );
@@ -363,6 +367,9 @@ module kaneko_cpumem_harness #(
     // then disagrees with hardware about the one thing being debugged.
     wire [9:0] CFG_H_VIS, CFG_V_VIS, CFG_V_START, CFG_HSYNC;
     wire [SDR_AW:1] CFG_BASE_MCURAM;
+    wire [SDR_AW:1] CFG_BASE_CALC3ROM;
+    wire            vbl_rise;
+    wire [15:0]     bk_q;
     wire [8:0] CFG_H_START;
 
     // THIS INSTANTIATION HAD DRIFTED, and nothing caught it: `make boot` is
@@ -401,7 +408,7 @@ module kaneko_cpumem_harness #(
         // The MCU's RAM and its data ROM: real bases, because this harness now
         // runs that RAM through the arbiter and the SDRAM, which is the whole
         // reason it exists again.
-        .base_mcuram(CFG_BASE_MCURAM), .base_calc3rom(),
+        .base_mcuram(CFG_BASE_MCURAM), .base_calc3rom(CFG_BASE_CALC3ROM),
         .hit_type2(),
         .irq_lvl_a(), .irq_lvl_b(), .irq_lvl_c(),
         .game_id(CFG_GAME_ID),
@@ -501,11 +508,85 @@ module kaneko_cpumem_harness #(
         .fail_want(rt_fail_want)
     );
 
-    wire [3:0]            arb_req  = {rt_req, 1'b0, 1'b0, cpu_mcu_req};
-    wire [3:0][SDR_AW:1]  arb_addr = {rt_addr, {SDR_AW{1'b0}}, {SDR_AW{1'b0}}, cpu_mcu_addr};
-    wire [3:0]            arb_we   = {rt_we, 1'b0, 1'b0, cpu_mcu_we};
-    wire [3:0][15:0]      arb_din  = {rt_din, 16'd0, 16'd0, cpu_mcu_din};
-    wire [3:0][1:0]       arb_be   = {rt_be, 2'b11, 2'b11, cpu_mcu_be};
+    // ---- The CALC3 MCU, on the arbiter it has in the core ----
+    //
+    // Lockstep stopped being able to say anything at the point the game asks
+    // the MCU for something. With no device here, nothing answers: the 68000
+    // sits in its watchdog-and-poll loop forever while MAME leaves it, and
+    // every access after that is a divergence that means nothing. The device
+    // sits on masters 1 and 2, in the order KanekoCALC3.sv uses, so a fault
+    // found here is a fault in what the board runs.
+    wire [16:0] c3_rom_addr;
+    wire        c3_rom_rd;
+    wire [7:0]  c3_rom_byte;
+    wire        c3_rom_ok;
+    wire [15:0] c3_ram_addr;
+    wire        c3_ram_rd, c3_ram_wr;
+    wire [1:0]  c3_ram_be;
+    wire [15:0] c3_ram_wdata;
+    wire [5:0]  c3_eep_addr;
+    wire        c3_eep_rd;
+    wire        c3_busy, c3_crc_ready, c3_key_missing;
+
+    wire        c3_romp_req;
+    wire [SDR_AW:1] c3_romp_addr;
+
+    kaneko_tilerom #(.NREQ(1), .SDR_AW(SDR_AW)) u_calc3rom (
+        .clk(clk), .rst(rst),
+        .req_addr({{7{1'b0}}, c3_rom_addr}),
+        .base_addr(CFG_BASE_CALC3ROM),
+        .req_data(c3_rom_byte),
+        .port_ready(c3_rom_ok),
+        .sdr_req(c3_romp_req), .sdr_addr(c3_romp_addr),
+        .sdr_ack(arb_ack[2]), .sdr_dout(arb_dout)
+    );
+
+    // The feeder answers with an address-and-ready contract; the device asks
+    // and waits for a valid. Also stops a ready left high by a CACHE HIT at
+    // the previous address being read as an answer to this cycle's request.
+    reg c3_rom_pending;
+    always_ff @(posedge clk) begin
+        if (rst)                c3_rom_pending <= 1'b0;
+        else if (c3_rom_rd)     c3_rom_pending <= 1'b1;
+        else if (c3_rom_valid)  c3_rom_pending <= 1'b0;
+    end
+    wire c3_rom_valid = c3_rom_pending && c3_rom_ok;
+
+    wire c3_ram_req = c3_ram_rd | c3_ram_wr;
+    // Aligned read, exact write -- the rule the whole core follows. See
+    // kaneko_bus and KanekoCALC3.sv; a burst starts at the address given.
+    wire [SDR_AW:1] c3_ram_sdr_addr = CFG_BASE_MCURAM +
+        (c3_ram_wr ? SDR_AW'(c3_ram_addr[15:1])
+                   : SDR_AW'({c3_ram_addr[15:3], 2'b00}));
+    reg [1:0] c3_ram_lane;
+    always_ff @(posedge clk) if (c3_ram_req) c3_ram_lane <= c3_ram_addr[2:1];
+    wire [15:0] c3_ram_rdata = arb_dout[{c3_ram_lane, 4'd0} +: 16];
+    wire        c3_ram_valid = arb_ack[1];
+
+    kaneko_calc3 #(.AW(17), .ROM_BYTES(32'h20000)) u_calc3 (
+        .clk(clk), .rst_n(~rst),
+        .com_w(dbg_com_w),
+        .tick(vbl_rise),
+        .dsw(8'he5),
+        .rom_addr(c3_rom_addr), .rom_rd(c3_rom_rd),
+        .rom_data(c3_rom_byte), .rom_valid(c3_rom_valid),
+        .ram_addr(c3_ram_addr), .ram_rd(c3_ram_rd), .ram_wr(c3_ram_wr),
+        .ram_be(c3_ram_be), .ram_wdata(c3_ram_wdata),
+        .ram_rdata(c3_ram_rdata), .ram_valid(c3_ram_valid),
+        .eep_addr(c3_eep_addr), .eep_data(bk_q), .eep_rd(c3_eep_rd),
+        .busy(c3_busy), .crc_ready(c3_crc_ready),
+        .key_missing(c3_key_missing),
+        .dbg_cmds(), .dbg_cmd(), .dbg_status(dbg_c3_status), .dbg_crc()
+    );
+
+    assign dbg_c3_busy      = c3_busy;
+    assign dbg_c3_crc_ready = c3_crc_ready;
+
+    wire [3:0]            arb_req  = {rt_req, c3_romp_req, c3_ram_req, cpu_mcu_req};
+    wire [3:0][SDR_AW:1]  arb_addr = {rt_addr, c3_romp_addr, c3_ram_sdr_addr, cpu_mcu_addr};
+    wire [3:0]            arb_we   = {rt_we, 1'b0, c3_ram_wr, cpu_mcu_we};
+    wire [3:0][15:0]      arb_din  = {rt_din, 16'd0, c3_ram_wdata, cpu_mcu_din};
+    wire [3:0][1:0]       arb_be   = {rt_be, 2'b11, c3_ram_be, cpu_mcu_be};
     wire [3:0]            arb_ack;
     wire [63:0]           arb_dout;
 

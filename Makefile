@@ -389,8 +389,16 @@ boot: regions
 	  echo "      sound only, because the frame gate never needed their code."; \
 	  echo "      kaneko_bus also decodes bakubrkr_map alone, so booting another"; \
 	  echo "      title needs its memory map too, not just its ROM."; exit 1; }
-	@./build/obj_kaneko_cpumem/kaneko_cpumem $(ROM_DIR)/$(SET)_maincpu.bin \
-	  --game $(shell tools/build_rom_regions.py --game-id $(SET)) $(BOOT_ARGS)
+	@# The MCU's data ROM, when the set has one. Without it the CALC3 scans
+	@# empty memory, checksums it and answers nothing, which is
+	@# indistinguishable from a device that does not work.
+	@C3=""; \
+	if [ -f $(ROM_DIR)/$(SET)_calc3_rom.bin ]; then \
+	  C3="--calc3 $(ROM_DIR)/$(SET)_calc3_rom.bin --calc3-off \
+	      $$(tools/build_rom_regions.py --region-offset $(SET) calc3_rom)"; \
+	fi; \
+	./build/obj_kaneko_cpumem/kaneko_cpumem $(ROM_DIR)/$(SET)_maincpu.bin \
+	  --game $(shell tools/build_rom_regions.py --game-id $(SET)) $$C3 $(BOOT_ARGS)
 
 # ------------------------------------------------------------------- area
 MOD ?= kaneko_tmap_fetch

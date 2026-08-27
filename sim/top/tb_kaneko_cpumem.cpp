@@ -74,6 +74,13 @@ struct Stats {
 };
 
 
+// A SECOND REGION, streamed at its own offset in the one stream the loader
+// fills. The MCU's data ROM is not part of the 68000's program region, and
+// without it the device scans empty memory, checksums it, and answers nothing
+// -- which looks exactly like a device that is broken.
+static std::vector<uint8_t> extra_rom;
+static uint32_t             extra_off = 0;
+
 // Reset, bring up the SDRAM, and stream the program region in exactly as the
 // HPS would. Split out of run() so the interrupt-acknowledge check can get a
 // booted machine without also taking over the observation loop.
@@ -116,6 +123,16 @@ static bool boot_dut(const std::vector<uint8_t>& rom, bool swap, bool video_idle
         while (dut->ioctl_wait) tick();
         uint8_t b0 = rom[n * 2], b1 = rom[n * 2 + 1];
         dut->ioctl_addr = (uint32_t)(n * 2);
+        dut->ioctl_dout = swap ? (uint16_t)((b0 << 8) | b1)
+                               : (uint16_t)(b0 | (b1 << 8));
+        dut->ioctl_wr = 1; tick();
+        dut->ioctl_wr = 0; tick();
+    }
+    // The MCU's data ROM, at the offset the SDRAM map gives it.
+    for (size_t n = 0; n < extra_rom.size() / 2; n++) {
+        while (dut->ioctl_wait) tick();
+        const uint8_t b0 = extra_rom[n * 2], b1 = extra_rom[n * 2 + 1];
+        dut->ioctl_addr = (uint32_t)(extra_off + n * 2);
         dut->ioctl_dout = swap ? (uint16_t)((b0 << 8) | b1)
                                : (uint16_t)(b0 | (b1 << 8));
         dut->ioctl_wr = 1; tick();
@@ -267,6 +284,12 @@ static void report(const char* name, const Stats& s, uint64_t run_ticks) {
     // rather than once at the end — the counters reset with the DUT, so a
     // single report at the end only ever describes the last sub-run, which is
     // the deliberately-broken byte-order probe.
+    // The MCU: did it come alive, and was it ever given a command? A run
+    // where crc_ready never sets is a device that never read its ROM; a run
+    // where status stays 0 is a device the game never asked for anything.
+    std::printf("    CALC3 crc_ready %u  busy %u  status %X\n",
+                (unsigned)dut->dbg_c3_crc_ready, (unsigned)dut->dbg_c3_busy,
+                (unsigned)dut->dbg_c3_status);
     std::printf("    OKI wr/fetch/busy/sample  %u / %u / %u / %u\n",
                 (unsigned)dut->oki_wr_cnt, (unsigned)dut->oki_ok_cnt,
                 (unsigned)dut->oki_busy_cnt, (unsigned)dut->oki_snd_cnt);
@@ -276,6 +299,7 @@ int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
 
     const char* path = "build/roms/explbrkr_maincpu.bin";
+    const char* calc3_path = nullptr;
     const char* trace_path = nullptr;
     uint64_t    trace_count = 20000;
     uint64_t    run_ticks_override = 0;
@@ -290,6 +314,10 @@ int main(int argc, char** argv) {
             tail_cap = (size_t)std::strtoull(argv[++i], nullptr, 0);
         else if (!std::strcmp(argv[i], "--ticks") && i + 1 < argc)
             run_ticks_override = std::strtoull(argv[++i], nullptr, 0);
+        else if (!std::strcmp(argv[i], "--calc3") && i + 1 < argc)
+            calc3_path = argv[++i];
+        else if (!std::strcmp(argv[i], "--calc3-off") && i + 1 < argc)
+            extra_off = (uint32_t)std::strtoul(argv[++i], nullptr, 0);
         else if (argv[i][0] != '-') path = argv[i];
     }
     FILE* f = std::fopen(path, "rb");
@@ -303,6 +331,17 @@ int main(int argc, char** argv) {
                             | ((uint32_t)rom[2] << 8)  | rom[3];
     const uint32_t want_pc  = ((uint32_t)rom[4] << 24) | ((uint32_t)rom[5] << 16)
                             | ((uint32_t)rom[6] << 8)  | rom[7];
+    if (calc3_path) {
+        FILE* cf = std::fopen(calc3_path, "rb");
+        if (!cf) { std::fprintf(stderr, "cannot open %s\n", calc3_path); return 2; }
+        std::fseek(cf, 0, SEEK_END); long cn = std::ftell(cf);
+        std::fseek(cf, 0, SEEK_SET);
+        extra_rom.resize((size_t)cn);
+        if (std::fread(extra_rom.data(), 1, (size_t)cn, cf) != (size_t)cn) return 2;
+        std::fclose(cf);
+        std::printf("MCU data ROM %s (%ld bytes) at stream offset %06X\n",
+                    calc3_path, cn, extra_off);
+    }
     std::printf("ROM %s (%ld bytes)\n", path, n);
     std::printf("  file reset vectors: SSP %08X  PC %08X\n\n", want_ssp, want_pc);
 

@@ -784,6 +784,22 @@ def build_mra(setname, rompath, outdir):
 if __name__ == "__main__":
     # A query that answers one question and exits, so a Makefile can ask for a
     # game's config byte without assembling anything.
+    # Where a region sits in the one stream the loader fills. No .get() with a
+    # fallback: a region that is not in the map has no correct offset, and
+    # answering 0 would put the MCU's data ROM on top of the 68000's program.
+    if "--region-offset" in sys.argv:
+        q = [a for a in sys.argv[1:] if not a.startswith("--")]
+        if len(q) != 2:
+            sys.exit("--region-offset takes a set name and a region name")
+        setname, region = q
+        if setname not in SDRAM_MAPS:
+            sys.exit("no SDRAM map for %s" % setname)
+        for name, off, _size in SDRAM_MAPS[setname]:
+            if name == region:
+                print("0x%x" % off)
+                sys.exit(0)
+        sys.exit("%s has no region %s" % (setname, region))
+
     if "--game-id" in sys.argv:
         q = [a for a in sys.argv[1:] if not a.startswith("--")]
         if len(q) != 1:
