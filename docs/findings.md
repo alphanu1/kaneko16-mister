@@ -6939,9 +6939,19 @@ select widened from `status[25:24]` to `[26:24]`.
 **Bit 26 had never meant anything before, so a config saved by the older core
 can have it set to anything.** With it set, "CW 90" -- 10 in two bits -- comes
 back as 110, code 6, which the unused-code term sent to no rotation. The menu
-still reads CW, the picture is upright, and nothing says why. Re-picking the
-option writes all three bits and clears it, which is why a setting touched
-since the upgrade behaves and one left alone does not.
+still reads CW, the picture is upright, and nothing says why.
+
+**THIS IS NOT THE REPORTED FAULT, and saying it was is a mistake worth
+recording.** A stale bit 26 turns rotation off on BOTH outputs, and the owner
+states rotation has always worked through HDMI -- so bit 26 is clear on that
+machine and this cannot be what they are seeing. It was written up as the
+explanation before that was checked, which is the same error as trusting a
+bitstream's commit date two paragraphs down: a theory that fits half the
+evidence was taken for the answer because it fit that half well.
+
+It is still a real fault. An old config really can turn rotation off silently,
+and the fold-forward below stands on its own merits. It is simply not the CRT
+report.
 
 Codes 5, 6 and 7 now fall back to what their low two bits meant before. Only
 code 4 is new and only code 4 is 180.
@@ -6960,3 +6970,20 @@ feature was already in the build that worked. It was not: that file was
 recovered off an SD card and committed long afterwards, which its own changelog
 states. The owner said so and was right. **The changelog records what is in a
 build; git history records when a file was added.**
+
+### What the CRT report still is not explained by, 2026-08-27
+
+With bit 26 ruled out by HDMI working, the core's rotation outputs are
+**identical** between the two releases for CW and CCW: same `rotate_ccw`, same
+`no_rotate`, `flip` zero either way, and `VGA_SCALER` tied low in both. There is
+nothing left in the core that could have stopped the analog output rotating
+while leaving HDMI alone.
+
+So either something outside the core differs on that machine -- Direct Video,
+`vga_scaler` in MiSTer.ini, a firmware update -- or the build the reporter
+remembers working is not the one assumed.
+
+What the core can now do that neither release did: it raises `VGA_SCALER` while
+the framebuffer is in use, which is the switch that routes the rotated image to
+the analog output at all. That is worth testing before anything else is
+theorised, and it needs the reporter, not more reading of the diff.
