@@ -7110,3 +7110,44 @@ that is blank therefore overwrites the defaults with exactly the `FFFF` above,
 and the game stalls in a way that looks nothing like an EEPROM problem. When a
 CALC3 title boots on the board and sits polling its command word, the saved
 NVRAM is the first thing to remove.
+
+## Every MCU write reached the memory as a read
+
+`kaneko_calc3` clears its request lines unconditionally at the top of its
+`always_ff`:
+
+    ram_rd  <= 1'b0;
+    ram_wr  <= 1'b0;
+
+so both are single-cycle pulses, and the cycle that raises `ram_wr` is the only
+cycle on which it is high. `kaneko_mcuram_arb` latches the REQUEST for exactly
+that reason -- and then sampled `m_we`, `m_din`, `m_addr` and `m_be` at GRANT
+time, which is a cycle later at best and later still when another master is
+being served. By then `we` was gone.
+
+**Every write the MCU issued was presented to the SDRAM as a read.** Its reads
+were unaffected -- `we` is 0 for a read either way -- so the device read its
+command word, read all seven of its parameters correctly, ran the right command
+against the right addresses, and never changed a single word of memory. Alive,
+correct, and completely invisible to the game.
+
+That is the whole of what the board was showing. The game writes `00ff` to its
+command word, the MCU reads it, does the init, writes `0000` back to clear it
+-- and the game reads `00ff` for ever, because the clear was a read.
+
+The side-band is now sampled with the request. Address, data and byte-enable
+are registers inside the device and survived the pulse, so only `we` was
+actually lost, but all four are captured: a master free to change them between
+request and grant is one this arbiter cannot serve, and nothing said otherwise.
+
+**Why no test could see it.** `tb_kaneko_mcuram_arb` does model a pulsing
+master -- master 1, as the CALC3 -- but its `clear_req()` drops `m_req` and
+leaves `m_we` asserted. The one thing that can go wrong was the one thing the
+model made impossible. The test added with this fix pulses request, write-
+enable and data together for a single cycle and then takes all three away, and
+holds the grant off so the sample cannot land on the request cycle. Without
+the fix it reports `a one-cycle write request reached the memory as a READ`.
+
+Found by putting the MCU in the lockstep harness and logging its own accesses:
+its reads returned exactly the values MAME's did, and nothing it wrote was ever
+read back by anything.

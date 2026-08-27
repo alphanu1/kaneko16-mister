@@ -94,6 +94,42 @@ module kaneko_mcuram_arb #(
     end
   endfunction
 
+  // THE SIDE-BAND IS SAMPLED WITH THE REQUEST, NOT AT THE GRANT.
+  //
+  // The request is latched above because kaneko_calc3 pulses it for one cycle
+  // -- and that same pulse is the only cycle on which its m_we is high. The
+  // grant happens a cycle later at best, and later still when another master
+  // is being served, by which time m_we has gone. Reading it there issued
+  // every one of the device's WRITES to the memory as a READ.
+  //
+  // Its reads were unaffected, we being 0 either way, so the MCU read its
+  // command, read its parameters, ran the right command and never changed a
+  // word of memory -- alive, correct, and invisible. The game polled the
+  // command word it had written and the MCU's clear of it never landed.
+  //
+  // Address, data and byte-enable are registers in the device and survive the
+  // pulse, so only we was actually lost; they are captured here too because a
+  // master that is free to change them between request and grant is a master
+  // this arbiter cannot serve, and nothing said otherwise.
+  logic [NM-1:0]           hold_we;
+  logic [NM-1:0][SDR_AW:1] hold_addr;
+  logic [NM-1:0][15:0]     hold_din;
+  logic [NM-1:0][1:0]      hold_be;
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      hold_we <= '0; hold_addr <= '0; hold_din <= '0; hold_be <= '0;
+    end else begin
+      for (int unsigned i = 0; i < NM; i++) begin
+        if (m_req[i]) begin
+          hold_we[i]   <= m_we[i];
+          hold_addr[i] <= m_addr[i];
+          hold_din[i]  <= m_din[i];
+          hold_be[i]   <= m_be[i];
+        end
+      end
+    end
+  end
+
   wire [MW-1:0] next_start = MW'((int'(last) + 1) % NM);
   wire          any_req    = |pend;
 
@@ -115,10 +151,10 @@ module kaneko_mcuram_arb #(
         if (any_req) begin
           grant  <= pick(next_start, pend);
           s_req  <= 1'b1;
-          s_addr <= m_addr[pick(next_start, pend)];
-          s_we   <= m_we  [pick(next_start, pend)];
-          s_din  <= m_din [pick(next_start, pend)];
-          s_be   <= m_be  [pick(next_start, pend)];
+          s_addr <= hold_addr[pick(next_start, pend)];
+          s_we   <= hold_we  [pick(next_start, pend)];
+          s_din  <= hold_din [pick(next_start, pend)];
+          s_be   <= hold_be  [pick(next_start, pend)];
           busy   <= 1'b1;
           // Taken, so it is no longer pending -- unless it arrives again this
           // very cycle, which the OR above preserves.

@@ -214,6 +214,56 @@ int main(int argc, char** argv) {
     fails++;
   }
 
+  // A ONE-CYCLE REQUEST CARRIES ITS WRITE WITH IT.
+  //
+  // kaneko_calc3 pulses ram_rd/ram_wr for a single cycle -- they are cleared
+  // unconditionally at the top of its always_ff -- so the cycle that raises
+  // m_req is the ONLY cycle its m_we is high. This file already models a
+  // pulsing master, but clear_req() drops m_req and leaves m_we asserted, so
+  // the one thing that can go wrong here could not happen: the arbiter read
+  // we at GRANT time and turned every one of the device's writes into a read.
+  //
+  // The device's reads were unaffected, so it looked alive and correct and
+  // never changed a word of memory.
+  for (int i = 0; i < NM; i++) clear_req(i);
+  for (int i = 0; i < 40; i++) { d->s_ack = d->s_req; tick(); }
+  d->s_ack = 0;
+  {
+    const uint32_t A = 0x3210;
+    const uint16_t V = 0xc0de;
+    bool saw_write = false, saw_read = false;
+    uint32_t got_addr = 0; uint16_t got_din = 0;
+    // Pulse it for exactly one cycle, then take EVERYTHING away -- request,
+    // write-enable and data -- as the device does.
+    d->m1_addr = A; d->m1_din = V; d->m1_we = 1; d->m1_be = 3; d->m1_req = 1;
+    tick();
+    d->m1_req = 0; d->m1_we = 0; d->m1_din = 0xffff; d->m1_addr = 0;
+    // Hold the grant off for a while, so the sample cannot accidentally land
+    // on the cycle the request was made.
+    for (int c = 0; c < 40; c++) {
+      const bool serving = d->s_req;
+      if (serving && !saw_write && !saw_read) {
+        got_addr = d->s_addr; got_din = d->s_din;
+        if (d->s_we) saw_write = true; else saw_read = true;
+      }
+      d->s_ack = serving ? 1 : 0;
+      tick();
+    }
+    d->s_ack = 0;
+    checks++;
+    if (saw_read || !saw_write) {
+      printf("  FAIL a one-cycle write request reached the memory as a %s\n",
+             saw_read ? "READ" : "nothing at all");
+      fails++;
+    }
+    checks++;
+    if (saw_write && (got_addr != A || got_din != V)) {
+      printf("  FAIL one-cycle write carried addr %06x data %04x, "
+             "wanted %06x %04x\n", got_addr, got_din, A, V);
+      fails++;
+    }
+  }
+
   // A HELD REQUEST IS ONE REQUEST, NOT A STREAM OF THEM.
   //
   // Every master above holds its request high continuously, which is a
