@@ -57,7 +57,25 @@ assign BUTTONS   = 0;
 
 assign VGA_SL      = 0;
 assign VGA_F1      = 0;
-assign VGA_SCALER  = 0;
+// THE ANALOG OUTPUT HAS TO BE ASKED FOR THE SCALER, OR ROTATION NEVER REACHES
+// IT.
+//
+// Rotation lives entirely in the DDR3 framebuffer that screen_rotate fills;
+// the scaler reads that and drives HDMI. With VGA_SCALER tied low the analog
+// output carries the core's RAW video instead, which is never rotated -- so a
+// turned game showed on HDMI and upright on VGA. This was 0 from the first
+// bring-up commit and nothing since has changed it, so rotation on analog has
+// most likely never worked rather than having regressed; the 180 change
+// touched only the select width, the flip line and the no-rotate term, and
+// none of those alters CW or CCW.
+//
+// Raised only while the framebuffer is actually in use, so a game running
+// unrotated keeps the direct path and the frame of latency the framebuffer
+// costs. And never while DIRECT VIDEO is on: that mode exists to put the
+// core's own timing on the VGA pins for a CRT, the scaler is bypassed by
+// definition, and rotation cannot reach it at all -- turn Direct Video off to
+// rotate on a CRT.
+assign VGA_SCALER  = FB_EN & ~direct_video;
 assign VGA_DISABLE = 0;
 
 // Aspect: the visible area is 256x224 and the game is ROT90, but this build
@@ -88,6 +106,19 @@ localparam CONF_STR = {
 	"O[20:19],Game override,Off(MRA),1 Magical Crystals,2 Blaze On,3 Wing Force;",
 	"O[23:21],Layer1 dx,+2 (MAME),0,-2,+4;",
 	"O[26:24],Rotation,Off,Auto (per game),CW 90,CCW 90,180;",
+	// POSITION 0 IS 100% ON BOTH, because status defaults to zero and a fresh
+	// boot must not be silent or quiet. The same reason the rotation option and
+	// the SDRAM capture option put their working value first.
+	//
+	// WHICH CHIP EACH ONE MOVES IS PER BOARD, and on one game the split is not
+	// real at all. Blaze On and Wing Force put music on the YM2151 and effects
+	// on the OKI, so the two controls are independent there. Explosive Breaker
+	// and Magical Crystals have two YM2149s and an OKI -- and Explosive Breaker
+	// keeps BOTH YM2149 volumes at zero and plays its whole soundtrack through
+	// the OKI, so on that game SFX moves everything and Music moves nothing
+	// audible. That is the hardware, not a shortcut; see docs/findings.md.
+	"O[29:27],Music volume,100%,125%,150%,200%,75%,50%,25%,Off;",
+	"O[32:30],SFX volume,100%,125%,150%,200%,75%,50%,25%,Off;",
 	"-;",
 	"R[12],Reset;",
 	"-;",
@@ -208,6 +239,22 @@ always @(posedge clk_sys) begin
 end
 
 wire [1:0] game_ovr = status[20:19];
+
+// Volume, in eighths of unity. Position 0 is 100%.
+function automatic [4:0] vol8(input [2:0] sel);
+	case (sel)
+		3'd0: vol8 = 5'd8;    // 100%
+		3'd1: vol8 = 5'd10;   // 125%
+		3'd2: vol8 = 5'd12;   // 150%
+		3'd3: vol8 = 5'd16;   // 200%
+		3'd4: vol8 = 5'd6;    // 75%
+		3'd5: vol8 = 5'd4;    // 50%
+		3'd6: vol8 = 5'd2;    // 25%
+		default: vol8 = 5'd0; // Off
+	endcase
+endfunction
+wire [4:0] g_music = vol8(status[29:27]);
+wire [4:0] g_sfx   = vol8(status[32:30]);
 
 kaneko_gamecfg #(.SDR_AW(SDR_AW)) u_gamecfg
 (
@@ -758,8 +805,17 @@ wire signed [11:0] ym_ctr = $signed({1'b0, ym_sum}) - 12'sd1024;
 // Two YM2149s and one OKI on every board this core runs. Summing both
 // unconditionally is right: a part that does not exist is held silent by its
 // own reset. The CALC3 board's second OKI left with the rest of Tier 2.
-wire signed [16:0] snd_mix = {{3{ym_ctr[11]}}, ym_ctr, 2'd0}      // YM, scaled
-                           + {{3{oki_snd[13]}}, oki_snd};         // OKI 1
+// The two parts are scaled SEPARATELY now, so Music and SFX are independent
+// where the board makes them so. At 100% each this is bit-for-bit the sum it
+// was: gain8 of 8 is a multiply by 8 and a shift by 3.
+wire signed [16:0] ym_part_raw  = {{3{ym_ctr[11]}}, ym_ctr, 2'd0};
+wire signed [16:0] oki_part_raw = {{3{oki_snd[13]}}, oki_snd};
+wire signed [16:0] ym_part, oki_part;
+
+kaneko_volume #(.W(17)) u_vol_music_a (.gain8(g_music), .din(ym_part_raw),  .dout(ym_part));
+kaneko_volume #(.W(17)) u_vol_sfx_a   (.gain8(g_sfx),   .din(oki_part_raw), .dout(oki_part));
+
+wire signed [16:0] snd_mix = ym_part + oki_part;
 
 // SCALED UP, BECAUSE THE HEADROOM IS FOR A SUM THAT NEVER HAPPENS.
 //
@@ -794,9 +850,17 @@ wire signed [16:0] snd_mix = {{3{ym_ctr[11]}}, ym_ctr, 2'd0}      // YM, scaled
 //
 // If loud effects distort, back this off to <<< 1 -- that is the largest shift
 // that cannot clip.
-wire signed [18:0] snd_gain = {{2{snd_mix[16]}}, snd_mix} <<< 2;
-wire [15:0] ym_mix = (snd_gain >  19'sd32767) ? 16'h7fff
-                   : (snd_gain < -19'sd32768) ? 16'h8000
+// x6, RAISED FROM x4 on the owner's report that Explosive Breaker is still
+// too quiet -- about 3.5 dB. The reasoning below still holds and this goes
+// further past the point the sum can be proven not to clip, which is why the
+// saturation under it is not optional.
+//
+// THE PRODUCT IS FORMED AT 21 BITS, NOT AT THE TARGET'S. 17 bits by 6 needs
+// 20; a narrower target truncates in silence, which is exactly how Wing
+// Force's music turned to noise a second in.
+wire signed [20:0] snd_gain = $signed({{4{snd_mix[16]}}, snd_mix}) * 21'sd6;
+wire [15:0] ym_mix = (snd_gain >  21'sd32767) ? 16'h7fff
+                   : (snd_gain < -21'sd32768) ? 16'h8000
                                               : snd_gain[15:0];
 
 // Blaze On board: the YM2151 in stereo, plus the OKI on Wing Force, which puts
@@ -880,8 +944,15 @@ wire signed [17:0] z80_ym_r  = z80_ym_r24[23:6];
 wire signed [17:0] z80_oki_x1 = $signed({{4{oki_snd[13]}}, oki_snd});
 wire signed [17:0] z80_oki_w  = (z80_oki_x1 <<< 1) + z80_oki_x1;   // x3
 
-wire signed [17:0] z80_sum_l = z80_ym_l + z80_oki_w;
-wire signed [17:0] z80_sum_r = z80_ym_r + z80_oki_w;
+// Scaled separately, so Music moves the YM2151 and SFX moves the OKI. At 100%
+// each this is the same sum it was.
+wire signed [17:0] z80_ym_lv, z80_ym_rv, z80_oki_v;
+kaneko_volume #(.W(18)) u_vol_music_l (.gain8(g_music), .din(z80_ym_l),  .dout(z80_ym_lv));
+kaneko_volume #(.W(18)) u_vol_music_r (.gain8(g_music), .din(z80_ym_r),  .dout(z80_ym_rv));
+kaneko_volume #(.W(18)) u_vol_sfx_z   (.gain8(g_sfx),   .din(z80_oki_w), .dout(z80_oki_v));
+
+wire signed [17:0] z80_sum_l = z80_ym_lv + z80_oki_v;
+wire signed [17:0] z80_sum_r = z80_ym_rv + z80_oki_v;
 
 // Saturated rather than trusted, for the same reason the 68000 board's mix is:
 // a silent overflow inverts the waveform and sounds like a broken chip.

@@ -6832,3 +6832,52 @@ unreadable over a bright picture; and now the frame gate reports a pass it
 cannot fail, on a class of object it does not render. Each looked green. The
 rule that follows: **an instrument that has never failed has not been shown to
 work.** Before trusting a gate, make it fail on purpose.
+
+## Which chip is "music" is per game, and on one game there is no split
+, 2026-08-27
+
+The OSD gained separate Music and SFX volumes, and the mapping is a per-game
+fact like everything else on this hardware:
+
+| Board | Music | SFX |
+|---|---|---|
+| Blaze On, Wing Force | YM2151 | OKI |
+| Explosive Breaker, Magical Crystals | 2x YM2149 | OKI |
+
+**On Explosive Breaker the split is not real.** It keeps both YM2149 volumes at
+zero and plays its entire soundtrack through the OKI, so the SFX control moves
+the music as well and the Music control moves nothing audible. That is the
+hardware and not a shortcut, and it is written into the OSD's own comment so
+the next person does not treat it as a bug.
+
+Both controls put 100% at position 0, because `status` defaults to zero and a
+fresh boot must not come up silent. The rotation option and the SDRAM capture
+option already had to learn that.
+
+Explosive Breaker's overall level went from x4 to x6, about 3.5 dB, on the
+owner's report that it was still too quiet. That is past the point the sum can
+be proven not to clip, which is why the saturation under it is not optional.
+The product is formed at 21 bits: 17 by 6 needs 20, and a narrower target
+truncates in silence -- the exact fault that turned Wing Force's music to noise
+a second in.
+
+## Rotation never reached the analog output, 2026-08-27
+
+Reported as a regression from the 180 change: rotation worked on HDMI but not
+on a CRT through VGA.
+
+It is not a regression. `VGA_SCALER` had been tied to 0 since the first
+bring-up commit, and rotation lives entirely in the DDR3 framebuffer that
+`screen_rotate` fills -- the scaler reads that and drives HDMI, while a low
+VGA_SCALER leaves the analog output carrying the core's RAW video, which is
+never rotated. The 180 commit changed the select width, the flip line and the
+no-rotate term, and none of those alters CW or CCW; diffed to be sure.
+
+`VGA_SCALER` is now raised while the framebuffer is in use, so the analog
+output follows the scaler when rotating and keeps the direct path -- and its
+lower latency -- when not.
+
+**It still cannot work with Direct Video on.** That mode puts the core's own
+timing on the VGA pins for a CRT and bypasses the scaler by definition, so
+there is nothing rotated for it to carry. Direct Video has to be off to rotate
+on a CRT, and no core-side change alters that.
