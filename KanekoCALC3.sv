@@ -1116,11 +1116,19 @@ kaneko_calc3 #(.AW(17), .ROM_BYTES(32'h20000)) u_calc3
 	.tick(vbl_rise),
 	// NOT an OSD option yet, so this is MAME's default switch positions:
 	// flip screen off (0x01), demo sounds on (0x04), difficulty 0x20 of 0x38,
-	// can-join 0x40, continue-coin 0x80. Bit 1 is not defined by the port and
-	// MAME reads undefined port bits as ZERO, so it is 0 rather than 1 -- the
-	// same rule that made Blaze On's idle SYSTEM word 0xFF00 and not 0xFFFF.
-	// The device inverts it, as MAME does.
-	.dsw(8'he5),
+	// can-join 0x40, continue-coin 0x80 -- and bit 1 SET.
+	//
+	// Bit 1 was 0 here, on the reasoning that the port does not define it and
+	// MAME reads undefined bits as zero. The port does define it:
+	//
+	//     PORT_SERVICE_DIPLOC(0x02, IP_ACTIVE_LOW, "SW1:2")
+	//
+	// It is the service switch, active low, so an unpressed switch reads 1.
+	// The default word is therefore e7, and the device writes its inverse into
+	// shared RAM every frame: MAME writes 18 to 200058 and this core wrote 1a.
+	// Read every bit out of INPUT_PORTS_START, including the ones that look
+	// like they are not there.
+	.dsw(8'he7),
 
 	.rom_addr(c3_rom_addr), .rom_rd(c3_rom_rd),
 	.rom_data(c3_rom_data), .rom_valid(c3_rom_valid),

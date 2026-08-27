@@ -78,6 +78,8 @@ module kaneko_cpumem_harness #(
     output wire        dbg_c3_rd_stb,
     output wire [15:0] dbg_c3_acc_addr,
     output wire [15:0] dbg_c3_acc_data,
+    output wire        dbg_c3_rv_stb,
+    output wire [15:0] dbg_c3_rdata,
     // What the MCU RAM port actually receives, at the controller's door: the
     // CPU trace shows what the 68000 ASKED for, and the two have to be
     // compared to find a write that is issued and never lands.
@@ -628,7 +630,7 @@ module kaneko_cpumem_harness #(
         .clk(clk), .rst_n(~rst),
         .com_w(dbg_com_w),
         .tick(vbl_rise),
-        .dsw(8'he5),
+        .dsw(8'he7),
         .rom_addr(c3_rom_addr), .rom_rd(c3_rom_rd),
         .rom_data(c3_rom_byte), .rom_valid(c3_rom_valid),
         .ram_addr(c3_ram_addr), .ram_rd(c3_ram_rd), .ram_wr(c3_ram_wr),
@@ -643,6 +645,12 @@ module kaneko_cpumem_harness #(
 
     reg [31:0] c3_wr_cnt, c3_rd_cnt, c3_busy_cnt, c3_ack_cnt;
     reg        c3_wr_d, c3_rd_d;
+    // Which kind of access is outstanding, so a valid can be attributed.
+    reg        c3_ram_wr_seen;
+    always_ff @(posedge clk)
+      if (rst)                c3_ram_wr_seen <= 1'b0;
+      else if (c3_ram_wr)     c3_ram_wr_seen <= 1'b1;
+      else if (c3_ram_rd)     c3_ram_wr_seen <= 1'b0;
     reg [15:0] wa [0:3];
     reg [15:0] wd [0:3];
     reg [15:0] wlast_a, wlast_d;
@@ -676,6 +684,11 @@ module kaneko_cpumem_harness #(
     assign dbg_c3_rd_stb   = c3_ram_rd && !c3_rd_d;
     assign dbg_c3_acc_addr = c3_ram_addr;
     assign dbg_c3_acc_data = c3_ram_wdata;
+    // A read logged at REQUEST time has no data yet, so the capture said
+    // "----" and hid the parameters the device is deciding on. This is the
+    // answer arriving.
+    assign dbg_c3_rv_stb   = c3_ram_valid && !c3_ram_wr_seen;
+    assign dbg_c3_rdata    = c3_ram_rdata;
     always_ff @(posedge clk) begin
       if (rst) begin
         c3_wr_cnt <= '0; c3_rd_cnt <= '0; c3_busy_cnt <= '0; c3_ack_cnt <= '0;
