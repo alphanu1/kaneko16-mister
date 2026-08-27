@@ -78,8 +78,19 @@ Both cannot be true, so the instrument was wrong rather than the eye. With the
 separators either side, each group reads as solid or dark and miscounting by one
 cannot change the answer.
 
-**Only about twelve blocks of a sixteen-block row are visible on the board** —
-the right-hand end runs off the screen. Everything here lives in the LEFT THREE
+**FIXED, 2026-08-27: the panel now uses the visible window's own origin.** It
+had been drawn against `screen_x`, which is the GAME's coordinate — `hcnt +
+h_start` — so on the CALC3 board, where `h_start` is 40, the first FIVE blocks
+of every row simply never occurred. A sixteen-bit row showed its last eleven
+blocks, the eight-bit interrupt row showed three, and the first visible
+separator fell after block 7 so the leading group had three blocks instead of
+four. Tier 1 has `h_start` 0, which is why the same panel was always correct
+there.
+
+That cost two rounds of misreading, and one layout put the single most
+diagnostic flag of the Tier 2 bring-up — whether the controller ever served the
+MCU's SDRAM port — in a group that could not be displayed at all. It would have
+read dark whatever the truth was. Everything here lives in the LEFT THREE
 groups; the fourth is deliberately empty rather than carrying something that
 would be silently lost.
 

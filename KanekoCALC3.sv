@@ -2439,20 +2439,36 @@ wire [7:0] pal_b = {pal_rd_q[4:0],   pal_rd_q[4:2]};
 // opposite fixes cannot share one indicator — rule 6: check the instrument
 // could have seen it.
 localparam int unsigned ALV_BIT_W = 8;
+
+// THE PANEL IS DRAWN RELATIVE TO THE VISIBLE WINDOW, NOT TO screen_x.
+//
+// screen_x is the GAME's coordinate -- hcnt + h_start -- so on a board whose
+// window does not start at zero the low coordinates never occur. The CALC3
+// board sets h_start to 40, which is five blocks, so blocks 0 to 4 of every row
+// were simply never drawn: a sixteen-bit row showed its last ELEVEN blocks and
+// the first visible separator fell after block 7, leaving a leading group of
+// three. Reported as "there is only 11 there", and it cost two rounds of
+// misreading the panel before the cause was found -- one of them had the most
+// diagnostic flag of the whole Tier 2 bring-up sitting in a group that could
+// not be displayed.
+//
+// Tier 1 has h_start 0, which is why the same panel is correct there and why
+// this never showed until the CALC3 board.
+wire [8:0] dbg_x = screen_x - CFG_H_START;
 localparam int unsigned ALV_BITS  = 20;
 localparam int unsigned IRQ_BITS  = 8;
 
 // Row 0, green: bus cycles per frame, 20 bits.
 wire in_alive_row = (screen_y >= 9'd16) && (screen_y < 9'(16 + 6))
-                 && (screen_x < 9'(ALV_BITS * ALV_BIT_W));
-wire [4:0] alive_bit = 5'(ALV_BITS - 1) - 5'(screen_x[8:3]);
+                 && (dbg_x < 9'(ALV_BITS * ALV_BIT_W));
+wire [4:0] alive_bit = 5'(ALV_BITS - 1) - 5'(dbg_x[8:3]);
 wire       alive_set = bus_cycles_lat[alive_bit];
 
 // Row 1, amber: interrupts acknowledged per frame, 8 bits. A different colour
 // so the two readouts cannot be mistaken for one wide number.
 wire in_irq_row = (screen_y >= 9'd24) && (screen_y < 9'(24 + 6))
-               && (screen_x < 9'(IRQ_BITS * ALV_BIT_W));
-wire [2:0] irq_bit = 3'(IRQ_BITS - 1) - 3'(screen_x[5:3]);
+               && (dbg_x < 9'(IRQ_BITS * ALV_BIT_W));
+wire [2:0] irq_bit = 3'(IRQ_BITS - 1) - 3'(dbg_x[5:3]);
 wire       irq_set = irq_cnt_lat[irq_bit];
 
 // Rows 4-7, yellow: the OKI sound path, per frame, one row per link in the
@@ -2467,8 +2483,8 @@ wire       irq_set = irq_cnt_lat[irq_bit];
 // everything above it. Yellow because magenta read too close to the cyan
 // overrun row above it to tell apart on a photograph.
 wire in_oki_row = (screen_y >= 9'd40) && (screen_y < 9'(40 + 24))
-               && (screen_x < 9'(16 * ALV_BIT_W));
-wire [3:0] oki_bit = 4'd15 - 4'(screen_x[6:3]);
+               && (dbg_x < 9'(16 * ALV_BIT_W));
+wire [3:0] oki_bit = 4'd15 - 4'(dbg_x[6:3]);
 // THE Z80 SOUND-PORT CENSUS, 2026-08-22. Was the OKI chain for one build.
 //
 // That build answered its question: the OKI rows lit whenever Wing Force made
@@ -2601,8 +2617,8 @@ wire       oki_set = oki_row_val[oki_bit];
 // RTL: the wiring matches MAME's INPUT_PORTS exactly, so the question is which
 // bits the pad actually produces, and that is only visible here.
 wire in_joy_row = (screen_y >= 9'd82) && (screen_y < 9'(82 + 6))
-               && (screen_x < 9'(16 * ALV_BIT_W));
-wire [3:0] joy_bit = 4'd15 - 4'(screen_x[6:3]);
+               && (dbg_x < 9'(16 * ALV_BIT_W));
+wire [3:0] joy_bit = 4'd15 - 4'(dbg_x[6:3]);
 // RESTORED to the live joystick word. The unmapped-access diagnostic that
 // borrowed this row did its job: the memory map is now verified from three
 // directions — the MAME bus trace, the per-game page table, and the register
@@ -2614,8 +2630,8 @@ wire       joy_set = joystick_0[joy_bit];
 // 1024 sprites at one pixel per clock, each pixel able to miss a 2.25 MB
 // sample of ROM, is the one part of the video path with no fixed upper bound.
 wire in_spr_row = (screen_y >= 9'd72) && (screen_y < 9'(72 + 6))
-               && (screen_x < 9'(16 * ALV_BIT_W));
-wire [3:0] spr_bit = 4'd15 - 4'(screen_x[6:3]);
+               && (dbg_x < 9'(16 * ALV_BIT_W));
+wire [3:0] spr_bit = 4'd15 - 4'(dbg_x[6:3]);
 // RESTORED. This row is sprite passes that did not finish before the next
 // frame started, and it is the measurement that answers a real open question:
 // the Blaze On board carries TWO VU-002 sprite chips reading one shared sprite
@@ -2638,20 +2654,20 @@ wire       spr_set = spr_overrun_lat[spr_bit];
 // latched value that HOLDS until the next unmapped access, which is what makes
 // a stuck CPU photographable.
 wire in_unm_row = (screen_y >= 9'd92) && (screen_y < 9'(92 + 6))
-               && (screen_x < 9'(16 * ALV_BIT_W));
-wire [3:0] unm_bit = 4'd15 - 4'(screen_x[6:3]);
+               && (dbg_x < 9'(16 * ALV_BIT_W));
+wire [3:0] unm_bit = 4'd15 - 4'(dbg_x[6:3]);
 wire       unm_set = unmapped_cnt_lat[unm_bit];
 
 wire in_uad_row = (screen_y >= 9'd100) && (screen_y < 9'(100 + 6))
-               && (screen_x < 9'(16 * ALV_BIT_W));
-wire [3:0] uad_bit = 4'd15 - 4'(screen_x[6:3]);
+               && (dbg_x < 9'(16 * ALV_BIT_W));
+wire [3:0] uad_bit = 4'd15 - 4'(dbg_x[6:3]);
 wire       uad_set = unmapped_addr_lat[uad_bit + 4'd8];
 
 // Row 2, cyan: line fetches that overran, per frame, 16 bits. All dark means
 // the feeder is keeping up and the tearing is somewhere else entirely.
 wire in_ovr_row = (screen_y >= 9'd32) && (screen_y < 9'(32 + 6))
-               && (screen_x < 9'(16 * ALV_BIT_W));
-wire [3:0] ovr_bit = 4'd15 - 4'(screen_x[6:3]);
+               && (dbg_x < 9'(16 * ALV_BIT_W));
+wire [3:0] ovr_bit = 4'd15 - 4'(dbg_x[6:3]);
 wire       ovr_set = overrun_lat[ovr_bit];
 
 // One column of every block left dark, so adjacent set bits stay countable.
@@ -2675,12 +2691,12 @@ wire dbg_on   = status[11];
 // nicety.
 wire in_dbg_panel = dbg_on
                  && (screen_y >= 9'd12) && (screen_y < 9'd108)
-                 && (screen_x < 9'(20 * ALV_BIT_W));
+                 && (dbg_x < 9'(20 * ALV_BIT_W));
 
 wire in_dbg_blk = (in_alive_row || in_irq_row || in_ovr_row || in_oki_row
                    || in_spr_row || in_joy_row
                    || in_unm_row || in_uad_row)
-                && (screen_x[2:0] != 3'd7);
+                && (dbg_x[2:0] != 3'd7);
 
 wire in_dbg   = dbg_on && in_dbg_panel;
 wire dbg_bit  = in_alive_row ? alive_set : in_irq_row ? irq_set
@@ -2696,7 +2712,7 @@ wire dbg_dark = in_dbg_blk && !dbg_bit;
 // than black. Counting to sixteen off a photograph is where the misreadings
 // have come from, and hex is what every number in the notes is written in.
 wire dbg_tick = dbg_on && in_dbg_panel && !in_dbg_blk
-              && (screen_x[2:0] == 3'd7) && (screen_x[4:3] == 2'd3);
+              && (dbg_x[2:0] == 3'd7) && (dbg_x[4:3] == 2'd3);
 
 wire [7:0] dbg_r = dbg_set ? ((in_irq_row || in_oki_row || in_spr_row
                                 || in_joy_row || in_unm_row) ? 8'hff : 8'h00)
