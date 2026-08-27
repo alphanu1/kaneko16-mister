@@ -6987,6 +6987,21 @@ The acknowledged master is now cleared from `pend` on completion. It
 re-requests by raising `m_req` after seeing the acknowledge, which is what its
 own state machine does anyway.
 
+**How it actually breaks, which is worse than a stray write.** `kaneko_bus`
+registers its acknowledge -- `S_MCU: if (mcuram_ack) mcuram_req <= 1'b0` --
+so it still presents the same address and data on that cycle, and the second
+transaction is an exact DUPLICATE, idempotent in memory. The damage is the
+second ACKNOWLEDGE. The arbiter acknowledges every transaction it completes,
+so one access produced two acks: the first completes the access correctly, and
+the second arrives while the master is waiting on its NEXT one and completes
+that early, handing it the previous transaction's data.
+
+So a write followed by a read of the same address returns whatever the write
+left on the bus, and a read of a new address returns the one before it. Stale
+or zero, exactly what a game's memory test reports as a RAM error, and only
+on a path where two accesses follow each other closely enough -- which is what
+a memory test is.
+
 **The testbench could not have caught it.** Every master in
 `tb_kaneko_mcuram_arb` holds its request high continuously -- a throughput
 test, where repeated service is the correct answer. Nothing modelled the one
