@@ -88,7 +88,19 @@ module kaneko_calc3_sys_harness #(
     output logic        dbg_rom_valid,
     // Straight from the device model: did it ever see one?
     output int unsigned dbg_reads,
-    output int unsigned dbg_writes
+    output int unsigned dbg_writes,
+    // What the CONTROLLER actually saw on the MCU's port, latched on its
+    // acknowledge. From the requester's side a write that never arrived and a
+    // write that arrived somewhere else are the same event.
+    output logic [SDR_AW:1] dbg_p10_addr,
+    output logic            dbg_p10_we,
+    output logic [15:0]     dbg_p10_din,
+    output int unsigned     dbg_p10_xacts,
+    // The device model's protocol checker was wired to NOTHING here, so this
+    // harness could break every timing rule the model knows and report a
+    // clean run.
+    output int unsigned     dbg_violations,
+    output int unsigned     dbg_vflags
 );
 
   logic clk_div;
@@ -191,6 +203,11 @@ module kaneko_calc3_sys_harness #(
       assign s_din  = a_din;  assign s_be   = a_be;
       assign a_ack  = s_ack;  assign a_dout = s_dout;
       assign ld_ack = 1'b0;   assign mem_ready = 1'b1;
+      always_comb begin
+        dbg_p10_addr = '0; dbg_p10_we = 1'b0;
+        dbg_p10_din  = '0; dbg_p10_xacts = 0;
+        dbg_violations = 0; dbg_vflags = 0;
+      end
   end else begin : g_real_mem
       // THE REAL STACK. The MCU sits on port P10 exactly as it does in the
       // core, with every other port tied off -- what is under test is that
@@ -225,6 +242,25 @@ module kaneko_calc3_sys_harness #(
       end
       assign a_ack  = s_ack_v[P10];
       assign a_dout = s_dout_v[P10];
+
+      // f_ack is two fast cycles wide, so count its RISING edge or every
+      // transaction is counted twice -- which would read exactly like the
+      // duplicate-service bug and be nothing of the kind.
+      logic f_ack_d;
+      always_ff @(posedge clk_fast) begin
+        if (rst) begin
+          f_ack_d <= 1'b0; dbg_p10_xacts <= 0;
+          dbg_p10_addr <= '0; dbg_p10_we <= 1'b0; dbg_p10_din <= '0;
+        end else begin
+          f_ack_d <= f_ack[P10];
+          if (f_ack[P10] && !f_ack_d) begin
+            dbg_p10_addr  <= f_addr[P10];
+            dbg_p10_we    <= f_we[P10];
+            dbg_p10_din   <= f_din[P10];
+            dbg_p10_xacts <= dbg_p10_xacts + 1;
+          end
+        end
+      end
 
       kaneko_sdram_x2 #(.NP(NP), .AW(SDR_AW)) u_x2 (
           .clk_fast(clk_fast),
@@ -264,7 +300,7 @@ module kaneko_calc3_sys_harness #(
           .clk(clk_fast), .cke(sd_cke), .cs_n(sd_cs_n), .ras_n(sd_ras_n),
           .cas_n(sd_cas_n), .we_n(sd_we_n), .ba(sd_ba), .a(sd_a),
           .dqm(sd_dqm), .dq_i(sd_dq_o), .dq_oe_i(sd_dq_oe), .dq_o(sd_dq_i),
-          .violations(), .v_flags(),
+          .violations(dbg_violations), .v_flags(dbg_vflags),
           .reads_served(dbg_reads), .writes_served(dbg_writes)
       );
   end

@@ -7024,8 +7024,32 @@ MCU overwriting the words. Draining 200 cycles between write and readback makes
 it worse, not better, and one readback returned another test word's value --
 which points at the address a write lands on rather than at completion timing.
 
-Recorded rather than fixed: making the counts real turns the gate red on
-something not yet understood, and the two proven fixes above are worth
-measuring on hardware first. **Whoever picks this up should start here, because
-a test that prints FAIL and reports green is the same family as a default that
-returns a plausible value.**
+**Resolved, and the answer is that the harness is not a witness.** Probing it
+from the controller's side settled it in three steps. The write reaches the
+controller with the right address, the right data and `we` high. The device
+model reports zero protocol violations -- once its `violations` and `v_flags`
+outputs were connected, which this harness had wired to nothing. And a read of
+four words that are supposedly KNOWN to be present comes back as four zeros,
+acknowledged, from the address asked for.
+
+Four zeros from a known-good address is not a write fault. The harness prints
+the reason itself, further down its own output:
+
+    checksum 04cf (over empty memory -- not asserted)
+
+The data ROM never reaches the model in this harness, and the checksum it
+computes is not compared against anything. Every lost-write count it reports
+is downstream of that. It cannot say anything about the core until its preload
+works, and it must not be cited as evidence about hardware.
+
+Its counters still belong in `fails` once the preload is fixed, and the
+instrumentation added while chasing this stays: the model's violation outputs
+are connected, the port's last transaction is visible, and the readback checks
+its acknowledge instead of treating a timed-out read as a memory full of
+zeros.
+
+The lasting lesson is the same one this file keeps recording. The controller's
+own testbench now covers what was actually in doubt -- 160 unaligned writes at
+every alignment, drained and hot, land and read back -- and it passes. The
+suspicion was aimed at the core for a full session on the word of a harness
+that was reporting its own broken preload.

@@ -127,6 +127,33 @@ int main(int argc, char** argv) {
     // for the crossing, tb_kaneko_mcuram_arb for the arbiter, and
     // kaneko_ramtest on the board itself, which is the only place the real
     // SDRAM has ever been asked.
+    // FIRST: read four words that are KNOWN to be there. The data ROM was
+    // loaded through the write port and the MCU's checksum over it is
+    // correct, so every lane of this burst has a known non-zero answer. If
+    // lanes 1..3 come back zero, the read returned ONE word and nothing about
+    // the write path is in question at all.
+    {
+      d->cpu_addr = BASE_ROM; d->cpu_we = 0; d->cpu_be = 3; d->cpu_req = 1;
+      long g = 0;
+      while (!d->cpu_ack && g++ < 100000) slow();
+      // CHECK THE ACKNOWLEDGE. A read that timed out leaves cpu_dout at zero,
+      // which is indistinguishable from a memory full of zeros and gets
+      // blamed on whatever wrote it.
+      if (!d->cpu_ack) printf("  READ NEVER ACKED after %ld slow cycles\n", g);
+      const uint64_t v = d->cpu_dout;
+      d->cpu_req = 0; slow();
+      printf("  known-good burst at %06x: %016llx   (controller saw addr "
+             "%06x we=%d, %u transactions on the port)\n",
+             BASE_ROM, (unsigned long long)v, d->dbg_p10_addr,
+             d->dbg_p10_we, d->dbg_p10_xacts);
+      for (int w = 0; w < 4; w++) {
+        const uint16_t want = (uint16_t)(rom[4*w] | (rom[4*w+1] << 8));
+        const uint16_t got  = (uint16_t)((v >> (16*w)) & 0xffff);
+        printf("    lane %d: got %04x want %04x%s\n", w, got, want,
+               got == want ? "" : "   <<<");
+      }
+    }
+
     printf("word writes to MCU RAM through the real stack:\n");
     long wbad = 0;
     for (int t = 0; t < 16; t++) {
@@ -136,15 +163,25 @@ int main(int argc, char** argv) {
       d->cpu_req = 1;
       long g = 0;
       while (!d->cpu_ack && g++ < 100000) slow();
+      const uint32_t wr_seen = d->dbg_p10_addr;
+      const int      wr_we   = d->dbg_p10_we;
+      const uint16_t wr_din  = d->dbg_p10_din;
       d->cpu_req = 0; d->cpu_we = 0;
       slow();
-      d->cpu_addr = word; d->cpu_req = 1;
+      d->cpu_addr = word & ~3u; d->cpu_req = 1;
       g = 0;
       while (!d->cpu_ack && g++ < 100000) slow();
       const uint16_t got = (uint16_t)((d->cpu_dout >> (16 * (word & 3))) & 0xffff);
+      const uint32_t rd_seen = d->dbg_p10_addr;
+      const int      rd_we   = d->dbg_p10_we;
       d->cpu_req = 0;
       slow();
       checks++;
+      if (t < 6)
+        printf("    t%-2d ask w=%06x  ctrl saw wr %06x we=%d din=%04x |"
+               "  rd ask %06x ctrl saw %06x we=%d  dout=%016llx got=%04x want=%04x\n",
+               t, word, wr_seen, wr_we, wr_din, word & ~3u, rd_seen, rd_we,
+               (unsigned long long)d->cpu_dout, got, val);
       if (got != val) {
         if (wbad < 4)
           printf("  FAIL word %06x: wrote %04x read %04x\n", word, val, got);
@@ -152,6 +189,8 @@ int main(int argc, char** argv) {
       }
     }
     printf("  %ld of 16 word writes read back wrong\n", wbad);
+    printf("  device model violations: %u (flags %04x)\n",
+           d->dbg_violations, d->dbg_vflags);
     printf("  device model: %u reads, %u writes served\n",
            d->dbg_reads, d->dbg_writes);
 

@@ -733,6 +733,72 @@ int main(int argc, char** argv) {
   // the test quietly stopped covering the case it was added for.
   printf("  reads accepted as raced (returned the legal pre-write value): %ld\n",
          h.races);
+  // AN UNALIGNED WRITE MUST LAND, AND MUST LAND WHERE IT WAS ASKED.
+  //
+  // Every write above is either raced against a concurrent read -- in which
+  // case the checker accepts the PRE-WRITE value as equally correct -- or is
+  // never read back on the same port right afterwards. A write that is simply
+  // dropped therefore reads back as the value that was already there and is
+  // waved through as a race. This drains completely first, so there is no
+  // race to hide behind, and it walks all four alignments.
+  printf("test: unaligned writes land, one alignment at a time\n");
+  {
+    long lost = 0;
+    for (int align = 0; align < 4; align++) {
+      for (int rep = 0; rep < 40; rep++) {
+        const uint32_t base = (pick_addr(rng) & ~3u);
+        const uint32_t a    = base + (uint32_t)align;
+        const uint16_t v    = (uint16_t)(rng() | 1);   // never zero
+        while (h.port[WRP].busy) h.step();
+        h.issue(WRP, a, true, v);
+        h.drain();                       // no in-flight anything
+        while (h.port[WRP].busy) h.step();
+        h.issue(WRP, base, false, 0);    // aligned read of the whole group
+        h.drain();
+        const uint16_t got =
+            (uint16_t)((h.getDout(WRP) >> (16 * align)) & 0xffff);
+        h.checks++;
+        if (got != v) {
+          if (lost < 8)
+            printf("  FAIL align %d: wrote %04x at %06x, read %04x\n",
+                   align, v, a, got);
+          lost++;
+          h.fails++;
+        }
+      }
+    }
+    printf("  unaligned writes lost: %ld of 160\n", lost);
+
+    // AND THE SAME WITH NO DRAIN. The 68000 writes a byte and reads it
+    // straight back -- that is what a memory test IS -- so the read follows
+    // the write on the same port with nothing in between. Draining first
+    // tests the array; not draining tests the pipeline.
+    long lost_hot = 0;
+    for (int align = 0; align < 4; align++) {
+      for (int rep = 0; rep < 40; rep++) {
+        const uint32_t base = (pick_addr(rng) & ~3u);
+        const uint32_t a    = base + (uint32_t)align;
+        const uint16_t v    = (uint16_t)(rng() | 1);
+        while (h.port[WRP].busy) h.step();
+        h.issue(WRP, a, true, v);
+        while (h.port[WRP].busy) h.step();     // ack only, no drain
+        h.issue(WRP, base, false, 0);
+        while (h.port[WRP].busy) h.step();
+        const uint16_t got =
+            (uint16_t)((h.getDout(WRP) >> (16 * align)) & 0xffff);
+        h.checks++;
+        if (got != v) {
+          if (lost_hot < 8)
+            printf("  FAIL hot align %d: wrote %04x at %06x, read %04x\n",
+                   align, v, a, got);
+          lost_hot++;
+          h.fails++;
+        }
+      }
+    }
+    printf("  unaligned writes lost with no drain: %ld of 160\n", lost_hot);
+  }
+
   printf("kaneko_sdram: checks=%ld fails=%ld violations=%u reads=%u writes=%u\n",
          h.checks, h.fails, h.d->violations, h.d->reads_served,
          h.d->writes_served);
