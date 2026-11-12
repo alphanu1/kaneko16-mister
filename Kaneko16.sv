@@ -57,25 +57,17 @@ assign BUTTONS   = 0;
 
 assign VGA_SL      = 0;
 assign VGA_F1      = 0;
-// THE ANALOG OUTPUT HAS TO BE ASKED FOR THE SCALER, OR ROTATION NEVER REACHES
-// IT.
+// THE ANALOG OUTPUT ALWAYS CARRIES THE CORE'S OWN 15 kHz RASTER.
 //
-// Rotation lives entirely in the DDR3 framebuffer that screen_rotate fills;
-// the scaler reads that and drives HDMI. With VGA_SCALER tied low the analog
-// output carries the core's RAW video instead, which is never rotated -- so a
-// turned game showed on HDMI and upright on VGA. This was 0 from the first
-// bring-up commit and nothing since has changed it, so rotation on analog has
-// most likely never worked rather than having regressed; the 180 change
-// touched only the select width, the flip line and the no-rotate term, and
-// none of those alters CW or CCW.
-//
-// Raised only while the framebuffer is actually in use, so a game running
-// unrotated keeps the direct path and the frame of latency the framebuffer
-// costs. And never while DIRECT VIDEO is on: that mode exists to put the
-// core's own timing on the VGA pins for a CRT, the scaler is bypassed by
-// definition, and rotation cannot reach it at all -- turn Direct Video off to
-// rotate on a CRT.
-assign VGA_SCALER  = FB_EN & ~direct_video;
+// This used to be `FB_EN & ~direct_video`, on the theory that analog should
+// follow the scaler while rotating. It cannot: the scaler's output is timed
+// for the HDMI mode (31 kHz and up), so a 15 kHz CRT on the analog port lost
+// sync the moment any rotation was picked -- the reported fault. Same rule
+// as the Namco NA1/NA2 core and the upstream vertical arcade cores: analog
+// keeps the native raster, a 90-degree turn is an HDMI/scaler presentation
+// only, and 180 is done natively in the renderer (see "rotation" at the
+// bottom) so it reaches the CRT, Direct Video and HDMI alike.
+assign VGA_SCALER  = 1'b0;
 assign VGA_DISABLE = 0;
 
 // Aspect: the visible area is 256x224 and the game is ROT90, but this build
@@ -112,6 +104,15 @@ localparam CONF_STR = {
 	"O[34:33],Game override,Off(MRA),1 Magical Crystals,2 Blaze On,3 Wing Force;",
 	"O[37:35],Layer1 dx,+2 (MAME),0,-2,+4;",
 	"O[26:24],Rotation,Off,Auto (per game),CW 90,CCW 90,180;",
+	// CRT Adjust, the same page and the same status bits as the Namco NA1/NA2
+	// core so the two behave and read alike. Position 0 of every value is
+	// neutral, because status defaults to zero.
+	"-;",
+	"P1,CRT Adjust;",
+	"P1O[96],CRT Adjust,Off,On;",
+	"H1P1O[116:112],CRT H-Size,0,+1,+2,+3,+4,+5,+6,+7,+8,+9,+10,-12,-11,-10,-9,-8,-7,-6,-5,-4,-3,-2,-1;",
+	"H1P1O[104:101],CRT H-Position,0,+6,+12,+18,+24,+30,+36,+42,-48,-42,-36,-30,-24,-18,-12,-6;",
+	"H1P1O[108:105],CRT V-Shift,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	// POSITION 0 IS 100% ON BOTH, because status defaults to zero and a fresh
 	// boot must not be silent or quiet. The same reason the rotation option and
 	// the SDRAM capture option put their working value first.
@@ -215,6 +216,7 @@ wire [17:0] SPR_ELEMENTS_CFG;
 wire [8:0]  SPR_MIN_Y;
 wire [9:0]  CFG_H_VIS, CFG_V_VIS, CFG_V_START, CFG_HSYNC;
 wire [8:0] CFG_H_START;   // visible window's x origin; 40 on the CALC3 board
+wire       ROT_EN, ROT_CCW;   // per-game orientation, from the game table
 wire        INPUTS_BLAZEON;
 wire [7:0]  PG_SND;
 wire        ROM_1MB;
@@ -366,7 +368,7 @@ wire rst_por = ~pll_locked;
 wire rst_sys = rst_por | RESET | status[12] | buttons[1];
 
 // ------------------------------------------------------------------ HPS
-wire [63:0] status;
+wire [127:0] status;   // 128: CRT Adjust lives at 96..116, as in the NA1 core
 wire        ioctl_download, ioctl_wr, ioctl_wait;
 wire [15:0] ioctl_index, ioctl_dout;
 wire [26:0] ioctl_addr;
@@ -384,6 +386,9 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 	.forced_scandoubler(forced_scandoubler),
 	.gamma_bus(gamma_bus),
 	.direct_video(direct_video),
+	// menumask bit 1 hides the H1 entries (the CRT Adjust values) while
+	// CRT Adjust is Off. Main_MiSTer parses the digit after H as the bit.
+	.status_menumask({14'd0, ~status[96], 1'b0}),
 
 	.ioctl_download(ioctl_download),
 	.ioctl_index(ioctl_index),
@@ -1925,6 +1930,70 @@ kaneko_video_timing u_timing
 	.vblank_rise(vbl_rise)
 );
 
+// ------------------------------------------------- orientation (OSD O[26:24])
+//
+//   0 Off     1 Auto (per game)     2 CW 90     3 CCW 90     4 180
+//
+// WHAT EACH ONE REACHES:
+//
+//   setting   analog / Direct Video     HDMI (scaler)
+//   Off       native                    native
+//   Auto      native                    turned per game table (ROT0 = native)
+//   CW 90     native                    native turned 90 clockwise
+//   CCW 90    native                    native turned 90 counter-clockwise
+//   180       native turned 180         native turned 180
+//
+// A quarter turn transposes the picture, which a 15 kHz raster cannot do, so
+// on a CRT the 90-degree settings deliberately do nothing and the monitor
+// keeps its sync. The half turn needs no transpose: it is done here, in the
+// renderer, by reading every pixel from the mirrored position -- so it is on
+// every output, including Direct Video. With Direct Video on, HDMI carries
+// the native raster too (the scaler is bypassed), so the quarter turns are
+// switched off there as well rather than half-applied.
+//
+// AN OLD SETTING MUST SURVIVE THE FIELD GETTING WIDER. This was status[25:24]
+// before 180 was added; a config saved by that core can carry any value in
+// bit 26, so codes 5..7 fall back to what their low two bits meant then
+// (Auto, CW, CCW). Only code 4 is 180.
+wire [2:0] rot_raw = status[26:24];
+wire [2:0] rot_sel = (rot_raw >= 3'd5) ? {1'b0, rot_raw[1:0]} : rot_raw;
+wire       rot_ccw = (rot_sel == 3'd1) ? ROT_CCW      // per game
+                   : (rot_sel == 3'd3);               // 2 = CW, 3 = CCW
+wire       rot_180 = (rot_sel == 3'd4);
+wire       no_rot  = (rot_sel == 3'd0)                // explicitly off
+                  || (rot_sel == 3'd4)                // 180 is native, not a turn
+                  || ((rot_sel == 3'd1) && !ROT_EN)   // auto, game is ROT0
+                  || direct_video;                    // scaler bypassed
+
+// NATIVE 180. Latched at the start of vblank, so a frame is never half one
+// way and half the other: the tile line for the first visible row is fetched
+// on the line before it, which is after vblank_rise.
+reg flip_l = 1'b0;
+always @(posedge clk_sys) if (vbl_rise) flip_l <= rot_180;
+
+// Mirrored read coordinates. Both are reflections about the visible window
+// the game table publishes, so they hold on every board:
+//
+//   x' = (h_start + h_vis - 1) - hcnt     -- screen_x is hcnt + h_start
+//   y' = (2*v_start + v_vis - 1) - y      -- screen_y runs v_start..+v_vis-1
+//
+// The sprite surface is a double-buffered full frame read by address, and
+// the tile line buffer is read by address too, so mirroring x is just a
+// different read address. Mirroring y means fetching the tile lines bottom
+// up: the line fetched during row y is shown on row y+1, so it is the mirror
+// of y+1 that is asked for. Outside the window the values wrap to harmless
+// lines that are fetched during blanking and never shown.
+//
+// Mid-frame register writes (raster splits) land on the mirrored rows, as
+// they would on a cabinet with the board's own flip. None of the four games
+// relies on one.
+wire [9:0] flip_ysum = (CFG_V_START << 1) + CFG_V_VIS - 10'd1;
+wire [9:0] flip_xsum = 10'(CFG_H_START) + CFG_H_VIS - 10'd1;
+wire [8:0] vid_x     = flip_l ? 9'(flip_xsum - hcnt)               : screen_x;
+wire [8:0] vid_y     = flip_l ? 9'(flip_ysum - 10'(screen_y))      : screen_y;
+wire [8:0] fetch_y   = flip_l ? 9'(flip_ysum - 10'(screen_y) - 10'd1)
+                              : 9'(screen_y + 9'd1);
+
 // The tile contact sheet is gone. It found the SDRAM byte order, the burst
 // addressing and the loader during bring-up, and then caused two problems of
 // its own: it kept fetching behind the game view and took half the bus, and its
@@ -2160,7 +2229,7 @@ kaneko_tmap_line #(.H_VIS(320)) u_line
 (
 	.clk(clk_sys), .rst(rst_sys),
 	.start(line_start), .h_active(CFG_H_VIS),
-	.line_y(screen_y + 9'd1), .busy(line_busy),
+	.line_y(fetch_y), .busy(line_busy),
 
 	.layer_en(lay_en), .dx_f(lay_dx), .dy_f(lay_dy),
 	.scroll_x_f(lay_sx), .scroll_y_f(lay_sy), .linescroll_en(lay_ls),
@@ -2170,7 +2239,7 @@ kaneko_tmap_line #(.H_VIS(320)) u_line
 	.rom_addr_f(trom_addr_f),   .rom_data_f(trom_data_f),
 	.rom_ready(trom_ready),
 
-	.rd_x(screen_x),
+	.rd_x(vid_x),
 	.out_solid(mix_solid), .out_cat_f(mix_cat),
 	.out_colour_f(mix_colour), .out_pix_f(mix_pix)
 );
@@ -2293,7 +2362,7 @@ kaneko_spr_sys #(
 	.sdr_req(p67_req), .sdr_addr(p67_addr),
 	.sdr_ack(p67_ack), .sdr_dout(p67_dout),
 
-	.rd_x(10'(screen_x)), .rd_y(10'(screen_y)),
+	.rd_x(10'(vid_x)), .rd_y(10'(vid_y)),
 	.spr_pix(spr_pix), .spr_prio(spr_prio),
 
 	.busy(spr_busy), .overrun(spr_overrun)
@@ -2814,8 +2883,10 @@ wire [7:0] out_b = in_dbg ? dbg_b : src_b;
 // buffer read and the palette read are both registered — so delaying it again
 // put it two clocks behind the syncs and the framework sampled the previous
 // pixel. Only the syncs and the pixel strobe move.
-reg [1:0] hs_d, vs_d, de_d, cep_d;
+reg [1:0] hs_d, vs_d, de_d, cep_d, hbo_d, vbo_d;
 always @(posedge clk_sys) begin
+	hbo_d <= {hbo_d[0], hb};
+	vbo_d <= {vbo_d[0], vb};
 	hs_d  <= {hs_d[0],  hs};
 	vs_d  <= {vs_d[0],  vs};
 	de_d  <= {de_d[0],  de};
@@ -2824,61 +2895,18 @@ end
 
 // ------------------------------------------------------------- rotation
 //
-// Explosive Breaker is ROT90 and Wing Force ROT270 -- two of the four games,
-// turned in OPPOSITE directions -- so the game table supplies both whether and
-// which way, and the OSD can override for a monitor that is already turned.
+// Explosive Breaker is ROT90 and Wing Force ROT270 -- turned in OPPOSITE
+// directions -- while Magical Crystals and Blaze On are ROT0. The game table
+// supplies ROT_EN/ROT_CCW for "Auto"; CW 90 and CCW 90 are offered on every
+// game, so a horizontal game can be played on a portrait monitor too.
 //
-// screen_rotate lives in sys/arcade_video.v and is already in sys.qip, so this
-// is an instantiation rather than a new dependency. It takes the video the
-// core would have displayed, writes each frame into DDR3 with the axes
-// swapped, and raises FB_EN so the scaler reads that instead.
-wire       ROT_EN, ROT_CCW;
-// OFF IS THE DEFAULT, DELIBERATELY. status defaults to zero, so position 0 is
-// what a fresh boot gets, and rotation is not the right thing to hand somebody
-// unasked: on an ordinary landscape monitor a turned game is a tall strip down
-// the middle, and the framebuffer path costs a frame of latency that the
-// direct video path does not. It is opt-in.
-//
-//   0 Off              1 Auto, from the game table
-//   2 CW 90            3 CCW 90            4 180
-//
-// 180 IS NOT A ROTATION HERE, and that is why it was missing. screen_rotate
-// gates its flip on `do_flip <= no_rotate && flip`, so a half turn is asked
-// for by NOT rotating and raising flip; it keeps the framebuffer because
-// `fb_en <= ~no_rotate | flip`. With flip tied to zero the option could never
-// be reached, which left a physically portrait monitor with three settings
-// that are each a quarter turn out and none that is right -- reported from
-// hardware, and the reason this exists.
-// AN OLD SETTING MUST SURVIVE THE FIELD GETTING WIDER.
-//
-// This was status[25:24] until 180 was added, and widening it to [26:24] gave
-// bit 26 a meaning it had never had. A config saved by the older core can have
-// that bit set to anything, so "CW 90" -- 10 in two bits -- comes back as 110,
-// which is code 6, which the unused-code term below sends to NO ROTATION. The
-// option still reads CW in the menu and the picture is upright, and nothing
-// says why.
-//
-// That is the shape of the CRT report: rotation that worked on the previous
-// release and not on the one after it, with no change to any rotation signal
-// between them. Re-picking the option writes all three bits and clears it,
-// which is why a setting touched since the upgrade behaves and one left alone
-// does not.
-//
-// So codes 5, 6 and 7 fall back to what their LOW TWO BITS meant before: 101
-// is Auto, 110 is CW, 111 is CCW. Only code 4 is new, and only code 4 is 180.
-wire [2:0] rot_raw = status[26:24];
-wire [2:0] rot_sel = (rot_raw >= 3'd5) ? {1'b0, rot_raw[1:0]} : rot_raw;
-wire       rot_ccw = (rot_sel == 3'd1) ? ROT_CCW      // per game
-                   : (rot_sel == 3'd3);               // 2 = CW, 3 = CCW
-wire       rot_180 = (rot_sel == 3'd4);
-// Positions 5..7 do not exist in the menu. They resolve to Off rather than to
-// a rotation, because a spare code that lands on a real setting is the shape
-// of bug this file has paid for repeatedly.
-// Only code 4 reaches here as "at or above 4" now: 5 to 7 were folded onto
-// their old two-bit meaning above.
-wire       no_rot  = (rot_sel == 3'd0)                // explicitly off
-                  || (rot_sel == 3'd4)                // 180 is a flip, not a turn
-                  || ((rot_sel == 3'd1) && !ROT_EN);  // auto, game is ROT0
+// screen_rotate (sys/arcade_video.v) writes each frame into DDR3 with the
+// axes swapped and raises FB_EN so the HDMI scaler reads that. It is HDMI
+// ONLY: VGA_SCALER is tied low (top of file), so the analog output keeps the
+// native 15 kHz raster whatever is picked here. The OSD decode (rot_sel,
+// rot_ccw, no_rot) and the native 180 (flip_l) live beside the video timing;
+// screen_rotate's own `flip` is unused because 180 is already in the picture
+// it is handed.
 wire       video_rotated;
 
 screen_rotate u_rotate
@@ -2887,7 +2915,9 @@ screen_rotate u_rotate
 	.VGA_R(out_r), .VGA_G(out_g), .VGA_B(out_b),
 	.VGA_HS(hs_d[1]), .VGA_VS(vs_d[1]), .VGA_DE(de_d[1]),
 
-	.rotate_ccw(rot_ccw), .no_rotate(no_rot), .flip(rot_180),
+	// flip is 0: 180 is done natively (flip_l), so the framebuffer path
+	// never has to invert anything.
+	.rotate_ccw(rot_ccw), .no_rotate(no_rot), .flip(1'b0),
 	.video_rotated(video_rotated),
 
 	.FB_EN(FB_EN), .FB_FORMAT(FB_FORMAT),
@@ -2908,14 +2938,100 @@ screen_rotate u_rotate
 // reset.
 assign FB_FORCE_BLANK = 1'b0;
 
+// ------------------------------------------------------------ CRT Adjust
+//
+// rmonic79's MiSTer-CRT-Adjust (rtl/vendor/crt_adjust.sv, GPL-3.0-or-later,
+// vendored byte-identical from the Namco NA1/NA2 core). It moves and resizes
+// the picture CONTENT through a one-line buffer while H and V sync stay
+// native -- line length 384, frame 264 lines, sync widths and the 15.6 kHz
+// line rate are untouched -- so a CRT keeps its lock while you adjust it.
+//
+// It sits on the VGA_* output only. screen_rotate above is handed the
+// unadjusted stream, so a rotated HDMI picture is never affected. With no
+// rotation the scaler reads VGA_* too, so the adjust is visible on HDMI while
+// it is On (accepted, as in NA1: isolating HDMI would mean editing sys_top).
+// Off, the default, is a true bypass: the stream below is exactly what it
+// was before this block existed, with no added latency.
+//
+// Every control is sampled once per frame at vblank_rise. Changing one
+// mid-frame disturbs the line buffer for that frame, so a change simply
+// lands on the next one.
+reg               crt_on      = 1'b0;
+reg  signed [4:0] crt_hsize_s = 5'sd0;   // -12..+10, + = wider
+reg  signed [3:0] crt_hpos_s  = 4'sd0;   // -8..+7, one step = 6 px right
+reg  signed [3:0] crt_vsh_s   = 4'sd0;   // -8..+7, one step = 1 line down
+always @(posedge clk_sys) if (vbl_rise) begin
+	crt_on      <= status[96];
+	// 0..10 are 0..+10; 11..22 are -12..-1; anything else is neutral.
+	crt_hsize_s <= (status[116:112] <= 5'd10) ? $signed(status[116:112])
+	             : (status[116:112] <= 5'd22) ? $signed(status[116:112] - 5'd23)
+	             : 5'sd0;
+	crt_hpos_s  <= $signed(status[104:101]);
+	crt_vsh_s   <= $signed(status[108:105]);
+end
+wire crt_act = crt_on;
+// Explicit sign extension: a bare 9'(x) cast of a signed nibble is unsigned
+// and turns -1 into +15 (the NA1 core found this in simulation).
+wire signed [8:0] crt_hoffset = crt_act ? ($signed({{5{crt_hpos_s[3]}}, crt_hpos_s}) * 9'sd6) : 9'sd0;
+wire signed [5:0] crt_voffset = crt_act ? $signed({{2{crt_vsh_s[3]}}, crt_vsh_s}) : 6'sd0;
+
+// READ RATE for H-Size. At H-Size 0 the read side is fed the real pixel CE,
+// so the content is byte-exact. Otherwise an exact rational NCO runs at
+//     READ_INC = PIXEL_HZ - hsize * STEP,  STEP = PIXEL_HZ / 100
+// i.e. 1% of the line per step; slower read = wider picture. Only the RATIO
+// READ_INC / SYS_HZ matters, and the pixel CE is exactly clk_sys / 8 by
+// construction (ce_div), so nominal 48 MHz / 6 MHz are exact here even if
+// the PLL is a hair off. Worst case 48,000,000 + 6,720,000 < 2^27.
+localparam integer CRT_SYS_HZ   = 48_000_000;
+localparam integer CRT_PIXEL_HZ = CRT_SYS_HZ / 8;
+localparam integer CRT_STEP     = (CRT_PIXEL_HZ + 50) / 100;
+wire crt_hs_ref;
+reg  crt_hs_ref_d = 1'b0;
+always @(posedge clk_sys) crt_hs_ref_d <= crt_hs_ref;
+wire crt_hs_ref_rise = crt_hs_ref && !crt_hs_ref_d;
+// Registered: the multiply in series with the adder and compare is a timing
+// path for nothing, since hsize only changes at vblank.
+reg  signed [31:0] crt_read_inc = CRT_PIXEL_HZ;
+always @(posedge clk_sys) crt_read_inc <= CRT_PIXEL_HZ - (crt_hsize_s * CRT_STEP);
+reg  [26:0] crt_phase = 27'd0;
+wire [27:0] crt_phase_sum = {1'b0, crt_phase} + crt_read_inc[26:0];
+wire        crt_rd_tick   = (crt_phase_sum >= CRT_SYS_HZ);
+always @(posedge clk_sys) begin
+	if (crt_hs_ref_rise)  crt_phase <= 27'd0;            // re-phased every line
+	else if (crt_rd_tick) crt_phase <= crt_phase_sum - CRT_SYS_HZ;
+	else                  crt_phase <= crt_phase_sum[26:0];
+end
+reg  crt_use_nco = 1'b0;
+always @(posedge clk_sys) crt_use_nco <= crt_act && (crt_hsize_s != 5'sd0);
+wire crt_rd_ce = crt_use_nco ? crt_rd_tick : cep_d[1];
+
+wire [7:0] crt_r, crt_g, crt_b;
+wire       crt_hs, crt_vs, crt_hb, crt_vb;
+// HPOS_MODE 0 (SYNCSHIFT): H-Position delays HSync through a line-length
+// shift register, so the porches are redistributed while the line period and
+// the pulse width stay native. Content-shift loses the active window at large
+// negative offsets on side-anchored rasters like this one, where all of the
+// blanking is at the end of the line (active from hcnt 0).
+crt_adjust #(.VTOTAL(264), .HTOTAL(384), .HPOS_MODE(0)) u_crt_adjust
+(
+	.clk(clk_sys), .pxl_cen(cep_d[1]), .pxl2_cen(crt_rd_ce),
+	.active(crt_act),
+	.hsize(crt_hsize_s), .hoffset(crt_hoffset), .voffset(crt_voffset),
+	.r_in(out_r), .g_in(out_g), .b_in(out_b),
+	.hs_in(hs_d[1]), .vs_in(vs_d[1]), .hb_in(hbo_d[1]), .vb_in(vbo_d[1]),
+	.r_out(crt_r), .g_out(crt_g), .b_out(crt_b),
+	.hs_out(crt_hs), .vs_out(crt_vs), .hb_out(crt_hb), .vb_out(crt_vb),
+	.hs_ref_out(crt_hs_ref)
+);
+
 assign CLK_VIDEO = clk_sys;
-assign CE_PIXEL  = cep_d[1];
-assign VGA_DE    = de_d[1];
-assign VGA_HS    = hs_d[1];
-assign VGA_VS    = vs_d[1];
-assign VGA_R     = out_r;
-assign VGA_G     = out_g;
-assign VGA_B     = out_b;
+assign CE_PIXEL  = crt_act ? crt_rd_ce            : cep_d[1];
+assign VGA_DE    = crt_act ? ~(crt_hb | crt_vb)   : de_d[1];
+assign VGA_HS    = crt_act ? crt_hs               : hs_d[1];
+assign VGA_VS    = crt_act ? crt_vs               : vs_d[1];
+assign VGA_R     = crt_act ? crt_r                : out_r;
+assign VGA_G     = crt_act ? crt_g                : out_g;
+assign VGA_B     = crt_act ? crt_b                : out_b;
 
 endmodule
 
