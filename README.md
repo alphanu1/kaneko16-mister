@@ -51,7 +51,7 @@ Miles Rally 1/2.
 | Inputs | two players, 2 buttons each, start/coin/service, and the board's DIPs — assembled per board, because the two boards wire the words differently, not just relocate them |
 | Game configuration table | `rtl/io/kaneko_gamecfg.sv` — one bitstream, four games; memory-map pages, ROM bases, video geometry, layer count, sprite list size and input wiring all selected by the MRA's game-id byte |
 | Z80 + YM2151 sound (Blaze On board) | **working on Blaze On** — music and effects. T80 at 4 MHz, jt51, and a 256-byte cache over SDRAM for the program ROM; a 48 KB copy in block RAM did not fit. Wing Force's OKI hangs off the Z80's I/O ports rather than the 68000's bus. Its attract mode is SILENT ON THE ORIGINAL HARDWARE and correctly silent here -- see the note at the top |
-| Screen rotation | **working on hardware** — per game, because it is per game in both senses: Explosive Breaker is ROT90 and Wing Force ROT270, turned in OPPOSITE directions, while Blaze On and Magical Crystals are ROT0. Uses MiSTer's `screen_rotate` and the DDR3 framebuffer, so it costs no M10K and no SDRAM bandwidth. **Off by default** — on a landscape monitor a turned game is a tall strip, and the framebuffer path costs a frame of latency. OSD: Off / Auto (per game) / CW 90 / CCW 90 / 180. The half turn is there because a physically portrait monitor needs it: `screen_rotate` reaches it by not rotating and raising `flip`, and without it three of the settings are each a quarter turn out and none is right |
+| Screen rotation | **working on hardware** — per game, because it is per game in both senses: Explosive Breaker is ROT90 and Wing Force ROT270, turned in OPPOSITE directions, while Blaze On and Magical Crystals are ROT0. Uses MiSTer's `screen_rotate` and the DDR3 framebuffer, so it costs no M10K and no SDRAM bandwidth. **Off by default** — on a landscape monitor a turned game is a tall strip, and the framebuffer path costs a frame of latency. OSD: Off / Auto (per game) / CW 90 / CCW 90 / 180, on every game. The quarter turns are HDMI only (the analog output keeps native 15 kHz timing); 180 is done natively in the renderer and works on CRT, Direct Video and HDMI. See [Rotation](#rotation-and-what-it-can-reach) |
 
 All four games are playable on hardware. The 68000 completes its
 self-test, formats a blank EEPROM, enables interrupts and runs its main loop;
@@ -118,24 +118,45 @@ MATCH over all 22897 compared accesses
 
 ## Rotation, and what it can reach
 
-Rotation is done by `screen_rotate`: each frame is written into DDR3 with the
-axes swapped, and the scaler displays that. **The rotated picture only exists in
-that framebuffer**, so where it can be seen depends on what the analog output is
-carrying.
+OSD **Rotation**: Off / Auto (per game) / CW 90 / CCW 90 / 180. All five are
+offered on every game, so a horizontal game (Blaze On, Magical Crystals) can be
+turned for a portrait monitor and a vertical one (Explosive Breaker ROT90, Wing
+Force ROT270) can be turned either way. "Auto" uses the game table: Explosive
+Breaker turns CW, Wing Force CCW, the horizontal games stay as they are.
 
-| Output | Rotates? |
-|---|---|
-| HDMI | yes |
-| Analog, **Direct Video off** | yes — the core raises `VGA_SCALER` while rotating so the analog output follows the scaler |
-| Analog, **Direct Video on** | **no, and no core change can fix it** |
+| Setting | Analog / CRT (Direct Video on or off) | HDMI |
+|---|---|---|
+| Off | native | native |
+| Auto, CW 90, CCW 90 | **native — the CRT keeps its sync** | turned 90 (framebuffer) |
+| 180 | **turned 180** | turned 180 |
 
-Direct Video exists to put the core's own timing on the VGA pins for a CRT. It
-bypasses the scaler by definition, so there is no rotated image on that path to
-carry — the core's raw output is what reaches the monitor, and that is never
-rotated. **To rotate on a CRT, Direct Video has to be off.**
+A quarter turn transposes the picture, which a 15 kHz raster cannot carry, so
+it is done by `screen_rotate` in the DDR3 framebuffer and seen only through the
+scaler on HDMI. With Direct Video on the scaler is bypassed, so the quarter
+turns are off on HDMI as well.
 
-`VGA_SCALER` is raised only while the framebuffer is in use, so a game running
-unrotated keeps the direct path and the frame of latency the framebuffer costs.
+The half turn needs no transpose and is done natively: the renderer reads every
+tile and sprite pixel from the mirrored position and fetches the tile lines
+bottom-up. It is in the picture before it leaves the core, so it reaches every
+output — which is what a CRT in a vertical cabinet mounted the "other" way needs.
+
+`VGA_SCALER` is tied low. It used to be raised while rotating, which put the
+scaler's HDMI-rate timing on the analog pins and knocked a 15 kHz CRT out of
+sync as soon as any rotation was picked.
+
+## CRT Adjust
+
+OSD page **CRT Adjust**: H-Size (-12..+10, 1% per step), H-Position (-48..+42
+pixels in steps of 6) and V-Shift (-8..+7 lines), shown once CRT Adjust is
+switched On. It is rmonic79's
+[MiSTer-CRT-Adjust](https://github.com/rmonic79/MiSTer-CRT-Adjust), wired as in
+the Namco NA1/NA2 core: the picture content moves through a one-line buffer
+while H and V sync stay native, so a CRT keeps its lock while you adjust.
+
+It acts on the core's own video output, so it works with Direct Video. A
+rotated HDMI picture is never affected. An unrotated HDMI picture follows the
+adjustment while it is On, because the scaler reads the same output. Off, the
+default, is a true bypass.
 
 ## SDRAM
 

@@ -108,6 +108,13 @@ the per-file headers in `sys/` read "either version 2 of the License, or (at
 your option) any later version". That or-later clause is the only reason a GPL-3
 core can use it — do not drop it, and do not assume it from the `LICENSE` file.
 
+### rmonic79/MiSTer-CRT-Adjust — GPL-3.0-or-later
+`rtl/vendor/crt_adjust.sv`, vendored **in the repository** (not `third_party/`)
+and byte-identical to the copy in the Namco NA1/NA2 core. Author Umberto Parisi
+(rmonic79), with Andrea Bogazzi (@asturur); the licence is stated in the file
+header. Or-later, so it combines with this core's GPL-3.0-only. Keep the header
+intact; all integration lives in `Kaneko16.sv`, never in the vendored file.
+
 ## Vendored local references
 
 ### `third_party/ref-core` — copy of an earlier core
